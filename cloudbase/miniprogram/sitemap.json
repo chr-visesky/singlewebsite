@@ -1,0 +1,9 @@
+{
+  "desc": "StudyGate schedule mini program",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
+}

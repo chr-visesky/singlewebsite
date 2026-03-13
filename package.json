@@ -1,0 +1,21 @@
+{
+  "name": "singlewebsite",
+  "version": "1.0.0",
+  "description": "Locked-down single-site browser shell for Windows",
+  "main": "src/main.js",
+  "author": "",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build": "node scripts/package-app.js",
+    "server": "node server/server.js",
+    "cloudbase:token": "node scripts/generate-cloudbase-token.js"
+  },
+  "singleWebsite": {
+    "productName": "StudyGate",
+    "outputDir": "dist"
+  },
+  "devDependencies": {
+    "electron": "^41.0.0"
+  }
+}

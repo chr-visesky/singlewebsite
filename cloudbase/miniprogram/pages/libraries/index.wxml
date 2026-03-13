@@ -1,0 +1,53 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__bar">
+      <view class="grow">
+        <view class="masthead__title">百度网盘视频模块</view>
+        <view class="status-pill">{{updatedAtDisplay}}</view>
+      </view>
+      <button class="refresh-button" bindtap="manualRefresh">刷新</button>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">添加模块</view>
+
+    <view class="field">
+      <view class="field__label">显示名称</view>
+      <input class="input" placeholder="例如：大语文" value="{{form.title}}" data-field="title" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <view class="field__label">百度网盘目录</view>
+      <input class="input" placeholder="例如：/大语文" value="{{form.folderPath}}" data-field="folderPath" bindinput="onInput" />
+    </view>
+
+    <view class="action-row">
+      <button class="btn-primary" bindtap="saveLibrary">{{submitText}}</button>
+      <button class="btn-secondary" bindtap="resetForm">清空</button>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">当前模块</view>
+
+    <view wx:if="{{!hasLibraries}}" class="empty-state">
+      <view class="empty-state__title">还没有模块</view>
+    </view>
+
+    <view wx:if="{{hasLibraries}}" class="list-stack">
+      <view wx:for="{{libraries}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.title}}</view>
+            <view class="meta meta--break">{{item.folderPath}}</view>
+          </view>
+        </view>
+        <view class="action-row">
+          <button class="btn-secondary" data-id="{{item.id}}" bindtap="editLibrary">编辑</button>
+          <button class="btn-danger" data-id="{{item.id}}" bindtap="removeLibrary">删除</button>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

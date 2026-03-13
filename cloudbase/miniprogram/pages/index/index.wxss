@@ -1,0 +1,353 @@
+.grow {
+  min-width: 0;
+}
+
+.masthead {
+  padding: 28rpx 30rpx;
+}
+
+.masthead__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.masthead__title {
+  margin-top: 0;
+  font-size: 46rpx;
+}
+
+.status-pill {
+  margin-top: 12rpx;
+}
+
+.gear-button {
+  width: 76rpx;
+  min-width: 76rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  padding: 0;
+  border-radius: 999rpx;
+  background: rgba(31, 39, 45, 0.08);
+  color: #394851;
+  font-size: 32rpx;
+  text-align: center;
+}
+
+.refresh-button {
+  min-width: 108rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: rgba(31, 39, 45, 0.08);
+  color: #394851;
+  font-size: 24rpx;
+  text-align: center;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.calendar-toolbar__title {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.calendar-nav {
+  width: 68rpx;
+  min-width: 68rpx;
+  height: 68rpx;
+  line-height: 68rpx;
+  padding: 0;
+  border-radius: 999rpx;
+  background: rgba(248, 242, 232, 0.1);
+  color: #f8f2e8;
+  text-align: center;
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8rpx;
+  margin-top: 20rpx;
+}
+
+.calendar-weekdays__item {
+  text-align: center;
+  color: rgba(248, 242, 232, 0.72);
+  font-size: 22rpx;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8rpx;
+  margin-top: 12rpx;
+}
+
+.calendar-cell {
+  min-height: 130rpx;
+  padding: 10rpx 8rpx;
+  border-radius: 18rpx;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid transparent;
+  box-sizing: border-box;
+}
+
+.calendar-cell--muted {
+  opacity: 0.38;
+}
+
+.calendar-cell--today {
+  border-color: rgba(255, 211, 124, 0.46);
+}
+
+.calendar-cell--selected {
+  background: rgba(255, 211, 124, 0.18);
+  border-color: rgba(255, 211, 124, 0.56);
+}
+
+.calendar-cell__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+}
+
+.calendar-cell__day {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #f8f2e8;
+}
+
+.calendar-cell__count {
+  font-size: 20rpx;
+  color: #ffd37c;
+  text-align: right;
+}
+
+.calendar-cell__preview {
+  margin-top: 6rpx;
+  font-size: 18rpx;
+  line-height: 1.3;
+  color: rgba(248, 242, 232, 0.86);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-cell__preview--soft {
+  color: rgba(248, 242, 232, 0.6);
+}
+
+.plan-empty {
+  margin-top: 18rpx;
+}
+
+.selected-list {
+  margin-top: 18rpx;
+}
+
+.selected-card {
+  padding: 18rpx 20rpx;
+}
+
+.selected-card--skipped {
+  opacity: 0.72;
+  background: linear-gradient(180deg, rgba(242, 238, 232, 0.96), rgba(235, 231, 225, 0.96));
+}
+
+.badge--muted {
+  background: rgba(31, 39, 45, 0.05);
+  color: #7b868d;
+}
+
+.badge--parent {
+  background: rgba(202, 109, 51, 0.12);
+  color: #bc5a2a;
+}
+
+.badge--student {
+  background: rgba(57, 111, 111, 0.14);
+  color: #326868;
+}
+
+.selected-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.selected-row__main {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.selected-row__content {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 4rpx;
+}
+
+.selected-row__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #1f272d;
+}
+
+.selected-row__meta {
+  color: #67757f;
+  font-size: 20rpx;
+  line-height: 1.2;
+}
+
+.selected-badge {
+  padding: 6rpx 12rpx;
+  font-size: 18rpx;
+}
+
+.selected-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  height: 42rpx;
+  line-height: 42rpx;
+  padding: 0 8rpx;
+  border-radius: 999rpx;
+  font-size: 18rpx;
+  margin: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.selected-action--danger {
+  background: rgba(191, 61, 49, 0.12);
+  color: #af352b;
+}
+
+.selected-action--skip {
+  background: rgba(202, 109, 51, 0.12);
+  color: #bc5a2a;
+}
+
+.selected-action--restore {
+  background: rgba(57, 111, 111, 0.14);
+  color: #326868;
+}
+
+.split--compact {
+  align-items: end;
+}
+
+.picker-input {
+  width: 100%;
+  height: 80rpx;
+  padding: 0 18rpx;
+  box-sizing: border-box;
+  border-radius: 18rpx;
+  border: 1px solid rgba(31, 39, 45, 0.12);
+  background: rgba(255, 252, 247, 0.98);
+  color: #1f272d;
+  font-size: 24rpx;
+  line-height: 80rpx;
+}
+
+.target-grid {
+  display: grid;
+  gap: 14rpx;
+}
+
+.target-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72rpx;
+  padding: 0 20rpx;
+  border-radius: 18rpx;
+  border: 1px solid rgba(31, 39, 45, 0.08);
+  background: rgba(31, 39, 45, 0.04);
+  color: #4e5d67;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.target-chip--active {
+  background: rgba(202, 109, 51, 0.12);
+  border-color: rgba(202, 109, 51, 0.26);
+  color: #bc5a2a;
+}
+
+.weekday-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.weekday-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  min-height: 72rpx;
+  padding: 0 10rpx;
+  border-radius: 18rpx;
+  border: 1px solid rgba(31, 39, 45, 0.08);
+  background: rgba(255, 252, 247, 0.95);
+  color: #46545e;
+  font-size: 24rpx;
+  box-sizing: border-box;
+}
+
+.weekday-chip--active {
+  background: rgba(202, 109, 51, 0.12);
+  border-color: rgba(202, 109, 51, 0.26);
+  color: #bc5a2a;
+}
+
+.weekday-chip checkbox {
+  transform: scale(0.82);
+}
+
+.weekly-card {
+  padding: 22rpx;
+}
+
+.weekly-delete {
+  align-self: flex-start;
+  min-width: 104rpx;
+  min-height: 64rpx;
+  line-height: 64rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: rgba(191, 61, 49, 0.12);
+  color: #af352b;
+  font-size: 24rpx;
+}
+
+@media (max-width: 420px) {
+  .split--compact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .weekday-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

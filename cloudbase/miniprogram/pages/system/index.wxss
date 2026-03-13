@@ -1,0 +1,3 @@
+.grow {
+  min-width: 0;
+}

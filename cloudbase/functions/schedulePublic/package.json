@@ -1,0 +1,7 @@
+{
+  "name": "schedule-public",
+  "private": true,
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

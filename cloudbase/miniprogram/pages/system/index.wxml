@@ -1,0 +1,60 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__eyebrow">SYSTEM</view>
+    <view class="masthead__title">系统管理</view>
+    <view class="status-pill">{{identityHint}}</view>
+  </view>
+
+  <view class="panel panel--ink">
+    <view class="panel__title">当前身份</view>
+    <view class="meta meta--light">OPENID</view>
+    <view class="meta meta--light meta--break">{{openIdDisplay}}</view>
+    <view class="action-row">
+      <button class="btn-secondary" bindtap="refreshIdentity">刷新身份</button>
+      <button class="btn-secondary" bindtap="copyOpenId">复制 OPENID</button>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">设置</view>
+    <view class="action-row">
+      <button class="btn-secondary" bindtap="openLibrariesPage">百度网盘视频模块</button>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">管理员列表</view>
+    <view class="panel__subtitle">{{adminUpdatedAtDisplay}}</view>
+
+    <view class="field">
+      <view class="field__label">添加管理员 OPENID</view>
+      <input class="input" placeholder="把你老婆手机里显示的 OPENID 粘进来" value="{{adminDraftOpenId}}" bindinput="onAdminInput" />
+    </view>
+
+    <view class="action-row">
+      <button class="btn-primary" bindtap="addAdmin">添加管理员</button>
+      <button class="btn-secondary" bindtap="reloadAdmins">刷新列表</button>
+    </view>
+
+    <view wx:if="{{!hasAdmins}}" class="empty-state">
+      <view class="empty-state__title">还没有管理员记录</view>
+      <view class="meta">第一次会先沿用云函数环境变量里的管理员名单。</view>
+    </view>
+
+    <view wx:if="{{hasAdmins}}" class="list-stack">
+      <view wx:for="{{admins}}" wx:key="openId" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.isSelf ? '当前管理员（你）' : '管理员'}}</view>
+            <view class="meta meta--break">{{item.openId}}</view>
+          </view>
+          <view class="badge">{{item.isSelf ? '本人' : '已授权'}}</view>
+        </view>
+
+        <view class="action-row">
+          <button class="btn-danger" data-openid="{{item.openId}}" bindtap="removeAdmin">移除</button>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

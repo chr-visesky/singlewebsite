@@ -1,0 +1,4 @@
+{
+  "envId": "your-cloudbase-env-id",
+  "functionsRoot": "./functions"
+}

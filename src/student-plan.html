@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>学生计划</title>
+    <link rel="stylesheet" href="./student-plan.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="hero__eyebrow">STUDENT PLAN</p>
+          <h1>学生计划</h1>
+        </div>
+        <div class="hero__actions">
+          <button id="refresh-plan" class="ghost-button" type="button">刷新</button>
+          <button id="back-home" class="ghost-button" type="button">返回首页</button>
+        </div>
+      </header>
+
+      <section class="dashboard">
+        <section class="panel panel--calendar">
+          <div class="panel__head">
+            <button id="prev-month" class="nav-pill" type="button">‹</button>
+            <h2 id="month-label"></h2>
+            <button id="next-month" class="nav-pill" type="button">›</button>
+          </div>
+          <div id="calendar-grid" class="calendar-grid"></div>
+
+          <div class="section-head">
+            <h3 id="selected-date-label"></h3>
+          </div>
+          <div id="selected-date-list" class="list-stack"></div>
+        </section>
+
+        <aside class="stack">
+          <section class="panel">
+            <div class="section-head">
+              <h2>添加学生计划</h2>
+            </div>
+
+            <label class="field">
+              <span>事项名称</span>
+              <input id="title-input" class="input" type="text" placeholder="事项名称" />
+            </label>
+
+            <div class="split">
+              <label class="field">
+                <span>时间</span>
+                <input id="time-input" class="input" type="time" value="19:00" />
+              </label>
+              <label class="field">
+                <span>提醒</span>
+                <input id="message-input" class="input" type="text" placeholder="提醒内容" />
+              </label>
+            </div>
+
+            <div class="field">
+              <span>添加到</span>
+              <label class="toggle-chip">
+                <input id="include-date" type="checkbox" checked />
+                <span id="include-date-label">所选日期</span>
+              </label>
+            </div>
+
+            <div id="weekday-grid" class="weekday-grid"></div>
+
+            <div class="action-row">
+              <button id="save-plan" class="primary-button" type="button">保存</button>
+              <button id="reset-form" class="secondary-button" type="button">清空</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-head">
+              <h2>学生周期计划</h2>
+            </div>
+            <div id="weekly-list" class="list-stack"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+    <script src="./student-plan.js"></script>
+  </body>
+</html>

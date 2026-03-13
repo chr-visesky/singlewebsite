@@ -1,0 +1,249 @@
+page {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(198, 117, 62, 0.18), transparent 26%),
+    radial-gradient(circle at top right, rgba(49, 111, 111, 0.12), transparent 22%),
+    linear-gradient(180deg, #f7efe4 0%, #efe4d5 100%);
+  color: #1f272d;
+  font-family: 'PingFang SC', 'Microsoft YaHei UI', sans-serif;
+}
+
+button::after {
+  border: none;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 28rpx;
+  box-sizing: border-box;
+  display: grid;
+  gap: 22rpx;
+}
+
+.masthead {
+  padding: 32rpx 30rpx;
+  border-radius: 36rpx;
+  background:
+    linear-gradient(135deg, rgba(255, 250, 244, 0.96), rgba(255, 255, 255, 0.82)),
+    #fff;
+  border: 1px solid rgba(56, 45, 36, 0.08);
+  box-shadow: 0 20rpx 48rpx rgba(54, 37, 24, 0.12);
+}
+
+.masthead__eyebrow {
+  font-size: 22rpx;
+  letter-spacing: 3rpx;
+  color: #9a6a4a;
+}
+
+.masthead__title {
+  margin-top: 12rpx;
+  font-size: 54rpx;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #1d2328;
+}
+
+.masthead__desc {
+  margin-top: 12rpx;
+  color: #61707a;
+  line-height: 1.5;
+  font-size: 24rpx;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 18rpx;
+  padding: 10rpx 18rpx;
+  border-radius: 999rpx;
+  background: rgba(197, 103, 45, 0.12);
+  color: #9a5527;
+  font-size: 24rpx;
+  line-height: 1.4;
+}
+
+.panel {
+  border-radius: 30rpx;
+  padding: 28rpx;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(31, 39, 45, 0.08);
+  box-shadow: 0 14rpx 36rpx rgba(54, 37, 24, 0.09);
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.panel--ink {
+  background: linear-gradient(135deg, rgba(33, 41, 47, 0.96), rgba(57, 70, 78, 0.92));
+  color: #f8f2e8;
+}
+
+.panel__title {
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.panel__subtitle {
+  margin-top: 10rpx;
+  color: #64737d;
+  line-height: 1.5;
+  font-size: 24rpx;
+}
+
+.panel--ink .panel__subtitle {
+  color: rgba(248, 242, 232, 0.74);
+}
+
+.meta {
+  margin-top: 10rpx;
+  color: #5d6b76;
+  line-height: 1.5;
+  font-size: 24rpx;
+}
+
+.meta--light {
+  color: rgba(248, 242, 232, 0.78);
+}
+
+.meta--break {
+  word-break: break-all;
+}
+
+.field {
+  display: grid;
+  gap: 10rpx;
+  margin-top: 20rpx;
+}
+
+.field__label {
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 24rpx;
+  border-radius: 18rpx;
+  border: 1px solid rgba(31, 39, 45, 0.12);
+  background: rgba(255, 252, 247, 0.98);
+  color: #1f272d;
+}
+
+.input {
+  height: 80rpx;
+  padding: 0 18rpx;
+  line-height: 80rpx;
+}
+
+.textarea {
+  min-height: 154rpx;
+  padding: 16rpx 20rpx;
+  line-height: 1.5;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+}
+
+.choice-chip {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  min-width: 0;
+  padding: 14rpx 16rpx;
+  border-radius: 999rpx;
+  border: 1px solid rgba(31, 39, 45, 0.09);
+  background: rgba(255, 252, 247, 0.9);
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.action-row button {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  min-height: 80rpx;
+  line-height: 80rpx;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #ca6d33, #b8572d);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: rgba(202, 109, 51, 0.12);
+  color: #c05f2d;
+}
+
+.btn-danger {
+  background: rgba(157, 37, 37, 0.12);
+  color: #a52b2b;
+}
+
+.list-stack {
+  display: grid;
+  gap: 16rpx;
+  margin-top: 18rpx;
+}
+
+.list-card {
+  padding: 22rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(249, 243, 235, 0.92));
+  border: 1px solid rgba(31, 39, 45, 0.07);
+}
+
+.list-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.list-card__title {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.badge {
+  align-self: flex-start;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(31, 39, 45, 0.08);
+  color: #5b6a75;
+  font-size: 22rpx;
+}
+
+.empty-state {
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: rgba(31, 39, 45, 0.04);
+}
+
+.empty-state__title {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+@media (max-width: 420px) {
+  .split,
+  .choice-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

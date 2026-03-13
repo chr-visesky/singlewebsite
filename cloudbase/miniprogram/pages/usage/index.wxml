@@ -1,0 +1,16 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__eyebrow">USAGE</view>
+    <view class="masthead__title">使用管理</view>
+  </view>
+
+  <view class="panel panel--ink">
+    <view class="panel__title">当前状态</view>
+    <view class="panel__subtitle">还没接入守护功能配置。</view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">下一步做守护配置</view>
+    <view class="meta">后面接可见版守护模式和放开时段。</view>
+  </view>
+</view>

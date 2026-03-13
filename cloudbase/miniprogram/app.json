@@ -1,0 +1,18 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/system/index",
+    "pages/libraries/index",
+    "pages/usage/index",
+    "pages/plan/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "StudyGate 课表",
+    "navigationBarBackgroundColor": "#f6f0e7",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f6f0e7",
+    "backgroundTextStyle": "light"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

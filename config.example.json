@@ -1,0 +1,94 @@
+{
+  "appTitle": "学习入口",
+  "startUrl": "https://www.talk915.com/student/login/",
+  "allowedTopLevelUrlPrefixes": [
+    "https://www.talk915.com/",
+    "https://www.chindle.com/web/",
+    "https://chindle.keyclass.cn/web/",
+    "https://pclive.xuedianyun.com/"
+  ],
+  "allowedResourceHostnames": [
+    "www.talk915.com",
+    "class.csslcloud.net",
+    "lf1-cdn-tos.bytegoofy.com",
+    "talk915-1302759139.cos.ap-beijing.myqcloud.com",
+    "chindle.keyclass.cn",
+    "pclive.xuedianyun.com"
+  ],
+  "allowedResourceHostnameSuffixes": [
+    ".talk915.com",
+    ".alicdn.com",
+    ".myqcloud.com",
+    ".csslcloud.net",
+    ".bytegoofy.com",
+    ".chindle.com",
+    ".keyclass.cn",
+    ".xuedianyun.com"
+  ],
+  "allowedResourceUrlPrefixes": [],
+  "resourceAccessMode": "top-level-only",
+  "baiduNetdisk": {
+    "clientId": "",
+    "clientSecret": "",
+    "scope": "netdisk"
+  },
+  "remoteSchedule": {
+    "url": "https://your-cloudbase-domain/api/schedule",
+    "authToken": "replace-with-your-read-token",
+    "refreshMinutes": 3
+  },
+  "contentLibraries": [
+    {
+      "id": "great-chinese",
+      "title": "大语文",
+      "description": "只展示百度网盘固定目录里的大语文视频",
+      "tone": "coral",
+      "folderPath": "/大语文"
+    },
+    {
+      "id": "teacher-library",
+      "title": "陆老师讲义",
+      "description": "只展示百度网盘固定目录里的陆老师讲义视频",
+      "tone": "teal",
+      "folderPath": "/陆老师讲义"
+    }
+  ],
+  "studySchedule": [
+    {
+      "id": "english-example",
+      "title": "说课英语",
+      "target": "english-course",
+      "time": "18:30",
+      "weekdays": [1, 3, 5],
+      "message": "到说课英语时间了，先进入课堂。"
+    },
+    {
+      "id": "reading-example",
+      "title": "晚间看书",
+      "target": "",
+      "time": "20:30",
+      "weekdays": [1, 2, 3, 4, 5],
+      "message": "到看书时间了，先把今天的阅读完成。"
+    }
+  ],
+  "kiosk": false,
+  "alwaysOnTop": false,
+  "exitShortcut": "Ctrl+Alt+Shift+Q",
+  "blockedShortcuts": [
+    "Alt+F4",
+    "Ctrl+L",
+    "Ctrl+N",
+    "Ctrl+O",
+    "Ctrl+P",
+    "Ctrl+R",
+    "Ctrl+Shift+I",
+    "Ctrl+Shift+J",
+    "Ctrl+Shift+N",
+    "Ctrl+T",
+    "Ctrl+U",
+    "F5",
+    "F11",
+    "F12"
+  ],
+  "logBlockedRequests": true
+}

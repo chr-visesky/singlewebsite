@@ -1,0 +1,22 @@
+.grow {
+  min-width: 0;
+}
+
+.masthead__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.refresh-button {
+  min-width: 108rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: rgba(31, 39, 45, 0.08);
+  color: #394851;
+  font-size: 24rpx;
+  text-align: center;
+}

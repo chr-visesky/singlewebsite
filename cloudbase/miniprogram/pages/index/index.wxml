@@ -1,0 +1,150 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__bar">
+      <view class="grow">
+        <view class="masthead__title">计划管理</view>
+        <view class="status-pill">{{identityHint}}</view>
+      </view>
+      <button class="refresh-button" bindtap="manualRefresh">刷新</button>
+      <button class="gear-button" bindtap="openSystemPage">⚙</button>
+    </view>
+  </view>
+
+  <view class="panel panel--ink">
+    <view class="calendar-toolbar">
+      <button class="calendar-nav" bindtap="prevMonth">‹</button>
+      <view class="calendar-toolbar__title">{{monthLabel}}</view>
+      <button class="calendar-nav" bindtap="nextMonth">›</button>
+    </view>
+
+    <view class="calendar-weekdays">
+      <view wx:for="{{calendarWeekdays}}" wx:key="*this" class="calendar-weekdays__item">{{item}}</view>
+    </view>
+
+    <view class="calendar-grid">
+      <view
+        wx:for="{{calendarCells}}"
+        wx:key="dateKey"
+        class="calendar-cell {{item.inCurrentMonth ? '' : 'calendar-cell--muted'}} {{item.isToday ? 'calendar-cell--today' : ''}} {{item.isSelected ? 'calendar-cell--selected' : ''}}"
+        data-date="{{item.dateKey}}"
+        data-month="{{item.monthKey}}"
+        bindtap="selectDate"
+      >
+        <view class="calendar-cell__top">
+          <view class="calendar-cell__day">{{item.dayLabel}}</view>
+          <view wx:if="{{item.planCount}}" class="calendar-cell__count">{{item.planCount}}</view>
+        </view>
+        <view wx:for="{{item.previewRows}}" wx:key="*this" class="calendar-cell__preview">{{item}}</view>
+        <view wx:if="{{item.extraCount}}" class="calendar-cell__preview calendar-cell__preview--soft">+{{item.extraCount}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">{{selectedDateLabel}}</view>
+    <view wx:if="{{!hasSelectedDateItems}}" class="empty-state plan-empty">
+      <view class="empty-state__title">当天没有计划</view>
+    </view>
+
+    <view wx:if="{{hasSelectedDateItems}}" class="list-stack selected-list">
+      <view wx:for="{{selectedDateItems}}" wx:key="id" class="list-card selected-card {{item.isSkipped ? 'selected-card--skipped' : ''}}">
+        <view class="selected-row">
+          <view class="selected-row__main">
+            <view class="badge selected-badge {{item.planScope === 'student' ? 'badge--student' : 'badge--parent'}}">{{item.planScopeLabel}}</view>
+            <view class="badge selected-badge {{item.isSkipped ? 'badge--muted' : ''}}">{{item.stateLabel}}</view>
+            <view class="selected-row__content">
+              <view class="selected-row__title">{{item.title}}</view>
+              <view class="selected-row__meta">{{item.time}}</view>
+            </view>
+          </view>
+          <view wx:if="{{item.actionLabel}}" class="selected-action {{item.actionClass}}" data-id="{{item.id}}" bindtap="handleSelectedDateAction">{{item.actionLabel}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">添加</view>
+
+    <view class="field">
+      <input
+        class="input"
+        placeholder="事项名称"
+        value="{{composerForm.title}}"
+        data-field="title"
+        bindinput="onComposerInput"
+      />
+    </view>
+
+    <view class="split split--compact">
+      <view class="field">
+        <view class="field__label">时间</view>
+        <picker mode="time" value="{{composerForm.time}}" bindchange="onTimeChange">
+          <view class="picker-input">{{composerForm.time}}</view>
+        </picker>
+      </view>
+      <view class="field">
+        <view class="field__label">提醒</view>
+        <input
+          class="input"
+          placeholder="提醒内容"
+          value="{{composerForm.message}}"
+          data-field="message"
+          bindinput="onComposerInput"
+        />
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="field__label">计划类型</view>
+      <view class="target-grid">
+        <view class="target-chip {{composerForm.planScope === 'parent' ? 'target-chip--active' : ''}}" bindtap="chooseParentScope">家长计划</view>
+        <view class="target-chip {{composerForm.planScope === 'student' ? 'target-chip--active' : ''}}" bindtap="chooseStudentScope">学生计划</view>
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="field__label">添加到</view>
+      <view class="target-grid">
+        <view
+          class="target-chip {{composerForm.includeSelectedDate ? 'target-chip--active' : ''}}"
+          bindtap="toggleSelectedDate"
+        >
+          {{selectedDateLabel}}
+        </view>
+        <checkbox-group bindchange="onComposerWeekdayChange">
+          <view class="weekday-grid">
+            <label wx:for="{{weekdayOptions}}" wx:key="value" class="weekday-chip {{item.checked ? 'weekday-chip--active' : ''}}">
+              <checkbox value="{{item.value}}" checked="{{item.checked}}" />
+              <text>{{item.label}}</text>
+            </label>
+          </view>
+        </checkbox-group>
+      </view>
+    </view>
+
+    <view class="action-row">
+      <button class="btn-primary" bindtap="saveComposer">保存</button>
+      <button class="btn-secondary" bindtap="resetComposer">清空</button>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized && hasWeeklyItems}}" class="panel">
+    <view class="panel__title">周期计划</view>
+    <view class="list-stack">
+      <view wx:for="{{weeklyItems}}" wx:key="id" class="list-card weekly-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.title}}</view>
+            <view class="meta">{{item.time}} · {{item.patternLabel}}</view>
+          </view>
+          <view class="badge {{item.planScope === 'student' ? 'badge--student' : 'badge--parent'}}">{{item.planScopeLabel}}</view>
+        </view>
+        <view class="action-row">
+          <button class="weekly-delete" data-id="{{item.id}}" data-scope="{{item.planScope}}" bindtap="deleteWeeklyItem">删除</button>
+        </view>
+        <view wx:if="{{item.message}}" class="meta">{{item.message}}</view>
+      </view>
+    </view>
+  </view>
+</view>

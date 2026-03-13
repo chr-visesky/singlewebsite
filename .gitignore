@@ -1,0 +1,10 @@
+config.json
+temp/
+截图/
+node_modules/
+dist/
+out/
+*.log
+videos/*
+!videos/README.txt
+server-data/
