@@ -66,15 +66,9 @@
 - `contentLibraries`：首页里要显示的固定网盘目录
 - `folderPath`：百度网盘里的目录路径，例如 `/大语文`
 
-百度开放平台应用里还需要配置授权回调地址。当前程序固定使用：
+当前程序走的是百度设备码授权，不再要求你额外登记浏览器 OAuth 回调地址。
 
-```text
-http://127.0.0.1:32147/__studygate/baidu/oauth/callback
-```
-
-如果百度后台要求精确登记回调地址，就填这一条。修改后按官方说明通常需要等待一段时间生效。
-
-第一次进入 `大语文` 或 `陆老师讲义` 时，点“连接百度网盘”，完成一次授权即可。程序会把授权状态保存在本机数据目录，后面会自动续用。
+第一次进入 `大语文` 或 `陆老师讲义` 时，点“连接百度网盘”，程序内会弹出二维码页；扫一次后会把授权状态保存在本机数据目录，后面自动续用。
 
 ### 课表和提醒
 
@@ -140,6 +134,7 @@ http://127.0.0.1:32147/__studygate/baidu/oauth/callback
   "remoteSchedule": {
     "url": "https://你的服务器/schedule.json",
     "authToken": "可选的访问 token",
+    "studentWriteToken": "学生计划写入 token",
     "refreshMinutes": 3
   }
 }
@@ -148,7 +143,8 @@ http://127.0.0.1:32147/__studygate/baidu/oauth/callback
 说明：
 
 - `url`：返回课表 JSON 的接口地址
-- `authToken`：如果填了，程序会自动带 `Authorization: Bearer <token>`
+- `authToken`：只读 token。程序读取课表时会自动带 `Authorization: Bearer <token>`
+- `studentWriteToken`：学生计划写入 token。桌面端“学生计划”保存时会单独用它发 `POST`
 - `refreshMinutes`：轮询间隔，单位分钟
 - 接口返回可以是数组，也可以是 `{ "items": [...] }`
 - 课表项格式和 `studySchedule` 完全一样
@@ -161,7 +157,7 @@ http://127.0.0.1:32147/__studygate/baidu/oauth/callback
 仓库里已经带了一套 `微信小程序 + CloudBase` 骨架，在 `cloudbase/` 目录：
 
 - `cloudbase/functions/scheduleAdmin`：小程序管理云函数
-- `cloudbase/functions/schedulePublic`：桌面程序只读接口
+- `cloudbase/functions/schedulePublic`：桌面程序拉课表和保存学生计划的 HTTP 接口
 - `cloudbase/miniprogram`：家长管理端小程序
 
 详细部署看：
@@ -220,6 +216,7 @@ npm run server
 - 手机管理地址
 - `remoteSchedule.url`
 - `remoteSchedule.authToken`
+- `remoteSchedule.studentWriteToken`
 
 你只需要把打印出来的 `url` 和 `authToken` 填到桌面程序的 [config.json](q:/singlewebsite/config.json) 里。
 

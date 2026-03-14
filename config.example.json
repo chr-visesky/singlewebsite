@@ -35,6 +35,7 @@
   "remoteSchedule": {
     "url": "https://your-cloudbase-domain/api/schedule",
     "authToken": "replace-with-your-read-token",
+    "studentWriteToken": "replace-with-your-student-write-token",
     "refreshMinutes": 3
   },
   "contentLibraries": [

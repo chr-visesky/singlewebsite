@@ -10,7 +10,7 @@ const db = cloud.database();
 const COLLECTION = process.env.SCHEDULE_COLLECTION || 'study_schedule';
 const STATE_DOC_ID = process.env.SCHEDULE_DOC_ID || 'main';
 const READ_TOKEN = (process.env.READ_TOKEN || '').trim();
-const STUDENT_WRITE_TOKEN = (process.env.STUDENT_WRITE_TOKEN || READ_TOKEN).trim();
+const STUDENT_WRITE_TOKEN = (process.env.STUDENT_WRITE_TOKEN || '').trim();
 
 function normalizePrefix(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -223,6 +223,10 @@ function bearerToken(headers = {}) {
   return normalizePrefix(rawHeader.slice(7));
 }
 
+function headerTokenOnly(event = {}) {
+  return bearerToken(event.headers);
+}
+
 function parseBody(body) {
   if (!body) {
     return {};
@@ -319,9 +323,7 @@ exports.main = async (event = {}) => {
       });
     }
 
-    const requestToken =
-      bearerToken(event.headers) ||
-      normalizePrefix(event.queryStringParameters && event.queryStringParameters.token);
+    const requestToken = headerTokenOnly(event);
 
     if (requestToken !== READ_TOKEN) {
       return jsonResponse(403, {
@@ -339,9 +341,7 @@ exports.main = async (event = {}) => {
       });
     }
 
-    const requestToken =
-      bearerToken(event.headers) ||
-      normalizePrefix(event.queryStringParameters && event.queryStringParameters.token);
+    const requestToken = headerTokenOnly(event);
 
     if (requestToken !== STUDENT_WRITE_TOKEN) {
       return jsonResponse(403, {

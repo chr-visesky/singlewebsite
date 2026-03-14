@@ -2874,6 +2874,9 @@ async function syncRemoteStudySchedule() {
     if (!Array.isArray(payload) && (!payload || typeof payload !== 'object')) {
       throw new Error('服务器返回的课表格式不对。');
     }
+    if (!Array.isArray(payload) && payload && typeof payload === 'object' && payload.error) {
+      throw new Error(`服务器同步失败：${payload.error}`);
+    }
 
     const normalizedState = normalizeStudyData(payload, appConfig.baseLibraries || libraryDefinitions);
 
@@ -2926,10 +2929,10 @@ async function persistStudentStudySchedule(rawSchedule) {
 
   const mutationSerial = bumpStudyDataMutation();
 
-  const writeToken = appConfig.remoteSchedule.studentWriteToken || appConfig.remoteSchedule.authToken;
+  const writeToken = appConfig.remoteSchedule.studentWriteToken;
 
   if (!writeToken) {
-    throw new Error('没有配置远程学生计划写入 token。');
+    throw new Error('没有配置 remoteSchedule.studentWriteToken。');
   }
 
   const payload = await fetchJson(appConfig.remoteSchedule.url, {
@@ -3011,28 +3014,6 @@ async function fetchJson(url, options = {}) {
   }
 
   return payload;
-}
-
-function currentRedirectUri() {
-  return `${internalServerOrigin}${INTERNAL_OAUTH_CALLBACK_ROUTE}`;
-}
-
-async function exchangeCodeForToken(code) {
-  ensureNetdiskConfigured();
-  const tokenUrl = new URL('https://openapi.baidu.com/oauth/2.0/token');
-  tokenUrl.searchParams.set('grant_type', 'authorization_code');
-  tokenUrl.searchParams.set('code', code);
-  tokenUrl.searchParams.set('client_id', appConfig.baiduNetdisk.clientId);
-  tokenUrl.searchParams.set('client_secret', appConfig.baiduNetdisk.clientSecret);
-  tokenUrl.searchParams.set('redirect_uri', currentRedirectUri());
-
-  const payload = await fetchJson(tokenUrl);
-
-  if (!payload || payload.error) {
-    throw createNetdiskAuthError(`百度网盘授权失败：${payload && payload.error_description ? payload.error_description : '无法换取 token。'}`);
-  }
-
-  updateNetdiskState(payload);
 }
 
 async function refreshNetdiskToken() {
@@ -3823,54 +3804,31 @@ async function authorizeNetdisk() {
     }
   });
 
-  await authWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderNetdiskDeviceAuthHtml(deviceAuth))}`);
+  try {
+    await authWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderNetdiskDeviceAuthHtml(deviceAuth))}`);
+  } catch (error) {
+    if (pendingNetdiskAuth && pendingNetdiskAuth.token === authToken) {
+      const reject = pendingNetdiskAuth.reject;
+      clearPendingNetdiskAuth();
+      closeAuthWindow();
+      reject(createNetdiskAuthError(error && error.message ? error.message : '百度网盘授权窗口打开失败。'));
+    }
+
+    return authPromise;
+  }
+
   void pollNetdiskDeviceAuthorization(deviceAuth, authToken);
 
   return authPromise;
 }
 
 async function handleOAuthCallback(response, requestUrl) {
-  const errorCode = normalizePrefix(requestUrl.searchParams.get('error'));
-  const state = normalizePrefix(requestUrl.searchParams.get('state'));
-  const code = normalizePrefix(requestUrl.searchParams.get('code'));
-
-  if (!pendingNetdiskAuth) {
-    sendHtml(response, 200, '<h1>授权已结束</h1><p>这个窗口可以直接关闭。</p>');
-    return;
-  }
-
-  if (state !== pendingNetdiskAuth.state) {
-    const reject = pendingNetdiskAuth.reject;
-    clearPendingNetdiskAuth();
-    closeAuthWindow();
-    reject(createNetdiskAuthError('百度网盘授权状态校验失败。'));
-    sendHtml(response, 400, '<h1>授权失败</h1><p>状态校验失败，请回到程序里重试。</p>');
-    return;
-  }
-
-  if (errorCode) {
-    const reject = pendingNetdiskAuth.reject;
-    clearPendingNetdiskAuth();
-    closeAuthWindow();
-    reject(createNetdiskAuthError(`百度网盘拒绝授权：${errorCode}`));
-    sendHtml(response, 400, '<h1>授权失败</h1><p>百度网盘拒绝了这次授权。</p>');
-    return;
-  }
-
-  try {
-    await exchangeCodeForToken(code);
-    const resolve = pendingNetdiskAuth.resolve;
-    clearPendingNetdiskAuth();
-    closeAuthWindow();
-    resolve({ success: true });
-    sendHtml(response, 200, '<h1>授权成功</h1><p>已经连接百度网盘，可以回到程序继续使用。</p>');
-  } catch (error) {
-    const reject = pendingNetdiskAuth.reject;
-    clearPendingNetdiskAuth();
-    closeAuthWindow();
-    reject(error);
-    sendHtml(response, 400, `<h1>授权失败</h1><p>${error.message}</p>`);
-  }
+  void requestUrl;
+  sendHtml(
+    response,
+    410,
+    '<h1>这个地址已停用</h1><p>当前版本改成了百度设备码授权，不再使用浏览器 OAuth 回调地址。请回到程序里重新点“连接百度网盘”。</p>'
+  );
 }
 
 async function handleInternalServerRequest(request, response) {

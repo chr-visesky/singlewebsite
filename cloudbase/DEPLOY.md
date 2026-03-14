@@ -6,9 +6,9 @@
 
 1. 小程序里改课表
 2. CloudBase 存课表
-3. 桌面程序从 CloudBase 的只读 HTTP 接口拉课表
+3. 桌面程序从 CloudBase HTTP 接口拉课表，并单独保存学生计划
 
-## 1. 先生成一个只读 token
+## 1. 先生成读写 token
 
 在项目根目录运行：
 
@@ -16,7 +16,7 @@
 npm run cloudbase:token
 ```
 
-把输出里的 `READ_TOKEN` 先留着，后面要用。
+把输出里的 `READ_TOKEN` 和 `STUDENT_WRITE_TOKEN` 都先留着，后面要用。
 
 ## 2. 准备小程序和 CloudBase
 
@@ -76,6 +76,7 @@ npm run cloudbase:token
 给 `schedulePublic` 再配：
 
 1. `READ_TOKEN=你刚才生成的 token`
+2. `STUDENT_WRITE_TOKEN=你刚才生成的学生写入 token`
 
 给 `scheduleAdmin` 再配：
 
@@ -130,6 +131,12 @@ https://xxxxxx.service.tcloudbase.com/api/schedule
 Invoke-RestMethod -Uri 'https://你的地址/api/schedule' -Headers @{ Authorization = 'Bearer 你的READ_TOKEN' }
 ```
 
+保存学生计划也可以测：
+
+```powershell
+Invoke-RestMethod -Method Post -Uri 'https://你的地址/api/schedule' -Headers @{ Authorization = 'Bearer 你的STUDENT_WRITE_TOKEN'; 'Content-Type' = 'application/json' } -Body '{"action":"saveStudentItems","items":[]}'
+```
+
 返回里如果有：
 
 1. `updatedAt`
@@ -146,6 +153,7 @@ Invoke-RestMethod -Uri 'https://你的地址/api/schedule' -Headers @{ Authoriza
   "remoteSchedule": {
     "url": "https://你的HTTP地址/api/schedule",
     "authToken": "你的READ_TOKEN",
+    "studentWriteToken": "你的STUDENT_WRITE_TOKEN",
     "refreshMinutes": 3
   }
 }
@@ -173,6 +181,7 @@ Invoke-RestMethod -Uri 'https://你的地址/api/schedule' -Headers @{ Authoriza
 
 1. 先在浏览器或 `Invoke-RestMethod` 里测 `remoteSchedule.url`
 2. 确认 `Authorization: Bearer <READ_TOKEN>` 能返回 JSON
+3. 确认 `Authorization: Bearer <STUDENT_WRITE_TOKEN>` 发 `POST` 能保存学生计划
 3. 再看桌面程序首页右侧的同步状态
 
 ## 11. 现在这套里最重要的 4 个值
@@ -182,4 +191,5 @@ Invoke-RestMethod -Uri 'https://你的地址/api/schedule' -Headers @{ Authoriza
 1. 小程序 `appid`
 2. CloudBase `envId`
 3. `READ_TOKEN`
-4. 你的 `OPENID`
+4. `STUDENT_WRITE_TOKEN`
+5. 你的 `OPENID`

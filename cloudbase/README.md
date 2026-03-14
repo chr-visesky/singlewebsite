@@ -5,7 +5,7 @@
 目录说明：
 
 - `functions/scheduleAdmin`：小程序调用的管理云函数
-- `functions/schedulePublic`：给桌面程序拉课表的只读 HTTP 云函数
+- `functions/schedulePublic`：给桌面程序拉课表和保存学生计划的 HTTP 云函数
 - `miniprogram`：家长自己用的小程序管理端
 
 如果你现在就要开始部署，直接看：
@@ -16,10 +16,11 @@
 
 - 一个微信小程序 AppID
 - 一个 CloudBase 环境 ID
-- 一个给桌面程序用的 `READ_TOKEN`
+- 一个给桌面程序读课表用的 `READ_TOKEN`
+- 一个给桌面程序写学生计划用的 `STUDENT_WRITE_TOKEN`
 - 你自己的微信 `OPENID`
 
-`READ_TOKEN` 可以直接生成：
+两个 token 可以直接一起生成：
 
 ```powershell
 npm run cloudbase:token
@@ -46,6 +47,7 @@ npm run cloudbase:token
 `schedulePublic` 还需要：
 
 - `READ_TOKEN=你给桌面程序的只读 token`
+- `STUDENT_WRITE_TOKEN=你给桌面程序写学生计划的 token`
 
 ## 3. 小程序端
 
@@ -75,19 +77,22 @@ npm run cloudbase:token
   "remoteSchedule": {
     "url": "https://你的-http-访问地址",
     "authToken": "和 READ_TOKEN 一致",
+    "studentWriteToken": "和 STUDENT_WRITE_TOKEN 一致",
     "refreshMinutes": 3
   }
 }
 ```
 
-`schedulePublic` 只支持：
+`schedulePublic` 支持：
 
 - `GET`
 - `Authorization: Bearer <READ_TOKEN>`
+- `POST`
+- `Authorization: Bearer <STUDENT_WRITE_TOKEN>`
 
-也兼容：
+不再接受：
 
-- `?token=<READ_TOKEN>`
+- `?token=...`
 
 返回格式：
 
@@ -124,4 +129,4 @@ npm run cloudbase:token
 ## 6. 备注
 
 - 这套 CloudBase 代码是独立骨架，不会影响当前桌面程序已有的本地版和自建服务端版。
-- 桌面程序本身已经支持远程拉课表，所以 CloudBase 这边只要把只读接口跑通就够了。
+- 桌面程序本身已经支持远程拉课表和单独保存学生计划，所以 CloudBase 这边要把读写 token 都配好。
