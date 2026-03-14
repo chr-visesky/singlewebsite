@@ -25,7 +25,7 @@
 - `allowedTopLevelUrlPrefixes`：允许主页面跳转到的 URL 前缀
 - `allowedResourceHostnames` / `allowedResourceHostnameSuffixes`：允许网课站加载脚本、图片、接口、流媒体等资源的域名
 - `allowedResourceUrlPrefixes`：如果只想放行某些资源前缀，可以补这里
-- `resourceAccessMode`：资源放行模式。`whitelist` 表示继续按资源白名单拦截；`top-level-only` 表示只拦主页面跳转，脚本、图片、接口、课堂 iframe 等资源不再逐个域名拦截
+- `resourceAccessMode`：资源放行模式。`whitelist` 表示继续按资源白名单拦截；`top-level-only` 表示顶层页面按你配置过的域名/后缀放行，脚本、图片、接口、课堂 iframe 等资源也不再逐个域名拦截
 
 ### 百度网盘
 
@@ -108,6 +108,7 @@
 - `time`：24 小时制，格式 `HH:mm`
 - `weekdays`：`1-7` 分别表示 `周一` 到 `周日`
 - `target`：`english-course` 表示 `说课英语`；也可以填 `contentLibraries` 里的库 ID；留空表示“只提醒，不跳转”，适合 `看书`、`做作业`
+- 允许的网站登录页会自动记住并回填账号密码，凭据使用本机安全存储加密，不明文写盘
 - `title` / `message`：电脑到点语音播报和弹层里显示的内容
 - `reminders.leadMinutes`：提前提醒分钟数，默认是 `[5, 1]`
 - 每天的完成状态会保存在本机数据目录里的 `study-tools-state.json`

@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, session } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -14,6 +14,7 @@ const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
 const SESSION_STATE_FILE = 'session-state.json';
 const ORIGIN_STORAGE_STATE_FILE = 'origin-storage-state.json';
+const SITE_CREDENTIAL_STATE_FILE = 'site-credentials.bin';
 const NETDISK_STATE_FILE = 'baidu-netdisk-state.json';
 const STUDY_TOOLS_STATE_FILE = 'study-tools-state.json';
 const STUDY_SCHEDULE_FILE = 'study-schedule.json';
@@ -46,6 +47,11 @@ const REMINDER_AUDIO_CACHE_DIR = 'reminder-audio-cache';
 const REMINDER_SEGMENT_PAUSE_MS = 210;
 const REMINDER_REPEAT_PAUSE_MS = 450;
 const REMOTE_SCHEDULE_DEFAULT_REFRESH_MINUTES = 3;
+const MAIN_WINDOW_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
+const DEFAULT_UI_ZOOM_FACTOR = 1;
+const MIN_UI_ZOOM_FACTOR = 0.75;
+const MAX_UI_ZOOM_FACTOR = 1.8;
+const UI_ZOOM_STEP = 0.1;
 const WEEKDAY_ALIASES = new Map([
   ['1', 1],
   ['mon', 1],
@@ -258,6 +264,7 @@ let pendingNetdiskAuth = null;
 let netdiskState = createEmptyNetdiskState();
 let netdiskDlinkCache = new Map();
 let originStorageState = { origins: {} };
+let siteCredentialState = { origins: {} };
 let studyToolsState = createEmptyStudyToolsState();
 let reminderPollTimer = null;
 let reminderFlashTimer = null;
@@ -268,6 +275,7 @@ let remoteScheduleStatus = createEmptyRemoteScheduleStatus();
 let remoteScheduleSyncSerial = 0;
 let studyDataMutationSerial = 0;
 let allowAppQuit = false;
+let currentWindowZoomFactor = DEFAULT_UI_ZOOM_FACTOR;
 
 app.setPath('userData', STABLE_USER_DATA_DIR);
 app.disableHardwareAcceleration();
@@ -293,8 +301,19 @@ function createEmptyNetdiskState() {
 function createEmptyStudyToolsState() {
   return {
     classMarks: {},
-    mobileToken: crypto.randomBytes(12).toString('hex')
+    mobileToken: crypto.randomBytes(12).toString('hex'),
+    uiZoomFactor: DEFAULT_UI_ZOOM_FACTOR
   };
+}
+
+function normalizeUiZoomFactor(value) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_UI_ZOOM_FACTOR;
+  }
+
+  return Math.min(MAX_UI_ZOOM_FACTOR, Math.max(MIN_UI_ZOOM_FACTOR, Math.round(numeric * 100) / 100));
 }
 
 function createEmptyRemoteScheduleStatus() {
@@ -1039,8 +1058,70 @@ function matchesPrefix(url, prefixes) {
   return prefixes.some((prefix) => url.startsWith(prefix));
 }
 
+function matchesAllowedHostname(url) {
+  const parsed = parseUrl(url);
+
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return false;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  if (appConfig.allowedHostnames.has(hostname)) {
+    return true;
+  }
+
+  return appConfig.allowedHostnameSuffixes.some((suffix) => hostname.endsWith(suffix));
+}
+
+function topLevelDecision(url) {
+  const parsed = parseUrl(url);
+
+  if (!parsed) {
+    return {
+      allowed: false,
+      reason: 'invalid_url'
+    };
+  }
+
+  if (parsed.protocol === 'file:') {
+    return {
+      allowed: isLocalAppFile(parsed),
+      reason: 'local_file'
+    };
+  }
+
+  if (matchesPrefix(url, appConfig.topLevelPrefixes)) {
+    return {
+      allowed: true,
+      reason: 'matched_prefix'
+    };
+  }
+
+  if (isTopLevelOnlyResourceMode()) {
+    const hostnameMatched = matchesAllowedHostname(url);
+    return {
+      allowed: hostnameMatched,
+      reason: hostnameMatched ? 'matched_hostname_top_level_only' : 'hostname_not_allowed_top_level_only'
+    };
+  }
+
+  return {
+    allowed: false,
+    reason: 'prefix_not_allowed'
+  };
+}
+
 function sessionStatePath() {
   return path.join(appConfig.stateDir, SESSION_STATE_FILE);
+}
+
+function navigationDebugLogPath() {
+  return path.join(appConfig.stateDir, 'navigation-debug.log');
+}
+
+function siteCredentialStatePath() {
+  return path.join(appConfig.stateDir, SITE_CREDENTIAL_STATE_FILE);
 }
 
 function netdiskStatePath() {
@@ -1079,7 +1160,7 @@ function isInternalServerUrl(url) {
 }
 
 function isAllowedTopLevel(url) {
-  return matchesPrefix(url, appConfig.topLevelPrefixes);
+  return topLevelDecision(url).allowed;
 }
 
 function storageOriginKey(value) {
@@ -1090,6 +1171,23 @@ function storageOriginKey(value) {
   }
 
   return parsed.origin;
+}
+
+function isCourseEcosystemOrigin(value) {
+  const parsed = parseUrl(value);
+
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return false;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  return (
+    hostname.endsWith('talk915.com') ||
+    hostname.endsWith('chindle.com') ||
+    hostname.endsWith('keyclass.cn') ||
+    hostname.endsWith('xuedianyun.com')
+  );
 }
 
 function shouldPersistOriginStorage(value) {
@@ -1218,6 +1316,29 @@ function logBlockedRequest(details, reason) {
   }
 }
 
+function logNavigationDebug(eventName, payload = {}) {
+  if (!appConfig.logBlockedRequests) {
+    return;
+  }
+
+  const currentUrl =
+    mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents
+      ? normalizePrefix(mainWindow.webContents.getURL())
+      : '';
+  const logLine = JSON.stringify({
+    at: new Date().toISOString(),
+    event: eventName,
+    currentUrl,
+    ...payload
+  });
+
+  try {
+    fs.appendFileSync(navigationDebugLogPath(), `${logLine}${os.EOL}`, 'utf8');
+  } catch {
+    // Ignore logging failures.
+  }
+}
+
 function isAllowedTopLevelDestination(url) {
   const parsed = parseUrl(url);
 
@@ -1267,12 +1388,22 @@ function shouldAllowRequest(details) {
 }
 
 function blockNavigation(event, targetUrl) {
+  const decision = topLevelDecision(targetUrl);
+
   if (isAllowedTopLevelDestination(targetUrl)) {
+    logNavigationDebug('block-navigation-allow', {
+      targetUrl,
+      decision
+    });
     return;
   }
 
   event.preventDefault();
   logBlockedRequest({ resourceType: 'navigation', url: targetUrl }, 'BLOCK_NAV');
+  logNavigationDebug('block-navigation-deny', {
+    targetUrl,
+    decision
+  });
 }
 
 function shouldBlockShortcut(input) {
@@ -1300,7 +1431,10 @@ function studentPlanTarget() {
   return 'internal:student-plan';
 }
 
-function loadHomePage() {
+function loadHomePage(reason = 'manual') {
+  logNavigationDebug('load-home-page', {
+    reason
+  });
   mainWindow.loadFile(internalPagePath('home'));
 }
 
@@ -1308,9 +1442,13 @@ function loadLibraryPage(libraryId) {
   const library = resolveLibrary(libraryId);
 
   if (!library) {
-    loadHomePage();
+    loadHomePage('library-not-found');
     return;
   }
+
+  logNavigationDebug('load-library-page', {
+    libraryId: library.id
+  });
 
   mainWindow.loadFile(internalPagePath('library'), {
     query: {
@@ -1320,6 +1458,7 @@ function loadLibraryPage(libraryId) {
 }
 
 function loadStudentPlanPage() {
+  logNavigationDebug('load-student-plan-page');
   mainWindow.loadFile(internalPagePath('studentPlan'));
 }
 
@@ -1327,11 +1466,15 @@ function navigateMainWindow(target) {
   const normalizedTarget = normalizePrefix(target);
 
   if (!normalizedTarget || !mainWindow || mainWindow.isDestroyed()) {
+    logNavigationDebug('navigate-main-window-rejected', {
+      target: normalizedTarget,
+      reason: 'missing_target_or_window'
+    });
     return false;
   }
 
   if (normalizedTarget === 'internal:home') {
-    loadHomePage();
+    loadHomePage('navigate-internal-home');
     return true;
   }
 
@@ -1353,15 +1496,29 @@ function navigateMainWindow(target) {
 
   if (!isAllowedTopLevel(normalizedTarget)) {
     logBlockedRequest({ resourceType: 'navigation', url: normalizedTarget }, 'BLOCK_NAV');
+    logNavigationDebug('navigate-main-window-blocked', {
+      target: normalizedTarget,
+      decision: topLevelDecision(normalizedTarget)
+    });
     return false;
   }
 
+  logNavigationDebug('navigate-main-window-load-url', {
+    target: normalizedTarget,
+    decision: topLevelDecision(normalizedTarget)
+  });
   mainWindow.loadURL(normalizedTarget);
   return true;
 }
 
 function launchStudyEntry(target, options = {}) {
   const normalizedTarget = normalizePrefix(target);
+  logNavigationDebug('launch-study-entry', {
+    target: normalizedTarget,
+    scheduleId: normalizePrefix(options.scheduleId),
+    scheduleTargetId: normalizePrefix(options.scheduleTargetId),
+    libraryId: normalizePrefix(options.libraryId)
+  });
   const success = navigateMainWindow(normalizedTarget);
 
   if (!success) {
@@ -1641,6 +1798,186 @@ function clearNetdiskState() {
   }
 }
 
+function canUseSiteCredentialStorage() {
+  return Boolean(safeStorage && typeof safeStorage.isEncryptionAvailable === 'function' && safeStorage.isEncryptionAvailable());
+}
+
+function loadSiteCredentialState() {
+  const filePath = siteCredentialStatePath();
+
+  if (!canUseSiteCredentialStorage() || !fs.existsSync(filePath)) {
+    siteCredentialState = { origins: {} };
+    return;
+  }
+
+  try {
+    const encrypted = fs.readFileSync(filePath);
+    const decrypted = safeStorage.decryptString(encrypted);
+    const rawState = JSON.parse(decrypted);
+    siteCredentialState = {
+      origins: rawState && rawState.origins && typeof rawState.origins === 'object' ? rawState.origins : {}
+    };
+  } catch {
+    siteCredentialState = { origins: {} };
+  }
+}
+
+function saveSiteCredentialState() {
+  if (!canUseSiteCredentialStorage()) {
+    return false;
+  }
+
+  const encrypted = safeStorage.encryptString(
+    JSON.stringify({
+      origins: siteCredentialState.origins || {}
+    })
+  );
+  fs.writeFileSync(siteCredentialStatePath(), encrypted);
+  return true;
+}
+
+function shouldStoreSiteCredentials(value) {
+  const parsed = parseUrl(value);
+
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return false;
+  }
+
+  return isAllowedTopLevel(parsed.href);
+}
+
+function normalizeCredentialUsername(value) {
+  return normalizePrefix(value).slice(0, 256);
+}
+
+function normalizeCredentialPassword(value) {
+  return typeof value === 'string' ? value.slice(0, 256) : '';
+}
+
+function getSiteCredentialSnapshot(url) {
+  const origin = storageOriginKey(url);
+
+  if (!origin || !shouldStoreSiteCredentials(url) || !canUseSiteCredentialStorage()) {
+    return {
+      available: false,
+      username: '',
+      password: ''
+    };
+  }
+
+  const record = siteCredentialState.origins[origin];
+  const username = record && typeof record.username === 'string' ? record.username : '';
+  const password = record && typeof record.password === 'string' ? record.password : '';
+
+  return {
+    available: Boolean(username && password),
+    username,
+    password
+  };
+}
+
+function saveSiteCredentialSnapshot(payload = {}) {
+  const origin = storageOriginKey(payload.url || payload.origin);
+  const username = normalizeCredentialUsername(payload.username);
+  const password = normalizeCredentialPassword(payload.password);
+
+  if (!origin || !shouldStoreSiteCredentials(payload.url || origin) || !canUseSiteCredentialStorage()) {
+    return false;
+  }
+
+  if (!username || !password) {
+    return false;
+  }
+
+  siteCredentialState.origins[origin] = {
+    username,
+    password,
+    updatedAt: new Date().toISOString()
+  };
+
+  return saveSiteCredentialState();
+}
+
+function courseEcosystemOrigins() {
+  const origins = new Set();
+
+  for (const prefix of appConfig.topLevelPrefixes || []) {
+    if (isCourseEcosystemOrigin(prefix)) {
+      const origin = storageOriginKey(prefix);
+
+      if (origin) {
+        origins.add(origin);
+      }
+    }
+  }
+
+  for (const origin of Object.keys(originStorageState.origins || {})) {
+    if (isCourseEcosystemOrigin(origin)) {
+      origins.add(origin);
+    }
+  }
+
+  return [...origins];
+}
+
+function removeCourseOriginsFromStorageSnapshot() {
+  for (const origin of Object.keys(originStorageState.origins || {})) {
+    if (isCourseEcosystemOrigin(origin)) {
+      delete originStorageState.origins[origin];
+    }
+  }
+
+  saveOriginStorageState();
+}
+
+async function clearCourseSiteState() {
+  const ses = session.fromPartition(SESSION_PARTITION);
+  const origins = courseEcosystemOrigins();
+  const cookies = await ses.cookies.get({});
+  const removals = [];
+
+  for (const cookie of cookies) {
+    const domain = normalizeHostname(cookie.domain).replace(/^\.+/, '');
+
+    if (!domain || !isCourseEcosystemOrigin(`https://${domain}/`)) {
+      continue;
+    }
+
+    const protocol = cookie.secure ? 'https://' : 'http://';
+    const cookieUrl = `${protocol}${domain}${cookie.path || '/'}`;
+    removals.push(
+      ses.cookies.remove(cookieUrl, cookie.name).catch(() => {})
+    );
+  }
+
+  await Promise.all(removals);
+
+  for (const origin of origins) {
+    await ses
+      .clearStorageData({
+        origin,
+        storages: ['filesystem', 'indexeddb', 'localstorage', 'serviceworkers', 'cachestorage', 'websql']
+      })
+      .catch(() => {});
+  }
+
+  if (typeof ses.clearAuthCache === 'function') {
+    await ses.clearAuthCache().catch(() => {});
+  }
+
+  await ses.clearCache().catch(() => {});
+  removeCourseOriginsFromStorageSnapshot();
+  await writeSessionState().catch(() => {});
+
+  logNavigationDebug('clear-course-site-state', {
+    origins
+  });
+
+  return {
+    ok: true
+  };
+}
+
 function loadOriginStorageState() {
   const filePath = originStorageStatePath();
 
@@ -1669,7 +2006,7 @@ function pruneOriginStorageState() {
 
     nextOrigins[origin] = {
       localStorage: snapshot && snapshot.localStorage && typeof snapshot.localStorage === 'object' ? snapshot.localStorage : {},
-      sessionStorage: snapshot && snapshot.sessionStorage && typeof snapshot.sessionStorage === 'object' ? snapshot.sessionStorage : {},
+      sessionStorage: {},
       updatedAt: normalizePrefix(snapshot && snapshot.updatedAt) || new Date().toISOString()
     };
   }
@@ -1698,7 +2035,7 @@ function getOriginStorageSnapshot(url) {
   return {
     origin,
     localStorage: snapshot && snapshot.localStorage && typeof snapshot.localStorage === 'object' ? snapshot.localStorage : {},
-    sessionStorage: snapshot && snapshot.sessionStorage && typeof snapshot.sessionStorage === 'object' ? snapshot.sessionStorage : {}
+    sessionStorage: {}
   };
 }
 
@@ -1711,7 +2048,7 @@ function setOriginStorageSnapshot(payload = {}) {
 
   originStorageState.origins[origin] = {
     localStorage: payload.localStorage && typeof payload.localStorage === 'object' ? payload.localStorage : {},
-    sessionStorage: payload.sessionStorage && typeof payload.sessionStorage === 'object' ? payload.sessionStorage : {},
+    sessionStorage: {},
     updatedAt: new Date().toISOString()
   };
 
@@ -1878,7 +2215,8 @@ function loadStudyToolsState() {
     const rawState = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     studyToolsState = {
       classMarks: rawState.classMarks && typeof rawState.classMarks === 'object' ? rawState.classMarks : {},
-      mobileToken: normalizePrefix(rawState.mobileToken) || crypto.randomBytes(12).toString('hex')
+      mobileToken: normalizePrefix(rawState.mobileToken) || crypto.randomBytes(12).toString('hex'),
+      uiZoomFactor: normalizeUiZoomFactor(rawState.uiZoomFactor)
     };
   } catch {
     studyToolsState = createEmptyStudyToolsState();
@@ -1905,6 +2243,24 @@ function pruneStudyToolsState() {
 function saveStudyToolsState() {
   pruneStudyToolsState();
   fs.writeFileSync(studyToolsStatePath(), JSON.stringify(studyToolsState, null, 2), 'utf8');
+}
+
+function applyWindowZoomFactor(factor, options = {}) {
+  currentWindowZoomFactor = normalizeUiZoomFactor(factor);
+
+  if (studyToolsState) {
+    studyToolsState.uiZoomFactor = currentWindowZoomFactor;
+
+    if (!options.skipPersist) {
+      saveStudyToolsState();
+    }
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.setZoomFactor(currentWindowZoomFactor);
+  }
+
+  return currentWindowZoomFactor;
 }
 
 function studyScheduleOccurrenceKey(scheduleId, dateKey = formatLocalDateKey()) {
@@ -4128,6 +4484,7 @@ function stopInternalServer() {
 }
 
 function createMainWindow() {
+  logNavigationDebug('create-main-window');
   mainWindow = new BrowserWindow({
     title: appConfig.appTitle,
     width: 1440,
@@ -4156,7 +4513,10 @@ function createMainWindow() {
   mainWindow.removeMenu();
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setAlwaysOnTop(appConfig.alwaysOnTop, 'screen-saver');
+  mainWindow.webContents.setUserAgent(MAIN_WINDOW_USER_AGENT);
+  mainWindow.webContents.setZoomFactor(currentWindowZoomFactor);
   mainWindow.on('closed', () => {
+    logNavigationDebug('main-window-closed');
     mainWindow = null;
   });
   mainWindow.on('close', (event) => {
@@ -4196,19 +4556,71 @@ function createMainWindow() {
 
   mainWindow.webContents.on('will-navigate', blockNavigation);
   mainWindow.webContents.on('will-redirect', blockNavigation);
+  mainWindow.webContents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+    logNavigationDebug('did-start-navigation', {
+      url,
+      isInPlace,
+      isMainFrame
+    });
+  });
+  mainWindow.webContents.on('did-redirect-navigation', (_event, url, isInPlace, isMainFrame) => {
+    logNavigationDebug('did-redirect-navigation', {
+      url,
+      isInPlace,
+      isMainFrame
+    });
+  });
   mainWindow.webContents.on('did-finish-load', () => {
+    logNavigationDebug('did-finish-load', {
+      url: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : ''
+    });
     void applyCompatibilityPatch();
     scheduleSessionPersist();
   });
-  mainWindow.webContents.on('did-navigate', () => {
+  mainWindow.webContents.on('did-navigate', (_event, url) => {
+    logNavigationDebug('did-navigate', {
+      url
+    });
     scheduleSessionPersist();
   });
-  mainWindow.webContents.on('did-navigate-in-page', () => {
+  mainWindow.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+    logNavigationDebug('did-navigate-in-page', {
+      url,
+      isMainFrame
+    });
     scheduleSessionPersist();
+  });
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      logNavigationDebug('did-fail-load', {
+        errorCode,
+        errorDescription,
+        validatedURL,
+        isMainFrame
+      });
+    }
+  );
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    logNavigationDebug('render-process-gone', details || {});
+  });
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level <= 1) {
+      logNavigationDebug('renderer-console', {
+        level,
+        message: normalizePrefix(message),
+        line,
+        sourceId: normalizePrefix(sourceId)
+      });
+    }
   });
   mainWindow.webContents.on('context-menu', (event) => event.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedTopLevel(url)) {
+      logNavigationDebug('window-open-allow', {
+        url,
+        decision: topLevelDecision(url)
+      });
       setImmediate(() => {
         navigateMainWindow(url);
       });
@@ -4217,15 +4629,20 @@ function createMainWindow() {
     }
 
     logBlockedRequest({ resourceType: 'window-open', url }, 'BLOCK_POPUP');
+    logNavigationDebug('window-open-deny', {
+      url,
+      decision: topLevelDecision(url)
+    });
     return { action: 'deny' };
   });
 
   mainWindow.once('ready-to-show', () => {
+    logNavigationDebug('main-window-ready-to-show');
     mainWindow.show();
     mainWindow.focus();
   });
 
-  loadHomePage();
+  loadHomePage('create-main-window');
 }
 
 function configureSessionGuards() {
@@ -4265,6 +4682,13 @@ function registerIpc() {
   ipcMain.on('shell:save-origin-storage', (_event, payload = {}) => {
     setOriginStorageSnapshot(payload);
   });
+  ipcMain.handle('shell:get-site-credentials', async (_event, payload = {}) =>
+    getSiteCredentialSnapshot(normalizePrefix(payload.url))
+  );
+  ipcMain.on('shell:save-site-credentials', (_event, payload = {}) => {
+    saveSiteCredentialSnapshot(payload);
+  });
+  ipcMain.handle('shell:reset-course-site-state', async () => clearCourseSiteState());
   ipcMain.handle('shell:get-home-model', async () => {
     const todaySchedule = buildStudyScheduleModel();
     const calendarSchedule = buildStudyCalendarModel();
@@ -4358,6 +4782,19 @@ function registerIpc() {
   ipcMain.handle('shell:get-window-fullscreen', async () => ({
     fullscreen: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFullScreen())
   }));
+  ipcMain.handle('shell:get-window-zoom', async () => ({
+    zoomFactor: currentWindowZoomFactor
+  }));
+  ipcMain.handle('shell:adjust-window-zoom', async (_event, payload = {}) => {
+    const delta = Number(payload.delta) || 0;
+    const nextZoom = applyWindowZoomFactor(currentWindowZoomFactor + delta);
+    return {
+      zoomFactor: nextZoom
+    };
+  });
+  ipcMain.handle('shell:reset-window-zoom', async () => ({
+    zoomFactor: applyWindowZoomFactor(DEFAULT_UI_ZOOM_FACTOR)
+  }));
   ipcMain.handle('shell:navigate', async (_event, target) => ({
     success: navigateMainWindow(target)
   }));
@@ -4413,6 +4850,7 @@ app.whenReady().then(async () => {
     loadRemoteScheduleCache();
     loadNetdiskState();
     loadOriginStorageState();
+    loadSiteCredentialState();
     loadStudyToolsState();
     await startInternalServer();
     app.setName(appConfig.appTitle);
@@ -4430,6 +4868,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('second-instance', () => {
+  logNavigationDebug('second-instance');
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
@@ -4439,6 +4878,9 @@ app.on('second-instance', () => {
 });
 
 app.on('window-all-closed', () => {
+  logNavigationDebug('window-all-closed', {
+    allowAppQuit
+  });
   if (allowAppQuit) {
     app.quit();
     return;
@@ -4446,6 +4888,7 @@ app.on('window-all-closed', () => {
 
   setImmediate(() => {
     if (!allowAppQuit && (!mainWindow || mainWindow.isDestroyed())) {
+      logNavigationDebug('window-all-closed-recreate-main-window');
       createMainWindow();
     }
   });

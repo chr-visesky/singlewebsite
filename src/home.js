@@ -35,6 +35,19 @@ async function launchStudyTarget(payload) {
   }
 }
 
+async function resetCourseSiteState() {
+  if (!window.confirm('这会清空说课英语的网站缓存、登录状态和本地站点数据，但保留已保存的账号密码。继续吗？')) {
+    return;
+  }
+
+  try {
+    await window.studyGate.resetCourseSiteState();
+    window.alert('说课英语状态已初始化。');
+  } catch {
+    window.alert('初始化失败。');
+  }
+}
+
 async function completeSchedule(scheduleId) {
   try {
     await window.studyGate.completeStudySchedule({ scheduleId });
@@ -225,6 +238,9 @@ function createCard(card) {
   const heading = document.createElement('h2');
   heading.textContent = card.title;
 
+  const actions = document.createElement('div');
+  actions.className = 'card__actions';
+
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = '打开';
@@ -237,13 +253,26 @@ function createCard(card) {
     });
   });
 
-  inner.append(tag, heading, button);
+  actions.append(button);
+
+  if (card.id === 'english-course') {
+    const resetButton = document.createElement('button');
+    resetButton.type = 'button';
+    resetButton.className = 'card__ghost-button';
+    resetButton.textContent = '初始化状态';
+    resetButton.addEventListener('click', async () => {
+      await resetCourseSiteState();
+    });
+    actions.append(resetButton);
+  }
+
+  inner.append(tag, heading, actions);
   article.append(inner);
   return article;
 }
 
 function renderModel(model) {
-  titleNode.textContent = model.appTitle;
+  titleNode.textContent = (model && model.appTitle) || '学习入口';
   cardGrid.replaceChildren();
 
   model.cards.forEach((card) => {
