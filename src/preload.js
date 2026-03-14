@@ -10,6 +10,10 @@ let refreshTimer = null;
 let reminderHideTimer = null;
 let reminderAudio = null;
 
+function isExitVerificationPage() {
+  return window.location.protocol === 'file:' && /exit-verify\.html$/i.test(window.location.pathname);
+}
+
 function isTopFrame() {
   try {
     return window.top === window;
@@ -141,6 +145,17 @@ if (window.location.protocol === 'file:') {
     },
     navigate(target) {
       return ipcRenderer.invoke('shell:navigate', target);
+    },
+    getExitVerificationModel() {
+      return ipcRenderer.invoke('shell:get-exit-verification-model');
+    },
+    submitExitPassword(password) {
+      return ipcRenderer.invoke('shell:submit-exit-password', {
+        password
+      });
+    },
+    cancelExitPassword() {
+      return ipcRenderer.invoke('shell:cancel-exit-password');
     }
   });
 }
@@ -552,7 +567,7 @@ function startToolbarRefresh() {
 }
 
 function bootstrapToolbar() {
-  if (!isTopFrame()) {
+  if (!isTopFrame() || isExitVerificationPage()) {
     return;
   }
 

@@ -246,6 +246,7 @@ const INTERNAL_PAGES = {
 
 let mainWindow = null;
 let authWindow = null;
+let exitPasswordWindow = null;
 let appConfig = null;
 let libraryDefinitions = [];
 let libraryIndex = new Map();
@@ -266,6 +267,7 @@ let remoteSchedulePollTimer = null;
 let remoteScheduleStatus = createEmptyRemoteScheduleStatus();
 let remoteScheduleSyncSerial = 0;
 let studyDataMutationSerial = 0;
+let allowAppQuit = false;
 
 app.setPath('userData', STABLE_USER_DATA_DIR);
 app.disableHardwareAcceleration();
@@ -302,6 +304,14 @@ function createEmptyRemoteScheduleStatus() {
     lastAttemptAt: '',
     lastSuccessAt: '',
     message: '当前使用本机课表。'
+  };
+}
+
+function createEmptyControlSettings() {
+  return {
+    exitPasswordHash: '',
+    exitPasswordSalt: '',
+    exitPasswordUpdatedAt: ''
   };
 }
 
@@ -422,6 +432,55 @@ function normalizeReminderLeadMinutes(rawValue) {
   }
 
   return values.sort((left, right) => right - left);
+}
+
+function normalizeControlSettings(rawSettings) {
+  const source = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+  const exitPasswordHash = normalizePrefix(source.exitPasswordHash);
+  const exitPasswordSalt = normalizePrefix(source.exitPasswordSalt);
+  const exitPasswordUpdatedAt = normalizePrefix(source.exitPasswordUpdatedAt);
+
+  if (!exitPasswordHash || !exitPasswordSalt) {
+    return createEmptyControlSettings();
+  }
+
+  return {
+    exitPasswordHash,
+    exitPasswordSalt,
+    exitPasswordUpdatedAt
+  };
+}
+
+function hashExitPassword(password, salt) {
+  return crypto.createHash('sha256').update(`${salt}\u0000${password}`).digest('hex');
+}
+
+function hasConfiguredExitPassword() {
+  return Boolean(
+    appConfig &&
+      appConfig.controlSettings &&
+      appConfig.controlSettings.exitPasswordHash &&
+      appConfig.controlSettings.exitPasswordSalt
+  );
+}
+
+function verifyExitPassword(password) {
+  if (!hasConfiguredExitPassword()) {
+    return true;
+  }
+
+  const rawPassword = typeof password === 'string' ? password : '';
+  const candidateHash = hashExitPassword(rawPassword, appConfig.controlSettings.exitPasswordSalt);
+  const expectedHash = appConfig.controlSettings.exitPasswordHash;
+
+  if (candidateHash.length !== expectedHash.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(candidateHash, 'utf8'),
+    Buffer.from(expectedHash, 'utf8')
+  );
 }
 
 function normalizeScheduleTargetId(value) {
@@ -808,6 +867,7 @@ function serializeLibraries(libraries = libraryDefinitions) {
 function normalizeStudyData(rawState, fallbackLibraries = []) {
   const fallbackLibraryList = Array.isArray(fallbackLibraries) && fallbackLibraries.length ? fallbackLibraries : defaultLibraries();
   const source = rawState && typeof rawState === 'object' ? rawState : {};
+  const hasExplicitControlSettings = Object.prototype.hasOwnProperty.call(source, 'controlSettings');
   const hasExplicitLibraries =
     Array.isArray(source.contentLibraries) || Array.isArray(source.libraries);
   const rawLibraries = Array.isArray(source.contentLibraries)
@@ -836,7 +896,10 @@ function normalizeStudyData(rawState, fallbackLibraries = []) {
   return {
     parentItems,
     studentItems,
-    contentLibraries: libraries
+    contentLibraries: libraries,
+    controlSettings: hasExplicitControlSettings
+      ? normalizeControlSettings(source.controlSettings)
+      : normalizeControlSettings(appConfig && appConfig.controlSettings)
   };
 }
 
@@ -952,6 +1015,7 @@ function loadConfig() {
     },
     baseLibraries: serializeLibraries(libraries),
     libraries,
+    controlSettings: normalizeControlSettings(rawConfig.controlSettings),
     parentStudySchedule,
     studentStudySchedule: [],
     studySchedule: mergeStudySchedules(parentStudySchedule, [])
@@ -1674,11 +1738,13 @@ function serializeStudyData(state = {}) {
   const parentItems = Array.isArray(state.parentItems) ? state.parentItems : appConfig.parentStudySchedule;
   const studentItems = Array.isArray(state.studentItems) ? state.studentItems : appConfig.studentStudySchedule;
   const contentLibraries = Array.isArray(state.contentLibraries) ? state.contentLibraries : appConfig.libraries;
+  const controlSettings = normalizeControlSettings(state.controlSettings || appConfig.controlSettings);
 
   return {
     parentItems: serializeStudySchedule(parentItems),
     studentItems: serializeStudySchedule(studentItems),
     contentLibraries: serializeLibraries(contentLibraries),
+    controlSettings,
     items: serializeStudySchedule(mergeStudySchedules(parentItems, studentItems))
   };
 }
@@ -1687,7 +1753,8 @@ function currentStudyData() {
   return {
     parentItems: appConfig.parentStudySchedule || [],
     studentItems: appConfig.studentStudySchedule || [],
-    contentLibraries: appConfig.libraries || []
+    contentLibraries: appConfig.libraries || [],
+    controlSettings: normalizeControlSettings(appConfig.controlSettings)
   };
 }
 
@@ -1703,6 +1770,7 @@ function applyStudyData(state, source = 'local') {
   appConfig.parentStudySchedule = normalized.parentItems;
   appConfig.studentStudySchedule = normalized.studentItems;
   appConfig.studySchedule = mergeStudySchedules(normalized.parentItems, normalized.studentItems);
+  appConfig.controlSettings = normalized.controlSettings;
 
   if (source === 'remote') {
     remoteScheduleStatus.source = 'remote';
@@ -3396,6 +3464,14 @@ async function handleMobileScheduleApi(request, response, requestUrl) {
     return;
   }
 
+  if (appConfig.remoteSchedule.enabled) {
+    sendJson(response, 409, {
+      error: 'remote_enabled',
+      message: '当前已启用云端课表，请在家长管理端修改。'
+    });
+    return;
+  }
+
   const bodyText = await readRequestText(request);
   let payload;
 
@@ -3512,6 +3588,107 @@ function clearPendingNetdiskAuth() {
   }
 
   pendingNetdiskAuth = null;
+}
+
+function configureAutoLaunch() {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      path: process.execPath
+    });
+  } catch {
+    // Ignore auto-launch configuration failures on unsupported machines.
+  }
+}
+
+function closeExitPasswordWindow() {
+  if (exitPasswordWindow && !exitPasswordWindow.isDestroyed()) {
+    exitPasswordWindow.close();
+  }
+
+  exitPasswordWindow = null;
+}
+
+function exitPasswordPagePath() {
+  return path.join(__dirname, 'exit-verify.html');
+}
+
+function focusExitPasswordWindow() {
+  if (!exitPasswordWindow || exitPasswordWindow.isDestroyed()) {
+    return false;
+  }
+
+  if (exitPasswordWindow.isMinimized()) {
+    exitPasswordWindow.restore();
+  }
+
+  exitPasswordWindow.focus();
+  return true;
+}
+
+function exitVerificationModel() {
+  return {
+    appTitle: appConfig ? appConfig.appTitle : 'StudyGate',
+    hasExitPassword: hasConfiguredExitPassword()
+  };
+}
+
+function requestAppQuit() {
+  if (allowAppQuit) {
+    app.quit();
+    return;
+  }
+
+  if (!hasConfiguredExitPassword()) {
+    allowAppQuit = true;
+    app.quit();
+    return;
+  }
+
+  if (focusExitPasswordWindow()) {
+    return;
+  }
+
+  exitPasswordWindow = new BrowserWindow({
+    title: '退出验证',
+    width: 420,
+    height: 360,
+    parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : null,
+    modal: Boolean(mainWindow && !mainWindow.isDestroyed()),
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#f4ebdd',
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      devTools: false,
+      spellcheck: false,
+      preload: path.join(__dirname, 'preload.js'),
+      partition: SESSION_PARTITION
+    }
+  });
+
+  exitPasswordWindow.removeMenu();
+  exitPasswordWindow.setMenuBarVisibility(false);
+  exitPasswordWindow.on('closed', () => {
+    exitPasswordWindow = null;
+  });
+  exitPasswordWindow.once('ready-to-show', () => {
+    if (exitPasswordWindow && !exitPasswordWindow.isDestroyed()) {
+      exitPasswordWindow.show();
+      exitPasswordWindow.focus();
+    }
+  });
+  void exitPasswordWindow.loadFile(exitPasswordPagePath());
 }
 
 async function requestNetdiskDeviceCode() {
@@ -3933,6 +4110,14 @@ function createMainWindow() {
   mainWindow.removeMenu();
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setAlwaysOnTop(appConfig.alwaysOnTop, 'screen-saver');
+  mainWindow.on('close', (event) => {
+    if (allowAppQuit) {
+      return;
+    }
+
+    event.preventDefault();
+    requestAppQuit();
+  });
   mainWindow.on('enter-full-screen', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('window:fullscreen-changed', {
@@ -3956,7 +4141,7 @@ function createMainWindow() {
 
     if (isExitShortcut(input)) {
       event.preventDefault();
-      app.quit();
+      requestAppQuit();
     }
   });
 
@@ -4127,6 +4312,43 @@ function registerIpc() {
   ipcMain.handle('shell:navigate', async (_event, target) => ({
     success: navigateMainWindow(target)
   }));
+  ipcMain.handle('shell:get-exit-verification-model', async () => exitVerificationModel());
+  ipcMain.handle('shell:submit-exit-password', async (_event, payload = {}) => {
+    const password = typeof payload.password === 'string' ? payload.password : '';
+
+    if (!hasConfiguredExitPassword()) {
+      allowAppQuit = true;
+      setImmediate(() => {
+        app.quit();
+      });
+      return {
+        ok: true,
+        quitting: true
+      };
+    }
+
+    if (!verifyExitPassword(password)) {
+      return {
+        ok: false,
+        error: '密码不对。'
+      };
+    }
+
+    allowAppQuit = true;
+    closeExitPasswordWindow();
+    setImmediate(() => {
+      app.quit();
+    });
+
+    return {
+      ok: true,
+      quitting: true
+    };
+  });
+  ipcMain.handle('shell:cancel-exit-password', async () => {
+    closeExitPasswordWindow();
+    return { ok: true };
+  });
 }
 
 function showStartupError(error) {
@@ -4137,6 +4359,7 @@ app.whenReady().then(async () => {
   try {
     appConfig = loadConfig();
     rebuildLibraryIndex();
+    configureAutoLaunch();
     loadPersistedStudySchedule();
     loadRemoteScheduleCache();
     loadNetdiskState();
@@ -4159,21 +4382,29 @@ app.whenReady().then(async () => {
 
 app.on('second-instance', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
     mainWindow.focus();
   }
 });
 
 app.on('window-all-closed', () => {
-  app.quit();
+  if (allowAppQuit) {
+    app.quit();
+  }
 });
 
 app.on('before-quit', () => {
+  allowAppQuit = true;
+
   if (sessionPersistTimer) {
     clearTimeout(sessionPersistTimer);
     sessionPersistTimer = null;
   }
 
   clearPendingNetdiskAuth();
+  closeExitPasswordWindow();
   stopReminderPolling();
   stopRemoteSchedulePolling();
   stopInternalServer();

@@ -3,6 +3,8 @@ const { callAdmin, decorateAdmins } = require('../../utils/studygate-admin');
 let identityRequestSerial = 0;
 let adminsRequestSerial = 0;
 let adminsMutationSerial = 0;
+let controlRequestSerial = 0;
+let controlMutationSerial = 0;
 
 Page({
   data: {
@@ -13,7 +15,11 @@ Page({
     admins: [],
     hasAdmins: false,
     adminUpdatedAtDisplay: '还没有管理员记录。',
-    adminDraftOpenId: ''
+    adminDraftOpenId: '',
+    hasExitPassword: false,
+    exitPasswordUpdatedAtDisplay: '未设置',
+    exitPasswordDraft: '',
+    exitPasswordConfirmDraft: ''
   },
 
   onShow() {
@@ -30,15 +36,21 @@ Page({
     await this.refreshIdentity();
 
     if (this.data.authorized) {
-      await this.reloadAdmins();
+      await Promise.all([this.reloadAdmins(), this.reloadControlSettings()]);
       return;
     }
 
     this.setData({
       admins: [],
       hasAdmins: false,
-      adminUpdatedAtDisplay: '还没有管理员记录。'
+      adminUpdatedAtDisplay: '还没有管理员记录。',
+      hasExitPassword: false,
+      exitPasswordUpdatedAtDisplay: '未设置'
     });
+  },
+
+  formatUpdatedAt(value) {
+    return value ? `最近更新：${value}` : '未设置';
   },
 
   async refreshIdentity() {
@@ -112,9 +124,50 @@ Page({
     }
   },
 
+  async reloadControlSettings() {
+    const requestSerial = ++controlRequestSerial;
+    const mutationSerialAtStart = controlMutationSerial;
+
+    try {
+      const result = await callAdmin('getControlSettings');
+
+      if (requestSerial !== controlRequestSerial || mutationSerialAtStart !== controlMutationSerial) {
+        return;
+      }
+
+      this.setData({
+        hasExitPassword: Boolean(result.hasExitPassword),
+        exitPasswordUpdatedAtDisplay: Boolean(result.hasExitPassword)
+          ? this.formatUpdatedAt(result.exitPasswordUpdatedAt)
+          : '未设置'
+      });
+    } catch (error) {
+      if (requestSerial !== controlRequestSerial) {
+        return;
+      }
+
+      wx.showToast({
+        title: error && error.message ? error.message : '控制设置加载失败',
+        icon: 'none'
+      });
+    }
+  },
+
   onAdminInput(event) {
     this.setData({
       adminDraftOpenId: event.detail.value
+    });
+  },
+
+  onExitPasswordInput(event) {
+    this.setData({
+      exitPasswordDraft: event.detail.value
+    });
+  },
+
+  onExitPasswordConfirmInput(event) {
+    this.setData({
+      exitPasswordConfirmDraft: event.detail.value
     });
   },
 
@@ -165,6 +218,97 @@ Page({
     } catch (error) {
       wx.showToast({
         title: error && error.message ? error.message : '添加失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async saveExitPassword() {
+    const password = this.data.exitPasswordDraft || '';
+    const confirmPassword = this.data.exitPasswordConfirmDraft || '';
+
+    if (password.trim().length < 4) {
+      wx.showToast({
+        title: '密码至少 4 位',
+        icon: 'none'
+      });
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      wx.showToast({
+        title: '两次密码不一致',
+        icon: 'none'
+      });
+      return;
+    }
+
+    try {
+      const mutationSerial = ++controlMutationSerial;
+      const result = await callAdmin('saveControlSettings', {
+        exitPassword: password
+      });
+
+      if (mutationSerial !== controlMutationSerial) {
+        return;
+      }
+
+      this.setData({
+        hasExitPassword: Boolean(result.hasExitPassword),
+        exitPasswordUpdatedAtDisplay: Boolean(result.hasExitPassword)
+          ? this.formatUpdatedAt(result.exitPasswordUpdatedAt)
+          : '未设置',
+        exitPasswordDraft: '',
+        exitPasswordConfirmDraft: ''
+      });
+
+      wx.showToast({
+        title: '退出密码已保存',
+        icon: 'success'
+      });
+    } catch (error) {
+      wx.showToast({
+        title: error && error.message ? error.message : '保存失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async clearExitPassword() {
+    const modalResult = await wx.showModal({
+      title: '清空退出密码',
+      content: '确认清空客户端退出密码吗？',
+      confirmColor: '#a62020'
+    });
+
+    if (!modalResult.confirm) {
+      return;
+    }
+
+    try {
+      const mutationSerial = ++controlMutationSerial;
+      const result = await callAdmin('saveControlSettings', {
+        clearExitPassword: true
+      });
+
+      if (mutationSerial !== controlMutationSerial) {
+        return;
+      }
+
+      this.setData({
+        hasExitPassword: Boolean(result.hasExitPassword),
+        exitPasswordUpdatedAtDisplay: '未设置',
+        exitPasswordDraft: '',
+        exitPasswordConfirmDraft: ''
+      });
+
+      wx.showToast({
+        title: '退出密码已清空',
+        icon: 'success'
+      });
+    } catch (error) {
+      wx.showToast({
+        title: error && error.message ? error.message : '清空失败',
         icon: 'none'
       });
     }

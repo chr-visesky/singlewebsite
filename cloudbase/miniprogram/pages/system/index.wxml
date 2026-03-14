@@ -23,6 +23,39 @@
   </view>
 
   <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">退出密码</view>
+    <view class="panel__subtitle">{{hasExitPassword ? exitPasswordUpdatedAtDisplay : '未设置'}}</view>
+
+    <view class="field">
+      <view class="field__label">新密码</view>
+      <input
+        class="input"
+        password="{{true}}"
+        placeholder="至少 4 位"
+        value="{{exitPasswordDraft}}"
+        bindinput="onExitPasswordInput"
+      />
+    </view>
+
+    <view class="field">
+      <view class="field__label">确认密码</view>
+      <input
+        class="input"
+        password="{{true}}"
+        placeholder="再输一次"
+        value="{{exitPasswordConfirmDraft}}"
+        bindinput="onExitPasswordConfirmInput"
+      />
+    </view>
+
+    <view class="action-row">
+      <button class="btn-primary" bindtap="saveExitPassword">保存密码</button>
+      <button class="btn-secondary" bindtap="reloadControlSettings">刷新</button>
+      <button wx:if="{{hasExitPassword}}" class="btn-danger" bindtap="clearExitPassword">清空</button>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
     <view class="panel__title">管理员列表</view>
     <view class="panel__subtitle">{{adminUpdatedAtDisplay}}</view>
 

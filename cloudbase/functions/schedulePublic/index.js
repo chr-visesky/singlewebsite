@@ -152,6 +152,31 @@ function normalizeContentLibraries(rawLibraries) {
   return libraries;
 }
 
+function createEmptyControlSettings() {
+  return {
+    exitPasswordHash: '',
+    exitPasswordSalt: '',
+    exitPasswordUpdatedAt: ''
+  };
+}
+
+function normalizeControlSettings(rawSettings) {
+  const source = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+  const exitPasswordHash = normalizePrefix(source.exitPasswordHash);
+  const exitPasswordSalt = normalizePrefix(source.exitPasswordSalt);
+  const exitPasswordUpdatedAt = normalizePrefix(source.exitPasswordUpdatedAt);
+
+  if (!exitPasswordHash || !exitPasswordSalt) {
+    return createEmptyControlSettings();
+  }
+
+  return {
+    exitPasswordHash,
+    exitPasswordSalt,
+    exitPasswordUpdatedAt
+  };
+}
+
 function normalizeSchedule(rawItems, planScope = 'parent') {
   if (!Array.isArray(rawItems)) {
     return [];
@@ -253,12 +278,14 @@ async function readState() {
     );
     const studentItems = normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student');
     const contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    const controlSettings = normalizeControlSettings(data.controlSettings);
 
     return {
       updatedAt: normalizePrefix(data.updatedAt),
       parentItems,
       studentItems,
       contentLibraries,
+      controlSettings,
       items: combineItems(parentItems, studentItems)
     };
   } catch (error) {
@@ -270,6 +297,7 @@ async function readState() {
         parentItems: [],
         studentItems: [],
         contentLibraries: [],
+        controlSettings: createEmptyControlSettings(),
         items: []
       };
     }
@@ -284,6 +312,7 @@ async function writeStudentItems(rawItems) {
   return db.runTransaction(async (transaction) => {
     let parentItems = [];
     let contentLibraries = [];
+    let controlSettings = createEmptyControlSettings();
 
     try {
       const result = await transaction.collection(COLLECTION).doc(STATE_DOC_ID).get();
@@ -294,6 +323,7 @@ async function writeStudentItems(rawItems) {
         'parent'
       );
       contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+      controlSettings = normalizeControlSettings(data.controlSettings);
     } catch (error) {
       const message = normalizePrefix(error && (error.errMsg || error.message));
 
@@ -306,7 +336,8 @@ async function writeStudentItems(rawItems) {
       updatedAt: new Date().toISOString(),
       parentItems,
       studentItems: normalizedStudentItems,
-      contentLibraries
+      contentLibraries,
+      controlSettings
     };
 
     await transaction.collection(COLLECTION).doc(STATE_DOC_ID).set({

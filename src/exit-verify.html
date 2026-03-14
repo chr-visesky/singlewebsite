@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>退出验证</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(197, 109, 51, 0.16), transparent 24%),
+          linear-gradient(180deg, #f6efe6 0%, #efe3d3 100%);
+        color: #1f272d;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+      }
+
+      .shell {
+        width: min(100%, 360px);
+        padding: 26px 24px 22px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid rgba(31, 39, 45, 0.08);
+        box-shadow: 0 18px 50px rgba(54, 37, 24, 0.14);
+      }
+
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        color: #a1653f;
+      }
+
+      h1 {
+        margin: 10px 0 8px;
+        font-size: 28px;
+        line-height: 1.15;
+      }
+
+      .meta {
+        margin: 0;
+        color: #65737e;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .field {
+        margin-top: 18px;
+        display: grid;
+        gap: 8px;
+      }
+
+      label {
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      input {
+        width: 100%;
+        height: 48px;
+        padding: 0 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(31, 39, 45, 0.14);
+        background: #fffdfa;
+        color: #1f272d;
+        font: inherit;
+      }
+
+      input:focus {
+        outline: 2px solid rgba(192, 95, 45, 0.2);
+        border-color: rgba(192, 95, 45, 0.56);
+      }
+
+      .error {
+        min-height: 20px;
+        margin-top: 8px;
+        color: #9e2b2b;
+        font-size: 13px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      button {
+        flex: 1 1 0;
+        height: 44px;
+        border: none;
+        border-radius: 999px;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .cancel {
+        background: rgba(202, 109, 51, 0.12);
+        color: #b85a2e;
+      }
+
+      .submit {
+        background: linear-gradient(135deg, #ca6d33, #b8572d);
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <div class="eyebrow">LOCK</div>
+      <h1 id="title">退出验证</h1>
+      <p class="meta">输入家长设置的密码后才能退出。最小化不受影响。</p>
+
+      <div class="field">
+        <label for="password">退出密码</label>
+        <input id="password" type="password" autocomplete="off" />
+      </div>
+
+      <div id="error" class="error"></div>
+
+      <div class="actions">
+        <button id="cancel" class="cancel" type="button">取消</button>
+        <button id="submit" class="submit" type="button">退出</button>
+      </div>
+    </main>
+
+    <script>
+      const titleNode = document.getElementById('title');
+      const passwordInput = document.getElementById('password');
+      const errorNode = document.getElementById('error');
+      const cancelButton = document.getElementById('cancel');
+      const submitButton = document.getElementById('submit');
+
+      function setPending(pending) {
+        passwordInput.disabled = pending;
+        cancelButton.disabled = pending;
+        submitButton.disabled = pending;
+      }
+
+      function setError(message) {
+        errorNode.textContent = message || '';
+      }
+
+      async function boot() {
+        try {
+          const model = await window.studyGate.getExitVerificationModel();
+
+          if (model && model.appTitle) {
+            titleNode.textContent = `退出 ${model.appTitle}`;
+          }
+        } catch {
+          // Ignore bootstrap failures.
+        }
+
+        passwordInput.focus();
+      }
+
+      async function submit() {
+        const password = passwordInput.value || '';
+
+        if (!password) {
+          setError('先输入退出密码。');
+          passwordInput.focus();
+          return;
+        }
+
+        setPending(true);
+        setError('');
+
+        try {
+          const result = await window.studyGate.submitExitPassword(password);
+
+          if (!result || !result.ok) {
+            setPending(false);
+            passwordInput.select();
+            setError((result && result.error) || '密码不对。');
+            return;
+          }
+        } catch {
+          setPending(false);
+          setError('退出失败，请重试。');
+        }
+      }
+
+      cancelButton.addEventListener('click', async () => {
+        try {
+          await window.studyGate.cancelExitPassword();
+        } catch {
+          window.close();
+        }
+      });
+
+      submitButton.addEventListener('click', () => {
+        void submit();
+      });
+
+      passwordInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          void submit();
+        }
+      });
+
+      void boot();
+    </script>
+  </body>
+</html>

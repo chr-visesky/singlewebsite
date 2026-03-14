@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const cloud = require('wx-server-sdk');
 
 cloud.init({
@@ -173,6 +174,51 @@ function normalizeContentLibraries(rawLibraries) {
   }
 
   return libraries;
+}
+
+function createEmptyControlSettings() {
+  return {
+    exitPasswordHash: '',
+    exitPasswordSalt: '',
+    exitPasswordUpdatedAt: ''
+  };
+}
+
+function normalizeControlSettings(rawSettings) {
+  const source = rawSettings && typeof rawSettings === 'object' ? rawSettings : {};
+  const exitPasswordHash = normalizePrefix(source.exitPasswordHash);
+  const exitPasswordSalt = normalizePrefix(source.exitPasswordSalt);
+  const exitPasswordUpdatedAt = normalizePrefix(source.exitPasswordUpdatedAt);
+
+  if (!exitPasswordHash || !exitPasswordSalt) {
+    return createEmptyControlSettings();
+  }
+
+  return {
+    exitPasswordHash,
+    exitPasswordSalt,
+    exitPasswordUpdatedAt
+  };
+}
+
+function hashExitPassword(password, salt) {
+  return crypto.createHash('sha256').update(`${salt}\u0000${password}`).digest('hex');
+}
+
+function buildControlSettingsFromPassword(password) {
+  const normalizedPassword = typeof password === 'string' ? password.trim() : '';
+
+  if (!normalizedPassword) {
+    return createEmptyControlSettings();
+  }
+
+  const exitPasswordSalt = crypto.randomBytes(16).toString('hex');
+
+  return {
+    exitPasswordHash: hashExitPassword(normalizedPassword, exitPasswordSalt),
+    exitPasswordSalt,
+    exitPasswordUpdatedAt: new Date().toISOString()
+  };
 }
 
 function normalizeSchedule(rawItems, planScope = 'parent') {
@@ -386,12 +432,14 @@ async function readState() {
     );
     const studentItems = normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student');
     const contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    const controlSettings = normalizeControlSettings(data.controlSettings);
 
     return {
       updatedAt: normalizePrefix(data.updatedAt),
       parentItems,
       studentItems,
       contentLibraries,
+      controlSettings,
       items: combineItems(parentItems, studentItems)
     };
   } catch (error) {
@@ -403,6 +451,7 @@ async function readState() {
         parentItems: [],
         studentItems: [],
         contentLibraries: [],
+        controlSettings: createEmptyControlSettings(),
         items: []
       };
     }
@@ -418,7 +467,8 @@ async function writeState(rawState = {}, options = {}) {
     let currentState = {
       parentItems: [],
       studentItems: [],
-      contentLibraries: []
+      contentLibraries: [],
+      controlSettings: createEmptyControlSettings()
     };
 
     if (useMerge) {
@@ -432,7 +482,8 @@ async function writeState(rawState = {}, options = {}) {
             'parent'
           ),
           studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
-          contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries)
+          contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+          controlSettings: normalizeControlSettings(data.controlSettings)
         };
       } catch (error) {
         const message = normalizePrefix(error && (error.errMsg || error.message));
@@ -452,11 +503,15 @@ async function writeState(rawState = {}, options = {}) {
     const contentLibraries = Object.prototype.hasOwnProperty.call(rawState, 'contentLibraries')
       ? normalizeContentLibraries(rawState.contentLibraries)
       : currentState.contentLibraries;
+    const controlSettings = Object.prototype.hasOwnProperty.call(rawState, 'controlSettings')
+      ? normalizeControlSettings(rawState.controlSettings)
+      : currentState.controlSettings;
     const state = {
       updatedAt: new Date().toISOString(),
       parentItems,
       studentItems,
       contentLibraries,
+      controlSettings,
       items: combineItems(parentItems, studentItems)
     };
 
@@ -486,7 +541,8 @@ exports.main = async (event = {}) => {
       adminCount: adminState.openIds.length,
       adminSource: adminState.source,
       scheduleCount: state.items.length,
-      libraryCount: state.contentLibraries.length
+      libraryCount: state.contentLibraries.length,
+      hasExitPassword: Boolean(state.controlSettings.exitPasswordHash)
     };
   }
 
@@ -540,6 +596,43 @@ exports.main = async (event = {}) => {
           mergeWithExisting: true
         }
       ))
+    };
+  }
+
+  if (action === 'getControlSettings') {
+    const state = await readState();
+
+    return {
+      ok: true,
+      hasExitPassword: Boolean(state.controlSettings.exitPasswordHash),
+      exitPasswordUpdatedAt: state.controlSettings.exitPasswordUpdatedAt
+    };
+  }
+
+  if (action === 'saveControlSettings') {
+    const exitPassword = typeof event.exitPassword === 'string' ? event.exitPassword : '';
+    const clearExitPassword = event.clearExitPassword === true;
+
+    if (!clearExitPassword && exitPassword.trim().length < 4) {
+      throw new Error('退出密码至少 4 位。');
+    }
+
+    const controlSettings = clearExitPassword
+      ? createEmptyControlSettings()
+      : buildControlSettingsFromPassword(exitPassword);
+    const state = await writeState(
+      {
+        controlSettings
+      },
+      {
+        mergeWithExisting: true
+      }
+    );
+
+    return {
+      ok: true,
+      hasExitPassword: Boolean(state.controlSettings.exitPasswordHash),
+      exitPasswordUpdatedAt: state.controlSettings.exitPasswordUpdatedAt
     };
   }
 
