@@ -249,11 +249,23 @@
       const listNode = document.getElementById('list');
       const statusNode = document.getElementById('status');
       const resetButton = document.getElementById('reset-button');
+      const submitButton = document.getElementById('submit-button');
 
       const state = {
         items: Array.isArray(bootstrap.items) ? bootstrap.items.slice() : [],
         editId: ''
       };
+
+      function applyReadOnlyMode() {
+        if (!bootstrap.readOnly) {
+          return;
+        }
+
+        form.querySelectorAll('input, select, textarea, button').forEach((node) => {
+          node.disabled = true;
+        });
+        statusNode.textContent = bootstrap.readOnlyMessage || '当前只读。';
+      }
 
       function scheduleId() {
         return `item-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -282,6 +294,11 @@
       }
 
       function resetForm(item) {
+        if (bootstrap.readOnly) {
+          statusNode.textContent = bootstrap.readOnlyMessage || '当前只读。';
+          return;
+        }
+
         const nextItem = item || {
           title: '',
           time: '19:00',
@@ -373,34 +390,43 @@
             const message = document.createElement('p');
             message.textContent = item.message || `到${escapeText(item.title)}时间了。`;
 
-            const actions = document.createElement('div');
-            actions.className = 'item__actions';
+            if (!bootstrap.readOnly) {
+              const actions = document.createElement('div');
+              actions.className = 'item__actions';
 
-            const editButton = document.createElement('button');
-            editButton.type = 'button';
-            editButton.className = 'secondary';
-            editButton.textContent = '编辑';
-            editButton.addEventListener('click', () => {
-              resetForm(item);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            });
+              const editButton = document.createElement('button');
+              editButton.type = 'button';
+              editButton.className = 'secondary';
+              editButton.textContent = '编辑';
+              editButton.addEventListener('click', () => {
+                resetForm(item);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              });
 
-            const deleteButton = document.createElement('button');
-            deleteButton.type = 'button';
-            deleteButton.className = 'danger';
-            deleteButton.textContent = '删除';
-            deleteButton.addEventListener('click', async () => {
-              state.items = state.items.filter((entry) => entry.id !== item.id);
-              await saveRemote('已删除并保存。');
-            });
+              const deleteButton = document.createElement('button');
+              deleteButton.type = 'button';
+              deleteButton.className = 'danger';
+              deleteButton.textContent = '删除';
+              deleteButton.addEventListener('click', async () => {
+                state.items = state.items.filter((entry) => entry.id !== item.id);
+                await saveRemote('已删除并保存。');
+              });
 
-            actions.append(editButton, deleteButton);
-            article.append(head, message, actions);
+              actions.append(editButton, deleteButton);
+              article.append(head, message, actions);
+            } else {
+              article.append(head, message);
+            }
             listNode.append(article);
           });
       }
 
       async function saveRemote(successMessage) {
+        if (bootstrap.readOnly) {
+          statusNode.textContent = bootstrap.readOnlyMessage || '当前只读。';
+          return;
+        }
+
         statusNode.textContent = '正在保存...';
 
         const response = await fetch(`${bootstrap.apiPath}?token=${encodeURIComponent(bootstrap.token)}`, {
@@ -428,6 +454,11 @@
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
+
+        if (bootstrap.readOnly) {
+          statusNode.textContent = bootstrap.readOnlyMessage || '当前只读。';
+          return;
+        }
 
         const weekdays = readSelectedWeekdays();
 
@@ -460,6 +491,11 @@
       });
 
       resetButton.addEventListener('click', () => {
+        if (bootstrap.readOnly) {
+          statusNode.textContent = bootstrap.readOnlyMessage || '当前只读。';
+          return;
+        }
+
         resetForm();
       });
 
@@ -467,6 +503,7 @@
       renderWeekdays();
       resetForm();
       renderList();
+      applyReadOnlyMode();
     </script>
   </body>
 </html>

@@ -177,6 +177,14 @@ function normalizeControlSettings(rawSettings) {
   };
 }
 
+function sanitizeControlSettings(controlSettings) {
+  const normalized = normalizeControlSettings(controlSettings);
+  return {
+    hasExitPassword: Boolean(normalized.exitPasswordHash),
+    exitPasswordUpdatedAt: normalized.exitPasswordUpdatedAt
+  };
+}
+
 function normalizeSchedule(rawItems, planScope = 'parent') {
   if (!Array.isArray(rawItems)) {
     return [];
@@ -385,7 +393,12 @@ exports.main = async (event = {}) => {
       });
     }
 
-    return jsonResponse(200, await readState());
+    const state = await readState();
+
+    return jsonResponse(200, {
+      ...state,
+      controlSettings: sanitizeControlSettings(state.controlSettings)
+    });
   }
 
   if (method === 'POST') {
@@ -412,6 +425,15 @@ exports.main = async (event = {}) => {
     }
 
     const action = normalizePrefix(payload.action) || 'saveStudentItems';
+
+    if (action === 'getControlSettings') {
+      const state = await readState();
+
+      return jsonResponse(200, {
+        ok: true,
+        controlSettings: normalizeControlSettings(state.controlSettings)
+      });
+    }
 
     if (action !== 'saveStudentItems') {
       return jsonResponse(400, {

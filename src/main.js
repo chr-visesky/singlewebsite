@@ -2925,28 +2925,70 @@ async function syncRemoteStudySchedule() {
   };
 
   try {
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => {
-      abortController.abort();
-    }, 8000);
+    const fetchRemotePayload = async (options = {}) => {
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => {
+        abortController.abort();
+      }, 8000);
+      try {
+        return await fetchJson(appConfig.remoteSchedule.url, {
+          ...options,
+          signal: abortController.signal
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
     let payload;
 
-    try {
-      payload = await fetchJson(appConfig.remoteSchedule.url, {
-        headers,
-        signal: abortController.signal
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    payload = await fetchRemotePayload({
+      headers
+    });
     if (!Array.isArray(payload) && (!payload || typeof payload !== 'object')) {
       throw new Error('服务器返回的课表格式不对。');
     }
     if (!Array.isArray(payload) && payload && typeof payload === 'object' && payload.error) {
       throw new Error(`服务器同步失败：${payload.error}`);
     }
+    let controlSettings = normalizeControlSettings(appConfig.controlSettings);
 
-    const normalizedState = normalizeStudyData(payload, appConfig.baseLibraries || libraryDefinitions);
+    if (appConfig.remoteSchedule.studentWriteToken) {
+      const protectedPayload = await fetchRemotePayload({
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${appConfig.remoteSchedule.studentWriteToken}`
+        },
+        body: JSON.stringify({
+          action: 'getControlSettings'
+        })
+      });
+
+      if (!protectedPayload || protectedPayload.error) {
+        throw new Error(
+          protectedPayload && protectedPayload.error
+            ? `服务器控制设置同步失败：${protectedPayload.error}`
+            : '服务器控制设置同步失败。'
+        );
+      }
+
+      controlSettings = normalizeControlSettings(protectedPayload.controlSettings);
+    }
+
+    const normalizedState = normalizeStudyData(
+      Array.isArray(payload)
+        ? {
+            items: payload,
+            contentLibraries: appConfig.libraries,
+            controlSettings
+          }
+        : {
+            ...payload,
+            controlSettings
+          },
+      appConfig.baseLibraries || libraryDefinitions
+    );
 
     if (syncSerial !== remoteScheduleSyncSerial || mutationSerialAtStart !== studyDataMutationSerial) {
       return false;
@@ -3432,7 +3474,9 @@ function renderMobileConfigPage(requestUrl) {
     token: ensureMobileToken(),
     apiPath: INTERNAL_MOBILE_SCHEDULE_API_ROUTE,
     items: serializeStudySchedule(),
-    targetOptions: mobileTargetOptions()
+    targetOptions: mobileTargetOptions(),
+    readOnly: Boolean(appConfig.remoteSchedule.enabled),
+    readOnlyMessage: appConfig.remoteSchedule.enabled ? '当前已启用云端课表，这个本地页面只能看，不能改。' : ''
   };
 
   return template.replace(
@@ -3452,7 +3496,9 @@ async function handleMobileScheduleApi(request, response, requestUrl) {
   if (request.method === 'GET') {
     sendJson(response, 200, {
       items: serializeStudySchedule(),
-      targetOptions: mobileTargetOptions()
+      targetOptions: mobileTargetOptions(),
+      readOnly: Boolean(appConfig.remoteSchedule.enabled),
+      readOnlyMessage: appConfig.remoteSchedule.enabled ? '当前已启用云端课表，这个本地页面只能看，不能改。' : ''
     });
     return;
   }
@@ -4110,6 +4156,9 @@ function createMainWindow() {
   mainWindow.removeMenu();
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setAlwaysOnTop(appConfig.alwaysOnTop, 'screen-saver');
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
   mainWindow.on('close', (event) => {
     if (allowAppQuit) {
       return;
@@ -4392,7 +4441,14 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => {
   if (allowAppQuit) {
     app.quit();
+    return;
   }
+
+  setImmediate(() => {
+    if (!allowAppQuit && (!mainWindow || mainWindow.isDestroyed())) {
+      createMainWindow();
+    }
+  });
 });
 
 app.on('before-quit', () => {
