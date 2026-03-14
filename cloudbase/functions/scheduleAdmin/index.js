@@ -312,6 +312,49 @@ async function writeAdminState(rawOpenIds) {
   return state;
 }
 
+async function mutateAdminState(mutator) {
+  const bootstrapOpenIds = adminOpenIds();
+
+  return db.runTransaction(async (transaction) => {
+    let currentState = {
+      updatedAt: '',
+      openIds: bootstrapOpenIds
+    };
+
+    try {
+      const result = await transaction.collection(ADMIN_COLLECTION).doc(ADMIN_DOC_ID).get();
+      const data = result && result.data ? result.data : {};
+
+      currentState = {
+        updatedAt: normalizePrefix(data.updatedAt),
+        openIds: normalizeOpenIds(data.openIds)
+      };
+
+      if (!currentState.openIds.length && bootstrapOpenIds.length) {
+        currentState.openIds = bootstrapOpenIds;
+      }
+    } catch (error) {
+      const message = normalizePrefix(error && (error.errMsg || error.message));
+
+      if (!message.includes('document.get:fail') && !message.includes('not exist')) {
+        throw error;
+      }
+    }
+
+    const nextOpenIds = normalizeOpenIds(mutator(currentState.openIds));
+    const nextState = {
+      updatedAt: new Date().toISOString(),
+      openIds: nextOpenIds
+    };
+
+    await transaction.collection(ADMIN_COLLECTION).doc(ADMIN_DOC_ID).set({
+      data: nextState
+    });
+
+    return nextState;
+  });
+}
+
 async function assertAdmin(event) {
   const openId = currentOpenId(event);
   const adminState = await resolveAdminState({
@@ -369,33 +412,60 @@ async function readState() {
 }
 
 async function writeState(rawState = {}, options = {}) {
-  const currentState = options.mergeWithExisting ? await readState() : {
-    parentItems: [],
-    studentItems: [],
-    contentLibraries: []
-  };
-  const parentItems = Object.prototype.hasOwnProperty.call(rawState, 'parentItems')
-    ? normalizeSchedule(rawState.parentItems, 'parent')
-    : currentState.parentItems;
-  const studentItems = Object.prototype.hasOwnProperty.call(rawState, 'studentItems')
-    ? normalizeSchedule(rawState.studentItems, 'student')
-    : currentState.studentItems;
-  const contentLibraries = Object.prototype.hasOwnProperty.call(rawState, 'contentLibraries')
-    ? normalizeContentLibraries(rawState.contentLibraries)
-    : currentState.contentLibraries;
-  const state = {
-    updatedAt: new Date().toISOString(),
-    parentItems,
-    studentItems,
-    contentLibraries,
-    items: combineItems(parentItems, studentItems)
-  };
+  const useMerge = Boolean(options.mergeWithExisting);
 
-  await db.collection(COLLECTION).doc(STATE_DOC_ID).set({
-    data: state
+  return db.runTransaction(async (transaction) => {
+    let currentState = {
+      parentItems: [],
+      studentItems: [],
+      contentLibraries: []
+    };
+
+    if (useMerge) {
+      try {
+        const result = await transaction.collection(COLLECTION).doc(STATE_DOC_ID).get();
+        const data = result && result.data ? result.data : {};
+
+        currentState = {
+          parentItems: normalizeSchedule(
+            Array.isArray(data.parentItems) ? data.parentItems : Array.isArray(data.items) ? data.items : [],
+            'parent'
+          ),
+          studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
+          contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries)
+        };
+      } catch (error) {
+        const message = normalizePrefix(error && (error.errMsg || error.message));
+
+        if (!message.includes('document.get:fail') && !message.includes('not exist')) {
+          throw error;
+        }
+      }
+    }
+
+    const parentItems = Object.prototype.hasOwnProperty.call(rawState, 'parentItems')
+      ? normalizeSchedule(rawState.parentItems, 'parent')
+      : currentState.parentItems;
+    const studentItems = Object.prototype.hasOwnProperty.call(rawState, 'studentItems')
+      ? normalizeSchedule(rawState.studentItems, 'student')
+      : currentState.studentItems;
+    const contentLibraries = Object.prototype.hasOwnProperty.call(rawState, 'contentLibraries')
+      ? normalizeContentLibraries(rawState.contentLibraries)
+      : currentState.contentLibraries;
+    const state = {
+      updatedAt: new Date().toISOString(),
+      parentItems,
+      studentItems,
+      contentLibraries,
+      items: combineItems(parentItems, studentItems)
+    };
+
+    await transaction.collection(COLLECTION).doc(STATE_DOC_ID).set({
+      data: state
+    });
+
+    return state;
   });
-
-  return state;
 }
 
 exports.main = async (event = {}) => {
@@ -491,7 +561,7 @@ exports.main = async (event = {}) => {
 
     return {
       ok: true,
-      ...(await writeAdminState([...context.adminState.openIds, targetOpenId]))
+      ...(await mutateAdminState((currentOpenIds) => [...currentOpenIds, targetOpenId]))
     };
   }
 
@@ -502,15 +572,17 @@ exports.main = async (event = {}) => {
       throw new Error('要移除的 OPENID 不能为空。');
     }
 
-    const nextOpenIds = context.adminState.openIds.filter((item) => item !== targetOpenId);
-
-    if (!nextOpenIds.length) {
-      throw new Error('至少要保留一个管理员。');
-    }
-
     return {
       ok: true,
-      ...(await writeAdminState(nextOpenIds))
+      ...(await mutateAdminState((currentOpenIds) => {
+        const mergedNextOpenIds = currentOpenIds.filter((item) => item !== targetOpenId);
+
+        if (!mergedNextOpenIds.length) {
+          throw new Error('至少要保留一个管理员。');
+        }
+
+        return mergedNextOpenIds;
+      }))
     };
   }
 

@@ -279,25 +279,48 @@ async function readState() {
 }
 
 async function writeStudentItems(rawItems) {
-  const currentState = await readState();
-  const state = {
-    updatedAt: new Date().toISOString(),
-    parentItems: currentState.parentItems,
-    studentItems: normalizeSchedule(rawItems, 'student'),
-    contentLibraries: currentState.contentLibraries
-  };
+  const normalizedStudentItems = normalizeSchedule(rawItems, 'student');
 
-  await db.collection(COLLECTION).doc(STATE_DOC_ID).set({
-    data: {
+  return db.runTransaction(async (transaction) => {
+    let parentItems = [];
+    let contentLibraries = [];
+
+    try {
+      const result = await transaction.collection(COLLECTION).doc(STATE_DOC_ID).get();
+      const data = result && result.data ? result.data : {};
+
+      parentItems = normalizeSchedule(
+        Array.isArray(data.parentItems) ? data.parentItems : Array.isArray(data.items) ? data.items : [],
+        'parent'
+      );
+      contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    } catch (error) {
+      const message = normalizePrefix(error && (error.errMsg || error.message));
+
+      if (!message.includes('document.get:fail') && !message.includes('not exist')) {
+        throw error;
+      }
+    }
+
+    const state = {
+      updatedAt: new Date().toISOString(),
+      parentItems,
+      studentItems: normalizedStudentItems,
+      contentLibraries
+    };
+
+    await transaction.collection(COLLECTION).doc(STATE_DOC_ID).set({
+      data: {
+        ...state,
+        items: combineItems(state.parentItems, state.studentItems)
+      }
+    });
+
+    return {
       ...state,
       items: combineItems(state.parentItems, state.studentItems)
-    }
+    };
   });
-
-  return {
-    ...state,
-    items: combineItems(state.parentItems, state.studentItems)
-  };
 }
 
 exports.main = async (event = {}) => {
