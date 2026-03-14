@@ -77,7 +77,6 @@ npm run cloudbase:token
   "remoteSchedule": {
     "url": "https://你的-http-访问地址",
     "authToken": "和 READ_TOKEN 一致",
-    "studentWriteToken": "和 STUDENT_WRITE_TOKEN 一致",
     "refreshMinutes": 3
   }
 }
@@ -88,7 +87,8 @@ npm run cloudbase:token
 - `GET`
 - `Authorization: Bearer <READ_TOKEN>`
 - `POST`
-- `Authorization: Bearer <STUDENT_WRITE_TOKEN>`
+- `Authorization: Bearer <STUDENT_WRITE_TOKEN>`，可直接保存学生计划
+- `Authorization: Bearer <READ_TOKEN>` + 桌面端自动申请并经家长批准后的设备身份，也可以保存学生计划
 
 不再接受：
 

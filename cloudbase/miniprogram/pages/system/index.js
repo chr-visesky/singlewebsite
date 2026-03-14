@@ -1,8 +1,15 @@
-const { callAdmin, decorateAdmins } = require('../../utils/studygate-admin');
+const {
+  callAdmin,
+  decorateAdmins,
+  decorateStudentDevices,
+  formatCloudTimestamp
+} = require('../../utils/studygate-admin');
 
 let identityRequestSerial = 0;
 let adminsRequestSerial = 0;
 let adminsMutationSerial = 0;
+let devicesRequestSerial = 0;
+let devicesMutationSerial = 0;
 let controlRequestSerial = 0;
 let controlMutationSerial = 0;
 
@@ -16,6 +23,9 @@ Page({
     hasAdmins: false,
     adminUpdatedAtDisplay: '还没有管理员记录。',
     adminDraftOpenId: '',
+    studentDevices: [],
+    hasStudentDevices: false,
+    studentDevicesUpdatedAtDisplay: '还没有桌面客户端申请记录。',
     hasExitPassword: false,
     exitPasswordUpdatedAtDisplay: '未设置',
     exitPasswordDraft: '',
@@ -32,11 +42,17 @@ Page({
     });
   },
 
+  openClassroomsPage() {
+    wx.navigateTo({
+      url: '/pages/classrooms/index'
+    });
+  },
+
   async boot() {
     await this.refreshIdentity();
 
     if (this.data.authorized) {
-      await Promise.all([this.reloadAdmins(), this.reloadControlSettings()]);
+      await Promise.all([this.reloadAdmins(), this.reloadStudentDevices(), this.reloadControlSettings()]);
       return;
     }
 
@@ -44,13 +60,19 @@ Page({
       admins: [],
       hasAdmins: false,
       adminUpdatedAtDisplay: '还没有管理员记录。',
+      studentDevices: [],
+      hasStudentDevices: false,
+      studentDevicesUpdatedAtDisplay: '还没有桌面客户端申请记录。',
       hasExitPassword: false,
       exitPasswordUpdatedAtDisplay: '未设置'
     });
   },
 
   formatUpdatedAt(value) {
-    return value ? `最近更新：${value}` : '未设置';
+    return formatCloudTimestamp(value, {
+      prefix: '最近更新：',
+      emptyText: '未设置'
+    });
   },
 
   async refreshIdentity() {
@@ -110,7 +132,10 @@ Page({
       this.setData({
         admins,
         hasAdmins: admins.length > 0,
-        adminUpdatedAtDisplay: result.updatedAt ? `最近更新：${result.updatedAt}` : '还没有管理员记录。'
+        adminUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有管理员记录。'
+        })
       });
     } catch (error) {
       if (requestSerial !== adminsRequestSerial) {
@@ -119,6 +144,39 @@ Page({
 
       wx.showToast({
         title: error && error.message ? error.message : '管理员加载失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async reloadStudentDevices() {
+    const requestSerial = ++devicesRequestSerial;
+    const mutationSerialAtStart = devicesMutationSerial;
+
+    try {
+      const result = await callAdmin('listStudentDevices');
+
+      if (requestSerial !== devicesRequestSerial || mutationSerialAtStart !== devicesMutationSerial) {
+        return;
+      }
+
+      const studentDevices = decorateStudentDevices(result.items);
+
+      this.setData({
+        studentDevices,
+        hasStudentDevices: studentDevices.length > 0,
+        studentDevicesUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有桌面客户端申请记录。'
+        })
+      });
+    } catch (error) {
+      if (requestSerial !== devicesRequestSerial) {
+        return;
+      }
+
+      wx.showToast({
+        title: error && error.message ? error.message : '客户端列表加载失败',
         icon: 'none'
       });
     }
@@ -207,7 +265,10 @@ Page({
       this.setData({
         admins,
         hasAdmins: admins.length > 0,
-        adminUpdatedAtDisplay: result.updatedAt ? `最近更新：${result.updatedAt}` : '还没有管理员记录。',
+        adminUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有管理员记录。'
+        }),
         adminDraftOpenId: ''
       });
 
@@ -314,6 +375,97 @@ Page({
     }
   },
 
+  async approveStudentDevice(event) {
+    const deviceId = event.currentTarget.dataset.deviceid;
+
+    if (!deviceId) {
+      return;
+    }
+
+    try {
+      const mutationSerial = ++devicesMutationSerial;
+      const result = await callAdmin('approveStudentDevice', {
+        deviceId
+      });
+
+      if (mutationSerial !== devicesMutationSerial) {
+        return;
+      }
+
+      const studentDevices = decorateStudentDevices(result.items);
+
+      this.setData({
+        studentDevices,
+        hasStudentDevices: studentDevices.length > 0,
+        studentDevicesUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有桌面客户端申请记录。'
+        })
+      });
+
+      wx.showToast({
+        title: '已批准',
+        icon: 'success'
+      });
+    } catch (error) {
+      wx.showToast({
+        title: error && error.message ? error.message : '批准失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async removeStudentDevice(event) {
+    const deviceId = event.currentTarget.dataset.deviceid;
+    const label = event.currentTarget.dataset.label || '桌面客户端';
+
+    if (!deviceId) {
+      return;
+    }
+
+    const modalResult = await wx.showModal({
+      title: '删除客户端',
+      content: `确认删除这个客户端授权吗？\n${label}`,
+      confirmColor: '#a62020'
+    });
+
+    if (!modalResult.confirm) {
+      return;
+    }
+
+    try {
+      const mutationSerial = ++devicesMutationSerial;
+      const result = await callAdmin('removeStudentDevice', {
+        deviceId
+      });
+
+      if (mutationSerial !== devicesMutationSerial) {
+        return;
+      }
+
+      const studentDevices = decorateStudentDevices(result.items);
+
+      this.setData({
+        studentDevices,
+        hasStudentDevices: studentDevices.length > 0,
+        studentDevicesUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有桌面客户端申请记录。'
+        })
+      });
+
+      wx.showToast({
+        title: '已删除',
+        icon: 'success'
+      });
+    } catch (error) {
+      wx.showToast({
+        title: error && error.message ? error.message : '删除失败',
+        icon: 'none'
+      });
+    }
+  },
+
   async removeAdmin(event) {
     const openId = event.currentTarget.dataset.openid;
 
@@ -347,7 +499,10 @@ Page({
       this.setData({
         admins,
         hasAdmins: admins.length > 0,
-        adminUpdatedAtDisplay: result.updatedAt ? `最近更新：${result.updatedAt}` : '还没有管理员记录。',
+        adminUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有管理员记录。'
+        }),
         authorized: stillAuthorized,
         identityHint: stillAuthorized ? '当前账号已授权，可以管理管理员名单。' : '当前账号还不是管理员。请让现有管理员把这个 OPENID 加进列表。'
       });

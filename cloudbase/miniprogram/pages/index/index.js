@@ -4,7 +4,8 @@ const {
   normalizeSpecificDate,
   normalizeDateList,
   decorateWeekdayOptions,
-  decorateScheduleItems
+  decorateScheduleItems,
+  formatCloudTimestamp
 } = require('../../utils/studygate-admin');
 
 const CALENDAR_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
@@ -339,7 +340,10 @@ Page({
         studentItems,
         contentLibraries: Array.isArray(result.contentLibraries) ? result.contentLibraries : [],
         items,
-        updatedAtDisplay: result.updatedAt ? `最近保存：${result.updatedAt}` : '还没有保存记录。',
+        updatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近保存：',
+          emptyText: '还没有保存记录。'
+        }),
         ...buildViewState(items, this.data.currentMonthKey, this.data.selectedDate)
       });
     } catch (error) {
@@ -575,7 +579,10 @@ Page({
         studentItems: decoratedStudentItems,
         contentLibraries: Array.isArray(result.contentLibraries) ? result.contentLibraries : [],
         items,
-        updatedAtDisplay: result.updatedAt ? `最近保存：${result.updatedAt}` : '还没有保存记录。',
+        updatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近保存：',
+          emptyText: '还没有保存记录。'
+        }),
         ...buildViewState(items, this.data.currentMonthKey, this.data.selectedDate)
       };
 

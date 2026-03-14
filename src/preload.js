@@ -10,6 +10,7 @@ const TOOLBAR_TOP_OFFSET_ATTR = 'data-studygate-original-top';
 let refreshTimer = null;
 let reminderHideTimer = null;
 let reminderAudio = null;
+let reminderAlarmContext = null;
 let zoomShortcutBound = false;
 let layoutAdjustObserver = null;
 
@@ -295,8 +296,8 @@ bootstrapZoomShortcuts();
 
 if (window.location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('studyGate', {
-    getHomeModel() {
-      return ipcRenderer.invoke('shell:get-home-model');
+    getHomeModel(options) {
+      return ipcRenderer.invoke('shell:get-home-model', options);
     },
     getLibraryModel(libraryId) {
       return ipcRenderer.invoke('shell:get-library-model', libraryId);
@@ -780,6 +781,62 @@ async function playReminderAudio(payload) {
   }
 }
 
+function getReminderAlarmContext() {
+  if (!('AudioContext' in window) && !('webkitAudioContext' in window)) {
+    return null;
+  }
+
+  if (reminderAlarmContext && reminderAlarmContext.state !== 'closed') {
+    return reminderAlarmContext;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  reminderAlarmContext = new AudioContextCtor();
+  return reminderAlarmContext;
+}
+
+async function playAlarmChime() {
+  const audioContext = getReminderAlarmContext();
+
+  if (!audioContext) {
+    return false;
+  }
+
+  try {
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    const now = audioContext.currentTime + 0.02;
+    const notes = [
+      { at: 0, frequency: 1046.5, duration: 0.16 },
+      { at: 0.24, frequency: 1046.5, duration: 0.16 },
+      { at: 0.48, frequency: 1318.5, duration: 0.24 }
+    ];
+
+    notes.forEach((note) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = 'triangle';
+      oscillator.frequency.setValueAtTime(note.frequency, now + note.at);
+      gain.gain.setValueAtTime(0.0001, now + note.at);
+      gain.gain.linearRampToValueAtTime(0.18, now + note.at + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + note.at + note.duration);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(now + note.at);
+      oscillator.stop(now + note.at + note.duration + 0.02);
+    });
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 900);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function refreshToolbar() {
   const elements = ensureToolbarElements();
 
@@ -867,12 +924,6 @@ function bootstrapToolbar() {
 ipcRenderer.on('shell:study-reminder', async (_event, payload) => {
   const reminderPayload = payload || {};
   showReminder(reminderPayload);
-
-  const played = await playReminderAudio(reminderPayload);
-
-  if (!played) {
-    speakReminder(reminderPayload);
-  }
 });
 
 bootstrapToolbar();

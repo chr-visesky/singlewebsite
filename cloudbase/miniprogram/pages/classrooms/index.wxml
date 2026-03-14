@@ -1,0 +1,53 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__bar">
+      <view class="grow">
+        <view class="masthead__title">在线课堂模块</view>
+        <view class="status-pill">{{updatedAtDisplay}}</view>
+      </view>
+      <view class="header-chip" hover-class="header-chip--active" bindtap="manualRefresh">刷新</view>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">添加模块</view>
+
+    <view class="field">
+      <view class="field__label">显示名称</view>
+      <input class="input" placeholder="例如：说课英语" value="{{form.title}}" data-field="title" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <view class="field__label">课堂网址</view>
+      <input class="input" placeholder="例如：https://www.talk915.com/student/login/" value="{{form.entryUrl}}" data-field="entryUrl" bindinput="onInput" />
+    </view>
+
+    <view class="action-row">
+      <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="saveClassroom">{{submitText}}</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="resetForm">清空</view>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">当前模块</view>
+
+    <view wx:if="{{!hasClassrooms}}" class="empty-state">
+      <view class="empty-state__title">还没有模块</view>
+    </view>
+
+    <view wx:if="{{hasClassrooms}}" class="list-stack">
+      <view wx:for="{{classrooms}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.title}}</view>
+            <view class="meta meta--break">{{item.entryUrl}}</view>
+          </view>
+        </view>
+        <view class="action-row">
+          <view class="tap-button tap-button--secondary" hover-class="tap-button--active" data-id="{{item.id}}" bindtap="editClassroom">编辑</view>
+          <view class="tap-button tap-button--danger" hover-class="tap-button--active" data-id="{{item.id}}" bindtap="removeClassroom">删除</view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

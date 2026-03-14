@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const cloud = require('wx-server-sdk');
 
 cloud.init({
@@ -11,6 +12,15 @@ const COLLECTION = process.env.SCHEDULE_COLLECTION || 'study_schedule';
 const STATE_DOC_ID = process.env.SCHEDULE_DOC_ID || 'main';
 const READ_TOKEN = (process.env.READ_TOKEN || '').trim();
 const STUDENT_WRITE_TOKEN = (process.env.STUDENT_WRITE_TOKEN || '').trim();
+const DEFAULT_ONLINE_CLASSROOMS = [
+  {
+    id: 'english-course',
+    title: '说课英语',
+    description: '进入英语在线课堂。',
+    tone: 'amber',
+    entryUrl: 'https://www.talk915.com/student/login/'
+  }
+];
 
 function normalizePrefix(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -23,6 +33,20 @@ function normalizeId(value, fallback) {
     .replace(/^-+|-+$/g, '');
 
   return normalized || fallback;
+}
+
+function normalizeEntryUrl(value) {
+  const normalized = normalizePrefix(value);
+
+  if (!/^https?:\/\//i.test(normalized)) {
+    return '';
+  }
+
+  try {
+    return new URL(normalized).href;
+  } catch {
+    return '';
+  }
 }
 
 function normalizePlanScope(value, fallback = 'parent') {
@@ -152,6 +176,130 @@ function normalizeContentLibraries(rawLibraries) {
   return libraries;
 }
 
+function normalizeOnlineClassrooms(rawClassrooms) {
+  if (!Array.isArray(rawClassrooms) || !rawClassrooms.length) {
+    return [];
+  }
+
+  const classrooms = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < rawClassrooms.length; index += 1) {
+    const item = rawClassrooms[index] || {};
+    const title = normalizePrefix(item.title);
+    const entryUrl = normalizeEntryUrl(item.entryUrl || item.url || item.startUrl);
+
+    if (!title || !entryUrl) {
+      continue;
+    }
+
+    const id = normalizeId(item.id, index === 0 ? 'english-course' : `classroom-${index + 1}`);
+
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    classrooms.push({
+      id,
+      title,
+      description: normalizePrefix(item.description),
+      tone: normalizePrefix(item.tone),
+      entryUrl
+    });
+  }
+
+  return classrooms;
+}
+
+function fallbackOnlineClassrooms(classrooms) {
+  return Array.isArray(classrooms) && classrooms.length
+    ? classrooms
+    : normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS);
+}
+
+function normalizeDeviceLabel(value, fallback = '桌面客户端') {
+  return normalizePrefix(value).slice(0, 80) || fallback;
+}
+
+function normalizeStudentDeviceStatus(value) {
+  return normalizePrefix(value).toLowerCase() === 'approved' ? 'approved' : 'pending';
+}
+
+function hashStudentDeviceSecret(deviceId, deviceSecret) {
+  return crypto.createHash('sha256').update(`${deviceId}\u0000${deviceSecret}`).digest('hex');
+}
+
+function normalizeStudentDeviceAccess(rawItems) {
+  if (!Array.isArray(rawItems) || !rawItems.length) {
+    return [];
+  }
+
+  const devices = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const item = rawItems[index] || {};
+    const id = normalizeId(item.id || item.deviceId, '');
+    const secretHash = normalizePrefix(item.secretHash);
+
+    if (!id || !secretHash || seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    devices.push({
+      id,
+      label: normalizeDeviceLabel(item.label || item.deviceLabel, id),
+      secretHash,
+      status: normalizeStudentDeviceStatus(item.status),
+      requestedAt: normalizePrefix(item.requestedAt),
+      approvedAt: normalizePrefix(item.approvedAt),
+      updatedAt: normalizePrefix(item.updatedAt)
+    });
+  }
+
+  return devices;
+}
+
+function sanitizeStudentDeviceAccess(rawItems) {
+  return normalizeStudentDeviceAccess(rawItems).map((item) => ({
+    id: item.id,
+    label: item.label,
+    status: item.status,
+    requestedAt: item.requestedAt,
+    approvedAt: item.approvedAt,
+    updatedAt: item.updatedAt
+  }));
+}
+
+function normalizeStudentDeviceRequest(payload = {}) {
+  const deviceId = normalizeId(payload.deviceId || payload.studentDeviceId, '');
+  const deviceSecret = normalizePrefix(payload.deviceSecret || payload.studentDeviceSecret);
+  return {
+    deviceId,
+    deviceSecret,
+    label: normalizeDeviceLabel(payload.deviceLabel || payload.label, deviceId || '桌面客户端')
+  };
+}
+
+function buildStudentDeviceAccessStatus(item, message, mode = 'approval') {
+  const normalizedItem = item && typeof item === 'object' ? item : {};
+  const status = normalizeStudentDeviceStatus(normalizedItem.status);
+  return {
+    ok: true,
+    mode,
+    approved: status === 'approved',
+    status,
+    deviceId: normalizePrefix(normalizedItem.id),
+    label: normalizeDeviceLabel(normalizedItem.label, '桌面客户端'),
+    requestedAt: normalizePrefix(normalizedItem.requestedAt),
+    approvedAt: normalizePrefix(normalizedItem.approvedAt),
+    updatedAt: normalizePrefix(normalizedItem.updatedAt),
+    message: normalizePrefix(message)
+  };
+}
+
 function createEmptyControlSettings() {
   return {
     exitPasswordHash: '',
@@ -182,6 +330,21 @@ function sanitizeControlSettings(controlSettings) {
   return {
     hasExitPassword: Boolean(normalized.exitPasswordHash),
     exitPasswordUpdatedAt: normalized.exitPasswordUpdatedAt
+  };
+}
+
+function sanitizePublicState(state = {}) {
+  return {
+    updatedAt: normalizePrefix(state.updatedAt),
+    parentItems: normalizeSchedule(state.parentItems, 'parent'),
+    studentItems: normalizeSchedule(state.studentItems, 'student'),
+    onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(state.onlineClassrooms)),
+    contentLibraries: normalizeContentLibraries(state.contentLibraries),
+    items: combineItems(
+      normalizeSchedule(state.parentItems, 'parent'),
+      normalizeSchedule(state.studentItems, 'student')
+    ),
+    controlSettings: sanitizeControlSettings(state.controlSettings)
   };
 }
 
@@ -285,14 +448,19 @@ async function readState() {
       'parent'
     );
     const studentItems = normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student');
+    const onlineClassrooms = fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms));
     const contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    const studentDeviceAccess = normalizeStudentDeviceAccess(data.studentDeviceAccess);
     const controlSettings = normalizeControlSettings(data.controlSettings);
 
     return {
       updatedAt: normalizePrefix(data.updatedAt),
       parentItems,
       studentItems,
+      onlineClassrooms,
       contentLibraries,
+      studentDeviceAccess,
+      studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
       controlSettings,
       items: combineItems(parentItems, studentItems)
     };
@@ -304,7 +472,10 @@ async function readState() {
         updatedAt: '',
         parentItems: [],
         studentItems: [],
+        onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
         contentLibraries: [],
+        studentDeviceAccess: [],
+        studentDeviceAccessUpdatedAt: '',
         controlSettings: createEmptyControlSettings(),
         items: []
       };
@@ -314,12 +485,16 @@ async function readState() {
   }
 }
 
-async function writeStudentItems(rawItems) {
+async function writeStudentItems(rawItems, options = {}) {
   const normalizedStudentItems = normalizeSchedule(rawItems, 'student');
+  const studentDevice = options.studentDevice && typeof options.studentDevice === 'object' ? options.studentDevice : null;
 
   return db.runTransaction(async (transaction) => {
     let parentItems = [];
+    let onlineClassrooms = [];
     let contentLibraries = [];
+    let studentDeviceAccess = [];
+    let studentDeviceAccessUpdatedAt = '';
     let controlSettings = createEmptyControlSettings();
 
     try {
@@ -331,6 +506,9 @@ async function writeStudentItems(rawItems) {
         'parent'
       );
       contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+      onlineClassrooms = fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms));
+      studentDeviceAccess = normalizeStudentDeviceAccess(data.studentDeviceAccess);
+      studentDeviceAccessUpdatedAt = normalizePrefix(data.studentDeviceAccessUpdatedAt);
       controlSettings = normalizeControlSettings(data.controlSettings);
     } catch (error) {
       const message = normalizePrefix(error && (error.errMsg || error.message));
@@ -340,11 +518,27 @@ async function writeStudentItems(rawItems) {
       }
     }
 
+    if (studentDevice) {
+      const secretHash = hashStudentDeviceSecret(studentDevice.deviceId, studentDevice.deviceSecret);
+      const matchedDevice = studentDeviceAccess.find(
+        (item) => item.id === studentDevice.deviceId && item.secretHash === secretHash && item.status === 'approved'
+      );
+
+      if (!matchedDevice) {
+        const deviceError = new Error('device_not_approved');
+        deviceError.code = 'device_not_approved';
+        throw deviceError;
+      }
+    }
+
     const state = {
       updatedAt: new Date().toISOString(),
       parentItems,
       studentItems: normalizedStudentItems,
+      onlineClassrooms: fallbackOnlineClassrooms(onlineClassrooms),
       contentLibraries,
+      studentDeviceAccess,
+      studentDeviceAccessUpdatedAt,
       controlSettings
     };
 
@@ -359,6 +553,128 @@ async function writeStudentItems(rawItems) {
       ...state,
       items: combineItems(state.parentItems, state.studentItems)
     };
+  });
+}
+
+async function upsertStudentDeviceAccess(payload = {}) {
+  const request = normalizeStudentDeviceRequest(payload);
+
+  if (!request.deviceId || !request.deviceSecret) {
+    const error = new Error('missing_device_credential');
+    error.code = 'missing_device_credential';
+    throw error;
+  }
+
+  return db.runTransaction(async (transaction) => {
+    let currentState = {
+      updatedAt: '',
+      parentItems: [],
+      studentItems: [],
+      onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
+      contentLibraries: [],
+      studentDeviceAccess: [],
+      studentDeviceAccessUpdatedAt: '',
+      controlSettings: createEmptyControlSettings()
+    };
+
+    try {
+      const result = await transaction.collection(COLLECTION).doc(STATE_DOC_ID).get();
+      const data = result && result.data ? result.data : {};
+      currentState = {
+        updatedAt: normalizePrefix(data.updatedAt),
+        parentItems: normalizeSchedule(
+          Array.isArray(data.parentItems) ? data.parentItems : Array.isArray(data.items) ? data.items : [],
+          'parent'
+        ),
+        studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
+        onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms)),
+        contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+        studentDeviceAccess: normalizeStudentDeviceAccess(data.studentDeviceAccess),
+        studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
+        controlSettings: normalizeControlSettings(data.controlSettings)
+      };
+    } catch (error) {
+      const message = normalizePrefix(error && (error.errMsg || error.message));
+
+      if (!message.includes('document.get:fail') && !message.includes('not exist')) {
+        throw error;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const secretHash = hashStudentDeviceSecret(request.deviceId, request.deviceSecret);
+    const currentDevices = normalizeStudentDeviceAccess(currentState.studentDeviceAccess);
+    const existingIndex = currentDevices.findIndex((item) => item.id === request.deviceId);
+    let nextDevices = currentDevices;
+    let currentEntry = null;
+    let changed = false;
+
+    if (existingIndex >= 0) {
+      const existing = currentDevices[existingIndex];
+
+      if (existing.secretHash !== secretHash) {
+        currentEntry = {
+          id: request.deviceId,
+          label: request.label,
+          secretHash,
+          status: 'pending',
+          requestedAt: now,
+          approvedAt: '',
+          updatedAt: now
+        };
+        nextDevices = currentDevices.map((item, index) => (index === existingIndex ? currentEntry : item));
+        changed = true;
+      } else {
+        currentEntry = {
+          ...existing,
+          label: request.label || existing.label
+        };
+
+        if (currentEntry.label !== existing.label) {
+          currentEntry.updatedAt = now;
+          nextDevices = currentDevices.map((item, index) => (index === existingIndex ? currentEntry : item));
+          changed = true;
+        }
+      }
+    } else {
+      currentEntry = {
+        id: request.deviceId,
+        label: request.label,
+        secretHash,
+        status: 'pending',
+        requestedAt: now,
+        approvedAt: '',
+        updatedAt: now
+      };
+      nextDevices = [...currentDevices, currentEntry];
+      changed = true;
+    }
+
+    if (changed) {
+      const state = {
+        updatedAt: currentState.updatedAt,
+        parentItems: currentState.parentItems,
+        studentItems: currentState.studentItems,
+        onlineClassrooms: currentState.onlineClassrooms,
+        contentLibraries: currentState.contentLibraries,
+        studentDeviceAccess: normalizeStudentDeviceAccess(nextDevices),
+        studentDeviceAccessUpdatedAt: now,
+        controlSettings: currentState.controlSettings,
+        items: combineItems(currentState.parentItems, currentState.studentItems)
+      };
+
+      await transaction.collection(COLLECTION).doc(STATE_DOC_ID).set({
+        data: state
+      });
+    }
+
+    return buildStudentDeviceAccessStatus(
+      currentEntry,
+      currentEntry.status === 'approved'
+        ? '当前客户端已获准修改学生计划。'
+        : '已自动提交学生计划写入申请，等待家长在手机端批准。',
+      'approval'
+    );
   });
 }
 
@@ -395,26 +711,11 @@ exports.main = async (event = {}) => {
 
     const state = await readState();
 
-    return jsonResponse(200, {
-      ...state,
-      controlSettings: sanitizeControlSettings(state.controlSettings)
-    });
+    return jsonResponse(200, sanitizePublicState(state));
   }
 
   if (method === 'POST') {
-    if (!STUDENT_WRITE_TOKEN) {
-      return jsonResponse(500, {
-        error: 'missing_student_write_token'
-      });
-    }
-
     const requestToken = headerTokenOnly(event);
-
-    if (requestToken !== STUDENT_WRITE_TOKEN) {
-      return jsonResponse(403, {
-        error: 'forbidden'
-      });
-    }
 
     const payload = parseBody(event.body);
 
@@ -427,6 +728,18 @@ exports.main = async (event = {}) => {
     const action = normalizePrefix(payload.action) || 'saveStudentItems';
 
     if (action === 'getControlSettings') {
+      if (!READ_TOKEN) {
+        return jsonResponse(500, {
+          error: 'missing_read_token'
+        });
+      }
+
+      if (requestToken !== READ_TOKEN && requestToken !== STUDENT_WRITE_TOKEN) {
+        return jsonResponse(403, {
+          error: 'forbidden'
+        });
+      }
+
       const state = await readState();
 
       return jsonResponse(200, {
@@ -435,13 +748,97 @@ exports.main = async (event = {}) => {
       });
     }
 
+    if (action === 'getStudentDeviceAccessStatus') {
+      if (requestToken === STUDENT_WRITE_TOKEN && STUDENT_WRITE_TOKEN) {
+        const request = normalizeStudentDeviceRequest(payload);
+
+        return jsonResponse(200, buildStudentDeviceAccessStatus(
+          {
+            id: request.deviceId,
+            label: request.label,
+            status: 'approved',
+            requestedAt: '',
+            approvedAt: '',
+            updatedAt: ''
+          },
+          '当前客户端已通过专用写入令牌授权。',
+          'token'
+        ));
+      }
+
+      if (!READ_TOKEN) {
+        return jsonResponse(500, {
+          error: 'missing_read_token'
+        });
+      }
+
+      if (requestToken !== READ_TOKEN) {
+        return jsonResponse(403, {
+          error: 'forbidden'
+        });
+      }
+
+      try {
+        return jsonResponse(200, await upsertStudentDeviceAccess(payload));
+      } catch (error) {
+        if (error && error.code === 'missing_device_credential') {
+          return jsonResponse(400, {
+            error: 'missing_device_credential'
+          });
+        }
+
+        throw error;
+      }
+    }
+
     if (action !== 'saveStudentItems') {
       return jsonResponse(400, {
         error: 'unsupported_action'
       });
     }
 
-    return jsonResponse(200, await writeStudentItems(payload.items));
+    let writeMode = 'denied';
+    let studentDevice = null;
+
+    if (STUDENT_WRITE_TOKEN && requestToken === STUDENT_WRITE_TOKEN) {
+      writeMode = 'token';
+    } else if (READ_TOKEN && requestToken === READ_TOKEN) {
+      studentDevice = normalizeStudentDeviceRequest(payload);
+
+      if (!studentDevice.deviceId || !studentDevice.deviceSecret) {
+        return jsonResponse(400, {
+          error: 'missing_device_credential'
+        });
+      }
+
+      writeMode = 'approval';
+    }
+
+    if (writeMode === 'denied') {
+      if (!STUDENT_WRITE_TOKEN && !READ_TOKEN) {
+        return jsonResponse(500, {
+          error: 'missing_student_write_token'
+        });
+      }
+
+      return jsonResponse(403, {
+        error: 'forbidden'
+      });
+    }
+
+    try {
+      return jsonResponse(200, sanitizePublicState(await writeStudentItems(payload.items, {
+        studentDevice: writeMode === 'approval' ? studentDevice : null
+      })));
+    } catch (error) {
+      if (error && error.code === 'device_not_approved') {
+        return jsonResponse(403, {
+          error: 'device_not_approved'
+        });
+      }
+
+      throw error;
+    }
   }
 
   return jsonResponse(405, {

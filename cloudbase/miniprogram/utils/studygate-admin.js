@@ -133,6 +133,17 @@ function decorateLibraryItems(items) {
     : [];
 }
 
+function decorateClassroomItems(items) {
+  return Array.isArray(items)
+    ? items.map((item, index) => ({
+        id: item.id || (index === 0 ? 'english-course' : `classroom-${index + 1}`),
+        title: item.title || '',
+        entryUrl: item.entryUrl || item.url || item.startUrl || '',
+        description: item.description || ''
+      }))
+    : [];
+}
+
 function decorateAdmins(openIds, currentOpenId) {
   return Array.isArray(openIds)
     ? openIds.map((openId) => ({
@@ -140,6 +151,58 @@ function decorateAdmins(openIds, currentOpenId) {
         isSelf: Boolean(openId && openId === currentOpenId)
       }))
     : [];
+}
+
+function decorateStudentDevices(items) {
+  return Array.isArray(items)
+    ? items
+        .map((item) => {
+          const status = item && item.status === 'approved' ? 'approved' : 'pending';
+
+          return {
+            id: item.id || '',
+            label: item.label || '桌面客户端',
+            status,
+            statusLabel: status === 'approved' ? '已批准' : '待批准',
+            requestedAt: item.requestedAt || '',
+            requestedAtDisplay: formatCloudTimestamp(item.requestedAt, {
+              emptyText: '未记录'
+            }),
+            approvedAt: item.approvedAt || '',
+            approvedAtDisplay: formatCloudTimestamp(item.approvedAt, {
+              emptyText: '未记录'
+            }),
+            updatedAt: item.updatedAt || ''
+          };
+        })
+        .sort(
+          (left, right) =>
+            Number(left.status !== 'pending') - Number(right.status !== 'pending') ||
+            (right.updatedAt || right.requestedAt || '').localeCompare(left.updatedAt || left.requestedAt || '') ||
+            left.label.localeCompare(right.label)
+        )
+    : [];
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatCloudTimestamp(value, options = {}) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+
+  if (!raw) {
+    return options.emptyText || '';
+  }
+
+  const date = new Date(raw);
+
+  if (Number.isNaN(date.getTime())) {
+    return raw;
+  }
+
+  const prefix = options.prefix || '';
+  return `${prefix}${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 function buildHomeTiles(summary = {}) {
@@ -186,7 +249,10 @@ module.exports = {
   normalizeDateList,
   decorateWeekdayOptions,
   decorateScheduleItems,
+  decorateClassroomItems,
   decorateLibraryItems,
   decorateAdmins,
-  buildHomeTiles
+  decorateStudentDevices,
+  buildHomeTiles,
+  formatCloudTimestamp
 };

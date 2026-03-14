@@ -1,30 +1,30 @@
-const { callAdmin, decorateLibraryItems, formatCloudTimestamp } = require('../../utils/studygate-admin');
+const { callAdmin, decorateClassroomItems, formatCloudTimestamp } = require('../../utils/studygate-admin');
 
 const AUTO_REFRESH_INTERVAL_MS = 30000;
 
 let autoRefreshTimer = null;
-let librariesRequestSerial = 0;
-let librariesMutationSerial = 0;
+let classroomsRequestSerial = 0;
+let classroomsMutationSerial = 0;
 
 function emptyForm() {
   return {
     id: '',
     title: '',
-    folderPath: ''
+    entryUrl: ''
   };
 }
 
 Page({
   data: {
-    libraries: [],
-    hasLibraries: false,
+    classrooms: [],
+    hasClassrooms: false,
     updatedAtDisplay: '还没有模块记录。',
     form: emptyForm(),
     submitText: '添加模块'
   },
 
   onShow() {
-    void this.reloadLibraries();
+    void this.reloadClassrooms();
     this.startAutoRefresh();
   },
 
@@ -37,7 +37,7 @@ Page({
   },
 
   async onPullDownRefresh() {
-    await this.reloadLibraries();
+    await this.reloadClassrooms();
     wx.stopPullDownRefresh();
   },
 
@@ -61,7 +61,7 @@ Page({
     }
 
     autoRefreshTimer = setInterval(() => {
-      void this.reloadLibraries();
+      void this.reloadClassrooms();
     }, AUTO_REFRESH_INTERVAL_MS);
   },
 
@@ -73,32 +73,32 @@ Page({
   },
 
   async manualRefresh() {
-    await this.reloadLibraries();
+    await this.reloadClassrooms();
   },
 
-  async reloadLibraries() {
-    const requestSerial = ++librariesRequestSerial;
-    const mutationSerialAtStart = librariesMutationSerial;
+  async reloadClassrooms() {
+    const requestSerial = ++classroomsRequestSerial;
+    const mutationSerialAtStart = classroomsMutationSerial;
 
     try {
       const result = await callAdmin('list');
 
-      if (requestSerial !== librariesRequestSerial || mutationSerialAtStart !== librariesMutationSerial) {
+      if (requestSerial !== classroomsRequestSerial || mutationSerialAtStart !== classroomsMutationSerial) {
         return;
       }
 
-      const libraries = decorateLibraryItems(result.contentLibraries);
+      const classrooms = decorateClassroomItems(result.onlineClassrooms);
 
       this.setData({
-        libraries,
-        hasLibraries: libraries.length > 0,
+        classrooms,
+        hasClassrooms: classrooms.length > 0,
         updatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
           prefix: '最近更新：',
           emptyText: '还没有模块记录。'
         })
       });
     } catch (error) {
-      if (requestSerial !== librariesRequestSerial) {
+      if (requestSerial !== classroomsRequestSerial) {
         return;
       }
 
@@ -109,73 +109,73 @@ Page({
     }
   },
 
-  editLibrary(event) {
-    const libraryId = event.currentTarget.dataset.id;
-    const library = this.data.libraries.find((item) => item.id === libraryId);
+  editClassroom(event) {
+    const classroomId = event.currentTarget.dataset.id;
+    const classroom = this.data.classrooms.find((item) => item.id === classroomId);
 
-    if (!library) {
+    if (!classroom) {
       return;
     }
 
     this.setData({
       form: {
-        id: library.id,
-        title: library.title,
-        folderPath: library.folderPath
+        id: classroom.id,
+        title: classroom.title,
+        entryUrl: classroom.entryUrl
       },
       submitText: '保存模块'
     });
   },
 
-  async removeLibrary(event) {
-    const libraryId = event.currentTarget.dataset.id;
-    const nextLibraries = this.data.libraries.filter((item) => item.id !== libraryId);
-    await this.persistLibraries(nextLibraries, '已删除');
+  async removeClassroom(event) {
+    const classroomId = event.currentTarget.dataset.id;
+    const nextClassrooms = this.data.classrooms.filter((item) => item.id !== classroomId);
+    await this.persistClassrooms(nextClassrooms, '已删除');
   },
 
-  async saveLibrary() {
+  async saveClassroom() {
     const title = (this.data.form.title || '').trim();
-    const folderPath = (this.data.form.folderPath || '').trim();
+    const entryUrl = (this.data.form.entryUrl || '').trim();
 
-    if (!title || !folderPath) {
+    if (!title || !entryUrl) {
       wx.showToast({
-        title: '名称和目录都要填',
+        title: '名称和网址都要填',
         icon: 'none'
       });
       return;
     }
 
-    const nextLibrary = {
+    const nextClassroom = {
       id: this.data.form.id || '',
       title,
-      folderPath
+      entryUrl
     };
 
-    const nextLibraries = this.data.form.id
-      ? this.data.libraries.map((item) => (item.id === this.data.form.id ? nextLibrary : item))
-      : [...this.data.libraries, nextLibrary];
+    const nextClassrooms = this.data.form.id
+      ? this.data.classrooms.map((item) => (item.id === this.data.form.id ? nextClassroom : item))
+      : [...this.data.classrooms, nextClassroom];
 
-    await this.persistLibraries(nextLibraries, this.data.form.id ? '已保存' : '已添加', {
+    await this.persistClassrooms(nextClassrooms, this.data.form.id ? '已保存' : '已添加', {
       resetForm: true
     });
   },
 
-  async persistLibraries(libraries, successText, options = {}) {
-    const mutationSerial = ++librariesMutationSerial;
+  async persistClassrooms(classrooms, successText, options = {}) {
+    const mutationSerial = ++classroomsMutationSerial;
 
     try {
-      const result = await callAdmin('saveLibraries', {
-        contentLibraries: libraries
+      const result = await callAdmin('saveOnlineClassrooms', {
+        onlineClassrooms: classrooms
       });
 
-      if (mutationSerial !== librariesMutationSerial) {
+      if (mutationSerial !== classroomsMutationSerial) {
         return;
       }
 
-      const nextLibraries = decorateLibraryItems(result.contentLibraries);
+      const nextClassrooms = decorateClassroomItems(result.onlineClassrooms);
       const nextState = {
-        libraries: nextLibraries,
-        hasLibraries: nextLibraries.length > 0,
+        classrooms: nextClassrooms,
+        hasClassrooms: nextClassrooms.length > 0,
         updatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
           prefix: '最近更新：',
           emptyText: '还没有模块记录。'

@@ -12,6 +12,15 @@ const COLLECTION = process.env.SCHEDULE_COLLECTION || 'study_schedule';
 const STATE_DOC_ID = process.env.SCHEDULE_DOC_ID || 'main';
 const ADMIN_COLLECTION = process.env.ADMIN_COLLECTION || 'study_admins';
 const ADMIN_DOC_ID = process.env.ADMIN_DOC_ID || 'main';
+const DEFAULT_ONLINE_CLASSROOMS = [
+  {
+    id: 'english-course',
+    title: '说课英语',
+    description: '进入英语在线课堂。',
+    tone: 'amber',
+    entryUrl: 'https://www.talk915.com/student/login/'
+  }
+];
 
 function normalizePrefix(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -47,6 +56,20 @@ function normalizeId(value, fallback) {
     .replace(/^-+|-+$/g, '');
 
   return normalized || fallback;
+}
+
+function normalizeEntryUrl(value) {
+  const normalized = normalizePrefix(value);
+
+  if (!/^https?:\/\//i.test(normalized)) {
+    return '';
+  }
+
+  try {
+    return new URL(normalized).href;
+  } catch {
+    return '';
+  }
 }
 
 function normalizePlanScope(value, fallback = 'parent') {
@@ -174,6 +197,103 @@ function normalizeContentLibraries(rawLibraries) {
   }
 
   return libraries;
+}
+
+function normalizeOnlineClassrooms(rawClassrooms) {
+  if (!Array.isArray(rawClassrooms) || !rawClassrooms.length) {
+    return [];
+  }
+
+  const classrooms = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < rawClassrooms.length; index += 1) {
+    const item = rawClassrooms[index] || {};
+    const title = normalizePrefix(item.title);
+    const entryUrl = normalizeEntryUrl(item.entryUrl || item.url || item.startUrl);
+
+    if (!title || !entryUrl) {
+      continue;
+    }
+
+    const id = normalizeId(item.id, index === 0 ? 'english-course' : `classroom-${index + 1}`);
+
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    classrooms.push({
+      id,
+      title,
+      description: normalizePrefix(item.description),
+      tone: normalizePrefix(item.tone),
+      entryUrl
+    });
+  }
+
+  return classrooms;
+}
+
+function fallbackOnlineClassrooms(classrooms) {
+  return Array.isArray(classrooms) && classrooms.length
+    ? classrooms
+    : normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS);
+}
+
+function normalizeDeviceLabel(value, fallback = '桌面客户端') {
+  return normalizePrefix(value).slice(0, 80) || fallback;
+}
+
+function normalizeStudentDeviceStatus(value) {
+  return normalizePrefix(value).toLowerCase() === 'approved' ? 'approved' : 'pending';
+}
+
+function hashStudentDeviceSecret(deviceId, deviceSecret) {
+  return crypto.createHash('sha256').update(`${deviceId}\u0000${deviceSecret}`).digest('hex');
+}
+
+function normalizeStudentDeviceAccess(rawItems) {
+  if (!Array.isArray(rawItems) || !rawItems.length) {
+    return [];
+  }
+
+  const devices = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < rawItems.length; index += 1) {
+    const item = rawItems[index] || {};
+    const id = normalizeId(item.id || item.deviceId, '');
+    const secretHash = normalizePrefix(item.secretHash);
+
+    if (!id || !secretHash || seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    devices.push({
+      id,
+      label: normalizeDeviceLabel(item.label || item.deviceLabel, id),
+      secretHash,
+      status: normalizeStudentDeviceStatus(item.status),
+      requestedAt: normalizePrefix(item.requestedAt),
+      approvedAt: normalizePrefix(item.approvedAt),
+      updatedAt: normalizePrefix(item.updatedAt)
+    });
+  }
+
+  return devices;
+}
+
+function sanitizeStudentDeviceAccess(rawItems) {
+  return normalizeStudentDeviceAccess(rawItems).map((item) => ({
+    id: item.id,
+    label: item.label,
+    status: item.status,
+    requestedAt: item.requestedAt,
+    approvedAt: item.approvedAt,
+    updatedAt: item.updatedAt
+  }));
 }
 
 function createEmptyControlSettings() {
@@ -431,14 +551,19 @@ async function readState() {
       'parent'
     );
     const studentItems = normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student');
+    const onlineClassrooms = fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms));
     const contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    const studentDeviceAccess = normalizeStudentDeviceAccess(data.studentDeviceAccess);
     const controlSettings = normalizeControlSettings(data.controlSettings);
 
     return {
       updatedAt: normalizePrefix(data.updatedAt),
       parentItems,
       studentItems,
+      onlineClassrooms,
       contentLibraries,
+      studentDeviceAccess,
+      studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
       controlSettings,
       items: combineItems(parentItems, studentItems)
     };
@@ -450,7 +575,10 @@ async function readState() {
         updatedAt: '',
         parentItems: [],
         studentItems: [],
+        onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
         contentLibraries: [],
+        studentDeviceAccess: [],
+        studentDeviceAccessUpdatedAt: '',
         controlSettings: createEmptyControlSettings(),
         items: []
       };
@@ -467,7 +595,10 @@ async function writeState(rawState = {}, options = {}) {
     let currentState = {
       parentItems: [],
       studentItems: [],
+      onlineClassrooms: [],
       contentLibraries: [],
+      studentDeviceAccess: [],
+      studentDeviceAccessUpdatedAt: '',
       controlSettings: createEmptyControlSettings()
     };
 
@@ -482,7 +613,10 @@ async function writeState(rawState = {}, options = {}) {
             'parent'
           ),
           studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
+          onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms)),
           contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+          studentDeviceAccess: normalizeStudentDeviceAccess(data.studentDeviceAccess),
+          studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
           controlSettings: normalizeControlSettings(data.controlSettings)
         };
       } catch (error) {
@@ -500,19 +634,90 @@ async function writeState(rawState = {}, options = {}) {
     const studentItems = Object.prototype.hasOwnProperty.call(rawState, 'studentItems')
       ? normalizeSchedule(rawState.studentItems, 'student')
       : currentState.studentItems;
+    const onlineClassrooms = Object.prototype.hasOwnProperty.call(rawState, 'onlineClassrooms')
+      ? normalizeOnlineClassrooms(rawState.onlineClassrooms)
+      : currentState.onlineClassrooms;
     const contentLibraries = Object.prototype.hasOwnProperty.call(rawState, 'contentLibraries')
       ? normalizeContentLibraries(rawState.contentLibraries)
       : currentState.contentLibraries;
+    const studentDeviceAccess = Object.prototype.hasOwnProperty.call(rawState, 'studentDeviceAccess')
+      ? normalizeStudentDeviceAccess(rawState.studentDeviceAccess)
+      : currentState.studentDeviceAccess;
     const controlSettings = Object.prototype.hasOwnProperty.call(rawState, 'controlSettings')
       ? normalizeControlSettings(rawState.controlSettings)
       : currentState.controlSettings;
+    const studentDeviceAccessUpdatedAt = Object.prototype.hasOwnProperty.call(rawState, 'studentDeviceAccess')
+      ? new Date().toISOString()
+      : currentState.studentDeviceAccessUpdatedAt;
     const state = {
       updatedAt: new Date().toISOString(),
       parentItems,
       studentItems,
+      onlineClassrooms: fallbackOnlineClassrooms(onlineClassrooms),
       contentLibraries,
+      studentDeviceAccess,
+      studentDeviceAccessUpdatedAt,
       controlSettings,
       items: combineItems(parentItems, studentItems)
+    };
+
+    await transaction.collection(COLLECTION).doc(STATE_DOC_ID).set({
+      data: state
+    });
+
+    return state;
+  });
+}
+
+async function mutateStudentDeviceAccess(mutator) {
+  return db.runTransaction(async (transaction) => {
+    let currentState = {
+      updatedAt: '',
+      parentItems: [],
+      studentItems: [],
+      onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
+      contentLibraries: [],
+      studentDeviceAccess: [],
+      studentDeviceAccessUpdatedAt: '',
+      controlSettings: createEmptyControlSettings()
+    };
+
+    try {
+      const result = await transaction.collection(COLLECTION).doc(STATE_DOC_ID).get();
+      const data = result && result.data ? result.data : {};
+      currentState = {
+        updatedAt: normalizePrefix(data.updatedAt),
+        parentItems: normalizeSchedule(
+          Array.isArray(data.parentItems) ? data.parentItems : Array.isArray(data.items) ? data.items : [],
+          'parent'
+        ),
+        studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
+        onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms)),
+        contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+        studentDeviceAccess: normalizeStudentDeviceAccess(data.studentDeviceAccess),
+        studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
+        controlSettings: normalizeControlSettings(data.controlSettings)
+      };
+    } catch (error) {
+      const message = normalizePrefix(error && (error.errMsg || error.message));
+
+      if (!message.includes('document.get:fail') && !message.includes('not exist')) {
+        throw error;
+      }
+    }
+
+    const nextDevices = normalizeStudentDeviceAccess(mutator(currentState.studentDeviceAccess));
+    const now = new Date().toISOString();
+    const state = {
+      updatedAt: currentState.updatedAt,
+      parentItems: currentState.parentItems,
+      studentItems: currentState.studentItems,
+      onlineClassrooms: currentState.onlineClassrooms,
+      contentLibraries: currentState.contentLibraries,
+      studentDeviceAccess: nextDevices,
+      studentDeviceAccessUpdatedAt: now,
+      controlSettings: currentState.controlSettings,
+      items: combineItems(currentState.parentItems, currentState.studentItems)
     };
 
     await transaction.collection(COLLECTION).doc(STATE_DOC_ID).set({
@@ -541,6 +746,7 @@ exports.main = async (event = {}) => {
       adminCount: adminState.openIds.length,
       adminSource: adminState.source,
       scheduleCount: state.items.length,
+      classroomCount: state.onlineClassrooms.length,
       libraryCount: state.contentLibraries.length,
       hasExitPassword: Boolean(state.controlSettings.exitPasswordHash)
     };
@@ -572,6 +778,10 @@ exports.main = async (event = {}) => {
       payload.contentLibraries = event.contentLibraries;
     }
 
+    if (Array.isArray(event.onlineClassrooms)) {
+      payload.onlineClassrooms = event.onlineClassrooms;
+    }
+
     const state = await writeState(
       payload,
       {
@@ -591,6 +801,20 @@ exports.main = async (event = {}) => {
       ...(await writeState(
         {
           contentLibraries: Array.isArray(event.contentLibraries) ? event.contentLibraries : event.libraries
+        },
+        {
+          mergeWithExisting: true
+        }
+      ))
+    };
+  }
+
+  if (action === 'saveOnlineClassrooms') {
+    return {
+      ok: true,
+      ...(await writeState(
+        {
+          onlineClassrooms: Array.isArray(event.onlineClassrooms) ? event.onlineClassrooms : event.classrooms
         },
         {
           mergeWithExisting: true
@@ -633,6 +857,72 @@ exports.main = async (event = {}) => {
       ok: true,
       hasExitPassword: Boolean(state.controlSettings.exitPasswordHash),
       exitPasswordUpdatedAt: state.controlSettings.exitPasswordUpdatedAt
+    };
+  }
+
+  if (action === 'listStudentDevices') {
+    const state = await readState();
+
+    return {
+      ok: true,
+      updatedAt: state.studentDeviceAccessUpdatedAt,
+      items: sanitizeStudentDeviceAccess(state.studentDeviceAccess)
+    };
+  }
+
+  if (action === 'approveStudentDevice') {
+    const targetDeviceId = normalizeId(event.deviceId, '');
+
+    if (!targetDeviceId) {
+      throw new Error('要批准的客户端不能为空。');
+    }
+
+    const state = await mutateStudentDeviceAccess((currentDevices) => {
+      let found = false;
+      const now = new Date().toISOString();
+      const nextDevices = currentDevices.map((item) => {
+        if (item.id !== targetDeviceId) {
+          return item;
+        }
+
+        found = true;
+        return {
+          ...item,
+          status: 'approved',
+          approvedAt: item.approvedAt || now,
+          updatedAt: now
+        };
+      });
+
+      if (!found) {
+        throw new Error('找不到这个桌面客户端。');
+      }
+
+      return nextDevices;
+    });
+
+    return {
+      ok: true,
+      updatedAt: state.studentDeviceAccessUpdatedAt,
+      items: sanitizeStudentDeviceAccess(state.studentDeviceAccess)
+    };
+  }
+
+  if (action === 'removeStudentDevice') {
+    const targetDeviceId = normalizeId(event.deviceId, '');
+
+    if (!targetDeviceId) {
+      throw new Error('要删除的客户端不能为空。');
+    }
+
+    const state = await mutateStudentDeviceAccess((currentDevices) =>
+      currentDevices.filter((item) => item.id !== targetDeviceId)
+    );
+
+    return {
+      ok: true,
+      updatedAt: state.studentDeviceAccessUpdatedAt,
+      items: sanitizeStudentDeviceAccess(state.studentDeviceAccess)
     };
   }
 

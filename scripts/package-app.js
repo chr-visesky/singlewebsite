@@ -14,6 +14,7 @@ async function packageApp() {
   const appDir = path.join(outputDir, `${productName}-win32-x64`);
   const zipPath = path.join(outputDir, `${productName}-win32-x64.zip`);
   const configSource = path.join(projectRoot, 'config.json');
+  const videosSourceDir = path.join(projectRoot, 'videos');
   const electronDistDir = path.join(projectRoot, 'node_modules', 'electron', 'dist');
   const runtimeAppDir = path.join(appDir, 'resources', 'app');
   const vendorPiperRuntimeDir = path.join(projectRoot, 'vendor', 'piper', 'runtime');
@@ -44,6 +45,9 @@ async function packageApp() {
   await fs.cp(vendorPiperRuntimeDir, path.join(runtimeVendorPiperDir, 'runtime'), { recursive: true });
   await fs.cp(vendorPiperModelsDir, path.join(runtimeVendorPiperDir, 'models'), { recursive: true });
   await fs.copyFile(configSource, path.join(runtimeAppDir, 'embedded-config.json'));
+  if (await fs.stat(videosSourceDir).then((stats) => stats.isDirectory()).catch(() => false)) {
+    await fs.cp(videosSourceDir, path.join(appDir, 'videos'), { recursive: true });
+  }
   execFileSync(tarPath, ['-a', '-c', '-f', zipPath, path.basename(appDir)], {
     cwd: outputDir,
     windowsHide: true

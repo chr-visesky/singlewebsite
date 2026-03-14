@@ -18,6 +18,7 @@
   <view wx:if="{{authorized}}" class="panel">
     <view class="panel__title">设置</view>
     <view class="action-row action-row--start">
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="openClassroomsPage">在线课堂模块</view>
       <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="openLibrariesPage">百度网盘视频模块</view>
     </view>
   </view>
@@ -52,6 +53,50 @@
       <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="saveExitPassword">保存密码</view>
       <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="reloadControlSettings">刷新</view>
       <view wx:if="{{hasExitPassword}}" class="tap-button tap-button--danger" hover-class="tap-button--active" bindtap="clearExitPassword">清空</view>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">桌面客户端授权</view>
+    <view class="panel__subtitle">{{studentDevicesUpdatedAtDisplay}}</view>
+
+    <view class="action-row">
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="reloadStudentDevices">刷新列表</view>
+    </view>
+
+    <view wx:if="{{!hasStudentDevices}}" class="empty-state">
+      <view class="empty-state__title">还没有客户端申请</view>
+      <view class="meta">桌面端打开学生计划后会自动发起申请，你在这里批准或删除即可。</view>
+    </view>
+
+    <view wx:if="{{hasStudentDevices}}" class="list-stack">
+      <view wx:for="{{studentDevices}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.label}}</view>
+            <view class="meta meta--break">{{item.id}}</view>
+            <view class="meta">{{item.status === 'approved' ? '批准时间：' + item.approvedAtDisplay : '申请时间：' + item.requestedAtDisplay}}</view>
+          </view>
+          <view class="badge">{{item.statusLabel}}</view>
+        </view>
+
+        <view class="action-row">
+          <view
+            wx:if="{{item.status === 'pending'}}"
+            class="tap-button tap-button--primary"
+            hover-class="tap-button--active"
+            data-deviceid="{{item.id}}"
+            bindtap="approveStudentDevice"
+          >批准</view>
+          <view
+            class="tap-button tap-button--danger"
+            hover-class="tap-button--active"
+            data-deviceid="{{item.id}}"
+            data-label="{{item.label}}"
+            bindtap="removeStudentDevice"
+          >删除</view>
+        </view>
+      </view>
     </view>
   </view>
 

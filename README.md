@@ -2,7 +2,7 @@
 
 这是一个基于 Electron 的 Windows 桌面程序。它不是 Edge 浏览器窗口，启动后会先进入本地首页：
 
-- `说课英语`：进入你指定的英语网课站
+- `在线课堂模块`：进入你配置过的课堂网址
 - `大语文`：读取百度网盘固定目录里的视频
 - `陆老师讲义`：读取百度网盘固定目录里的视频
 
@@ -21,11 +21,31 @@
 
 ### 网课站
 
-- `startUrl`：`说课英语` 入口会打开的页面
+- `onlineClassrooms`：在线课堂模块列表。每项至少包含 `title` 和 `entryUrl`
+- `startUrl`：旧字段，仍然兼容；没配 `onlineClassrooms` 时会自动生成一个默认课堂模块
 - `allowedTopLevelUrlPrefixes`：允许主页面跳转到的 URL 前缀
 - `allowedResourceHostnames` / `allowedResourceHostnameSuffixes`：允许网课站加载脚本、图片、接口、流媒体等资源的域名
 - `allowedResourceUrlPrefixes`：如果只想放行某些资源前缀，可以补这里
 - `resourceAccessMode`：资源放行模式。`whitelist` 表示继续按资源白名单拦截；`top-level-only` 表示顶层页面按你配置过的域名/后缀放行，脚本、图片、接口、课堂 iframe 等资源也不再逐个域名拦截
+
+示例：
+
+```json
+{
+  "onlineClassrooms": [
+    {
+      "id": "english-course",
+      "title": "说课英语",
+      "entryUrl": "https://www.talk915.com/student/login/"
+    },
+    {
+      "id": "math-live",
+      "title": "数学直播",
+      "entryUrl": "https://example.com/classroom"
+    }
+  ]
+}
+```
 
 ### 百度网盘
 
@@ -107,7 +127,7 @@
 
 - `time`：24 小时制，格式 `HH:mm`
 - `weekdays`：`1-7` 分别表示 `周一` 到 `周日`
-- `target`：`english-course` 表示 `说课英语`；也可以填 `contentLibraries` 里的库 ID；留空表示“只提醒，不跳转”，适合 `看书`、`做作业`
+- `target`：可以填 `onlineClassrooms` 里的课堂 ID，也可以填 `contentLibraries` 里的库 ID；留空表示“只提醒，不跳转”，适合 `看书`、`做作业`
 - 允许的网站登录页会自动记住并回填账号密码，凭据使用本机安全存储加密，不明文写盘
 - `title` / `message`：电脑到点语音播报和弹层里显示的内容
 - `reminders.leadMinutes`：提前提醒分钟数，默认是 `[5, 1]`
@@ -135,7 +155,6 @@
   "remoteSchedule": {
     "url": "https://你的服务器/schedule.json",
     "authToken": "可选的访问 token",
-    "studentWriteToken": "学生计划写入 token",
     "refreshMinutes": 3
   }
 }
@@ -145,7 +164,7 @@
 
 - `url`：返回课表 JSON 的接口地址
 - `authToken`：只读 token。程序读取课表时会自动带 `Authorization: Bearer <token>`
-- `studentWriteToken`：学生计划写入 token。桌面端“学生计划”保存时会单独用它发 `POST`
+- `studentWriteToken`：可选。配了就直接允许桌面端保存学生计划；不配时，桌面端会自动发起写入申请，家长在手机端批准后才能保存
 - `refreshMinutes`：轮询间隔，单位分钟
 - 接口返回可以是数组，也可以是 `{ "items": [...] }`
 - 课表项格式和 `studySchedule` 完全一样
@@ -217,7 +236,6 @@ npm run server
 - 手机管理地址
 - `remoteSchedule.url`
 - `remoteSchedule.authToken`
-- `remoteSchedule.studentWriteToken`
 
 你只需要把打印出来的 `url` 和 `authToken` 填到桌面程序的 [config.json](q:/singlewebsite/config.json) 里。
 

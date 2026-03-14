@@ -153,7 +153,6 @@ Invoke-RestMethod -Method Post -Uri 'https://你的地址/api/schedule' -Headers
   "remoteSchedule": {
     "url": "https://你的HTTP地址/api/schedule",
     "authToken": "你的READ_TOKEN",
-    "studentWriteToken": "你的STUDENT_WRITE_TOKEN",
     "refreshMinutes": 3
   }
 }
@@ -181,15 +180,16 @@ Invoke-RestMethod -Method Post -Uri 'https://你的地址/api/schedule' -Headers
 
 1. 先在浏览器或 `Invoke-RestMethod` 里测 `remoteSchedule.url`
 2. 确认 `Authorization: Bearer <READ_TOKEN>` 能返回 JSON
-3. 确认 `Authorization: Bearer <STUDENT_WRITE_TOKEN>` 发 `POST` 能保存学生计划
-3. 再看桌面程序首页右侧的同步状态
+3. 如果没配 `STUDENT_WRITE_TOKEN`，先让桌面端打开“学生计划”自动发起申请，再在小程序系统管理里批准
+4. 如果配了 `STUDENT_WRITE_TOKEN`，确认 `Authorization: Bearer <STUDENT_WRITE_TOKEN>` 发 `POST` 能保存学生计划
+5. 再看桌面程序首页右侧的同步状态
 
 ## 11. 现在这套里最重要的 4 个值
 
-你真正要保管好的就是这 4 个：
+你真正要保管好的就是这些值：
 
 1. 小程序 `appid`
 2. CloudBase `envId`
 3. `READ_TOKEN`
-4. `STUDENT_WRITE_TOKEN`
+4. `STUDENT_WRITE_TOKEN`（如果你想跳过审批，才需要）
 5. 你的 `OPENID`

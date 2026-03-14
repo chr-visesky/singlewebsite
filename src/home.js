@@ -12,7 +12,7 @@ const calendarSelectedDate = document.getElementById('calendar-selected-date');
 const calendarSelectedList = document.getElementById('calendar-selected-list');
 
 let refreshPromise = null;
-let queuedRefresh = false;
+let queuedRefreshOptions = null;
 let selectedCalendarDateKey = '';
 let currentCalendarModel = null;
 
@@ -35,14 +35,14 @@ async function launchStudyTarget(payload) {
   }
 }
 
-async function resetCourseSiteState() {
-  if (!window.confirm('这会清空说课英语的网站缓存、登录状态和本地站点数据，但保留已保存的账号密码。继续吗？')) {
+async function resetCourseSiteState(title = '在线课堂') {
+  if (!window.confirm(`这会清空 ${title} 的网站缓存、登录状态和本地站点数据，但保留已保存的账号密码。继续吗？`)) {
     return;
   }
 
   try {
     await window.studyGate.resetCourseSiteState();
-    window.alert('说课英语状态已初始化。');
+    window.alert(`${title} 状态已初始化。`);
   } catch {
     window.alert('初始化失败。');
   }
@@ -255,13 +255,13 @@ function createCard(card) {
 
   actions.append(button);
 
-  if (card.id === 'english-course') {
+  if (card.supportsStateReset) {
     const resetButton = document.createElement('button');
     resetButton.type = 'button';
     resetButton.className = 'card__ghost-button';
     resetButton.textContent = '初始化状态';
     resetButton.addEventListener('click', async () => {
-      await resetCourseSiteState();
+      await resetCourseSiteState(card.title);
     });
     actions.append(resetButton);
   }
@@ -283,14 +283,18 @@ function renderModel(model) {
   renderCalendarSchedule(model.calendarSchedule);
 }
 
-async function refreshHomeModel() {
+async function refreshHomeModel(options = {}) {
   if (refreshPromise) {
-    queuedRefresh = true;
+    queuedRefreshOptions = {
+      syncRemote: Boolean(options.syncRemote) || Boolean(queuedRefreshOptions && queuedRefreshOptions.syncRemote)
+    };
     return refreshPromise;
   }
 
   refreshPromise = (async () => {
-    const model = await window.studyGate.getHomeModel();
+    const model = await window.studyGate.getHomeModel({
+      syncRemote: Boolean(options.syncRemote)
+    });
     renderModel(model);
   })();
 
@@ -300,9 +304,10 @@ async function refreshHomeModel() {
     refreshPromise = null;
   }
 
-  if (queuedRefresh) {
-    queuedRefresh = false;
-    await refreshHomeModel();
+  if (queuedRefreshOptions) {
+    const nextOptions = queuedRefreshOptions;
+    queuedRefreshOptions = null;
+    await refreshHomeModel(nextOptions);
   }
 }
 
@@ -331,5 +336,7 @@ studentPlanButton.addEventListener('click', async () => {
 });
 
 refreshHomeButton.addEventListener('click', () => {
-  void refreshHomeModel();
+  void refreshHomeModel({
+    syncRemote: true
+  });
 });

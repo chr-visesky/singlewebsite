@@ -2,6 +2,7 @@
   "pages": [
     "pages/index/index",
     "pages/system/index",
+    "pages/classrooms/index",
     "pages/libraries/index",
     "pages/usage/index",
     "pages/plan/index"

@@ -1,6 +1,15 @@
 {
   "appTitle": "学习入口",
   "startUrl": "https://www.talk915.com/student/login/",
+  "onlineClassrooms": [
+    {
+      "id": "english-course",
+      "title": "说课英语",
+      "description": "进入英语在线课堂。",
+      "tone": "amber",
+      "entryUrl": "https://www.talk915.com/student/login/"
+    }
+  ],
   "allowedTopLevelUrlPrefixes": [
     "https://www.talk915.com/",
     "https://www.chindle.com/web/",
@@ -35,7 +44,6 @@
   "remoteSchedule": {
     "url": "https://your-cloudbase-domain/api/schedule",
     "authToken": "replace-with-your-read-token",
-    "studentWriteToken": "replace-with-your-student-write-token",
     "refreshMinutes": 3
   },
   "contentLibraries": [

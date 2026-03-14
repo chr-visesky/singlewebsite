@@ -2,6 +2,9 @@
 
 const backHomeButton = document.getElementById('back-home');
 const refreshPlanButton = document.getElementById('refresh-plan');
+const accessStatusNode = document.getElementById('access-status');
+const accessStatusTitleNode = document.getElementById('access-status-title');
+const accessStatusMessageNode = document.getElementById('access-status-message');
 const prevMonthButton = document.getElementById('prev-month');
 const nextMonthButton = document.getElementById('next-month');
 const monthLabelNode = document.getElementById('month-label');
@@ -37,6 +40,11 @@ let formState = createEmptyFormState();
 let autoRefreshTimer = null;
 let refreshRequestSerial = 0;
 let viewMutationSerial = 0;
+let accessStatus = {
+  mode: 'local',
+  approved: true,
+  message: '当前使用本机学生计划。'
+};
 
 function createEmptyFormState() {
   return {
@@ -159,6 +167,7 @@ function renderSelectedDateItems(items) {
       action.type = 'button';
       action.className = `action-chip ${item.kindLabel === '单次' ? 'action-chip--delete' : 'action-chip--skip'}`;
       action.textContent = item.actionLabel;
+      action.disabled = !canMutateStudentPlans();
       action.addEventListener('click', async () => {
         await applySelectedItemAction(item);
       });
@@ -207,6 +216,7 @@ function renderWeeklyItems(items) {
     action.type = 'button';
     action.className = 'action-chip action-chip--delete';
     action.textContent = '删除';
+    action.disabled = !canMutateStudentPlans();
     action.addEventListener('click', async () => {
       const nextItems = studentItems.filter((entry) => entry.id !== item.id);
       await saveStudentItems(nextItems);
@@ -215,6 +225,43 @@ function renderWeeklyItems(items) {
     article.append(main, action);
     weeklyListNode.append(article);
   });
+}
+
+function canMutateStudentPlans() {
+  return Boolean(accessStatus && (accessStatus.approved || accessStatus.mode === 'local' || accessStatus.mode === 'token'));
+}
+
+function renderAccessStatus(nextStatus) {
+  accessStatus = nextStatus && typeof nextStatus === 'object'
+    ? nextStatus
+    : {
+        mode: 'local',
+        approved: true,
+        message: '当前使用本机学生计划。'
+      };
+
+  let title = '本机模式';
+  let message = accessStatus.message || '当前使用本机学生计划。';
+  let toneClass = 'status-banner--muted';
+
+  if (accessStatus.mode === 'token' || accessStatus.approved) {
+    title = '已授权';
+    toneClass = 'status-banner--ok';
+    message = accessStatus.message || '当前客户端已获准修改学生计划。';
+  } else if (accessStatus.mode === 'approval') {
+    title = '等待批准';
+    toneClass = 'status-banner--warn';
+    message = accessStatus.message || '已自动提交学生计划写入申请，等待家长在手机端批准。';
+  } else if (accessStatus.mode === 'error') {
+    title = '授权异常';
+    toneClass = 'status-banner--danger';
+    message = accessStatus.message || '学生计划授权状态同步失败。';
+  }
+
+  accessStatusNode.className = `status-banner ${toneClass}`;
+  accessStatusTitleNode.textContent = title;
+  accessStatusMessageNode.textContent = message;
+  savePlanButton.disabled = !canMutateStudentPlans();
 }
 
 function renderCalendar(model) {
@@ -274,6 +321,7 @@ function renderCalendar(model) {
 
 function renderModel(response) {
   const model = response.model || {};
+  renderAccessStatus(response.accessStatus || null);
   studentItems = Array.isArray(response.studentItems) ? response.studentItems : [];
   currentMonthKey = model.currentMonthKey || currentMonthKey;
   selectedDateKey = model.selectedDateKey || selectedDateKey;
@@ -336,21 +384,37 @@ function startAutoRefresh() {
 
 async function saveStudentItems(items) {
   const mutationSerial = ++viewMutationSerial;
-  const response = await window.studyGate.saveStudentPlanItems({
-    items,
-    monthKey: currentMonthKey,
-    selectedDate: selectedDateKey
-  });
 
-  if (mutationSerial !== viewMutationSerial) {
-    return;
+  try {
+    const response = await window.studyGate.saveStudentPlanItems({
+      items,
+      monthKey: currentMonthKey,
+      selectedDate: selectedDateKey
+    });
+
+    if (mutationSerial !== viewMutationSerial) {
+      return false;
+    }
+
+    renderModel(response);
+    return true;
+  } catch (error) {
+    if (mutationSerial === viewMutationSerial) {
+      window.alert((error && error.message) || '学生计划保存失败。');
+      await refreshModel();
+    }
+
+    return false;
   }
-
-  renderModel(response);
 }
 
 async function applySelectedItemAction(item) {
   if (!item || !item.id) {
+    return;
+  }
+
+  if (!canMutateStudentPlans()) {
+    window.alert(accessStatus.message || '已自动提交学生计划写入申请，等待家长批准。');
     return;
   }
 
@@ -384,6 +448,11 @@ async function applySelectedItemAction(item) {
 }
 
 async function saveForm() {
+  if (!canMutateStudentPlans()) {
+    window.alert(accessStatus.message || '已自动提交学生计划写入申请，等待家长批准。');
+    return;
+  }
+
   const title = titleInput.value.trim();
   const time = timeInput.value || '19:00';
   const message = messageInput.value.trim();
@@ -429,8 +498,11 @@ async function saveForm() {
     });
   }
 
-  await saveStudentItems([...studentItems, ...additions]);
-  resetForm();
+  const saved = await saveStudentItems([...studentItems, ...additions]);
+
+  if (saved) {
+    resetForm();
+  }
 }
 
 backHomeButton.addEventListener('click', async () => {

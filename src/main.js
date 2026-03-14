@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, session } = require('electron');
+const { Notification, app, BrowserWindow, dialog, ipcMain, safeStorage, screen, session, shell: electronShell } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -8,7 +8,7 @@ const http = require('http');
 const os = require('os');
 const path = require('path');
 const { Readable } = require('stream');
-const { fileURLToPath, pathToFileURL } = require('url');
+const { fileURLToPath } = require('url');
 
 const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
@@ -35,7 +35,8 @@ const STABLE_USER_DATA_DIR = path.join(app.getPath('appData'), 'StudyGate');
 const VALID_CARD_TONES = new Set(['amber', 'teal', 'coral']);
 const AUTH_ERRNOS = new Set([111]);
 const RESOURCE_ACCESS_MODES = new Set(['whitelist', 'top-level-only']);
-const REMINDER_POLL_INTERVAL_MS = 30 * 1000;
+const REMINDER_TRIGGER_GRACE_MS = 2 * 60 * 1000;
+const REMINDER_CHECK_ALIGNMENT_FUZZ_MS = 150;
 const DEFAULT_REMINDER_LEAD_MINUTES = [5, 1];
 const NETDISK_DEVICE_SCOPE = 'basic,netdisk';
 const NETDISK_DEVICE_MIN_POLL_MS = 5000;
@@ -46,6 +47,20 @@ const PIPER_MODEL_CONFIG_RELATIVE_PATH = `${PIPER_MODEL_RELATIVE_PATH}.json`;
 const REMINDER_AUDIO_CACHE_DIR = 'reminder-audio-cache';
 const REMINDER_SEGMENT_PAUSE_MS = 210;
 const REMINDER_REPEAT_PAUSE_MS = 450;
+const REMINDER_SEQUENCE_REPEAT_COUNT = 3;
+const REMINDER_AUDIO_TEMPLATE_VERSION = 'template-v3';
+const REMINDER_FIXED_TEXT_COMPONENTS = Object.freeze({
+  distance: '距离',
+  remain: '还剩',
+  five_minutes: '5分钟',
+  one_minutes: '1分钟',
+  now: '现在开始'
+});
+const REMINDER_SILENCE_COMPONENTS_MS = Object.freeze({
+  s120: 120,
+  s180: 180,
+  s220: 220
+});
 const REMOTE_SCHEDULE_DEFAULT_REFRESH_MINUTES = 3;
 const MAIN_WINDOW_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 const DEFAULT_UI_ZOOM_FACTOR = 1;
@@ -254,6 +269,8 @@ let mainWindow = null;
 let authWindow = null;
 let exitPasswordWindow = null;
 let appConfig = null;
+let classroomDefinitions = [];
+let classroomIndex = new Map();
 let libraryDefinitions = [];
 let libraryIndex = new Map();
 let sessionPersistTimer = null;
@@ -270,8 +287,15 @@ let reminderPollTimer = null;
 let reminderFlashTimer = null;
 let reminderCheckInFlight = false;
 let reminderAudioBuilds = new Map();
+let reminderAudioPrewarmTimer = null;
+let reminderAudioPrewarmInFlight = false;
+let reminderAudioPrewarmQueued = false;
+let reminderAudioProcess = null;
+let reminderPopupWindow = null;
+let reminderPopupTimer = null;
 let remoteSchedulePollTimer = null;
 let remoteScheduleStatus = createEmptyRemoteScheduleStatus();
+let studentDeviceAccessStatus = createEmptyStudentDeviceAccessStatus();
 let remoteScheduleSyncSerial = 0;
 let studyDataMutationSerial = 0;
 let allowAppQuit = false;
@@ -285,7 +309,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
-  app.quit();
+  app.exit(0);
 }
 
 function createEmptyNetdiskState() {
@@ -302,7 +326,12 @@ function createEmptyStudyToolsState() {
   return {
     classMarks: {},
     mobileToken: crypto.randomBytes(12).toString('hex'),
-    uiZoomFactor: DEFAULT_UI_ZOOM_FACTOR
+    uiZoomFactor: DEFAULT_UI_ZOOM_FACTOR,
+    studentDeviceCredential: {
+      deviceId: `desktop-${crypto.randomBytes(8).toString('hex')}`,
+      deviceSecret: crypto.randomBytes(16).toString('hex'),
+      label: ''
+    }
   };
 }
 
@@ -323,6 +352,20 @@ function createEmptyRemoteScheduleStatus() {
     lastAttemptAt: '',
     lastSuccessAt: '',
     message: '当前使用本机课表。'
+  };
+}
+
+function createEmptyStudentDeviceAccessStatus() {
+  return {
+    mode: 'local',
+    approved: true,
+    status: 'approved',
+    deviceId: '',
+    label: '',
+    requestedAt: '',
+    approvedAt: '',
+    updatedAt: '',
+    message: '当前使用本机学生计划。'
   };
 }
 
@@ -516,6 +559,17 @@ function normalizeScheduleTargetId(value) {
   return normalized;
 }
 
+function normalizeEntryUrl(value) {
+  const normalized = normalizePrefix(value);
+  const parsed = parseUrl(normalized);
+
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return '';
+  }
+
+  return parsed.href;
+}
+
 function normalizeWeekdays(rawValue) {
   const source = Array.isArray(rawValue) ? rawValue : [rawValue];
   const days = new Set();
@@ -589,12 +643,14 @@ function normalizeScopedScheduleId(value, fallback, planScope = 'parent') {
   return `${scopePrefix}${normalizedId}`;
 }
 
-function normalizeStudySchedule(rawSchedule, libraries, options = {}) {
+function normalizeStudySchedule(rawSchedule, classrooms, libraries, options = {}) {
   if (!Array.isArray(rawSchedule) || !rawSchedule.length) {
     return [];
   }
 
   const planScope = normalizePlanScope(options.planScope, 'parent');
+  const classroomIds = new Set(classrooms.map((classroom) => classroom.id));
+  const defaultClassroomId = classrooms[0] ? classrooms[0].id : '';
   const libraryIds = new Set(libraries.map((library) => library.id));
   const seenIds = new Set();
   const schedule = [];
@@ -608,11 +664,14 @@ function normalizeStudySchedule(rawSchedule, libraries, options = {}) {
     }
 
     const candidateTargetId = normalizeScheduleTargetId(item.target || item.targetId);
-    const targetId =
-      candidateTargetId === 'english-course' || libraryIds.has(candidateTargetId) ? candidateTargetId : '';
+    const targetId = candidateTargetId === 'english-course'
+      ? defaultClassroomId
+      : classroomIds.has(candidateTargetId) || libraryIds.has(candidateTargetId)
+        ? candidateTargetId
+        : '';
     const title =
       normalizePrefix(item.title) ||
-      (targetId === 'english-course' ? '说课英语' : targetId ? resolveLibraryTitle(libraries, targetId) : '');
+      (targetId ? resolveStudyTargetTitle(classrooms, libraries, targetId) : '');
 
     if (!title) {
       continue;
@@ -835,9 +894,81 @@ function defaultLibraries() {
   ];
 }
 
+function defaultOnlineClassrooms(startUrl = '') {
+  const entryUrl = normalizeEntryUrl(startUrl);
+
+  if (!entryUrl) {
+    return [];
+  }
+
+  return [
+    {
+      id: 'english-course',
+      title: '说课英语',
+      description: '进入你指定的在线课堂网站。',
+      tone: 'amber',
+      entryUrl
+    }
+  ];
+}
+
+function normalizeOnlineClassrooms(rawClassrooms, options = {}) {
+  const reservedIds = options.reservedIds instanceof Set ? options.reservedIds : new Set();
+  const fallbackClassrooms =
+    options.fallbackToDefault === false ? [] : defaultOnlineClassrooms(options.defaultStartUrl);
+  const source = Array.isArray(rawClassrooms) && rawClassrooms.length ? rawClassrooms : fallbackClassrooms;
+  const classrooms = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < source.length; index += 1) {
+    const item = source[index] || {};
+    const entryUrl = normalizeEntryUrl(item.entryUrl || item.url || item.startUrl);
+
+    if (!entryUrl) {
+      continue;
+    }
+
+    let id = normalizeLibraryId(item.id, index === 0 ? 'english-course' : `classroom-${index + 1}`);
+
+    while (seenIds.has(id) || reservedIds.has(id)) {
+      id = normalizeLibraryId(`${id}-classroom`, `classroom-${index + 1}`);
+    }
+
+    seenIds.add(id);
+    classrooms.push({
+      id,
+      title: normalizePrefix(item.title) || `在线课堂 ${index + 1}`,
+      description: normalizePrefix(item.description) || '进入固定在线课堂网址。',
+      tone: normalizeCardTone(item.tone, index === 0 ? 'amber' : 'teal'),
+      entryUrl
+    });
+  }
+
+  return classrooms;
+}
+
+function serializeOnlineClassrooms(classrooms = classroomDefinitions) {
+  return (Array.isArray(classrooms) ? classrooms : []).map((classroom) => ({
+    id: classroom.id,
+    title: classroom.title,
+    description: classroom.description,
+    tone: classroom.tone,
+    entryUrl: classroom.entryUrl
+  }));
+}
+
+function resolveClassroomTitle(classrooms, classroomId) {
+  const classroom = classrooms.find((item) => item.id === classroomId);
+  return classroom ? classroom.title : '';
+}
+
 function resolveLibraryTitle(libraries, libraryId) {
   const library = libraries.find((item) => item.id === libraryId);
   return library ? library.title : '学习内容';
+}
+
+function resolveStudyTargetTitle(classrooms, libraries, targetId) {
+  return resolveClassroomTitle(classrooms, targetId) || resolveLibraryTitle(libraries, targetId);
 }
 
 function normalizeLibraries(rawLibraries, options = {}) {
@@ -883,12 +1014,23 @@ function serializeLibraries(libraries = libraryDefinitions) {
   }));
 }
 
-function normalizeStudyData(rawState, fallbackLibraries = []) {
+function normalizeStudyData(rawState, fallbackClassrooms = [], fallbackLibraries = []) {
+  const fallbackClassroomList =
+    Array.isArray(fallbackClassrooms) && fallbackClassrooms.length
+      ? fallbackClassrooms
+      : defaultOnlineClassrooms(appConfig && appConfig.startUrl);
   const fallbackLibraryList = Array.isArray(fallbackLibraries) && fallbackLibraries.length ? fallbackLibraries : defaultLibraries();
   const source = rawState && typeof rawState === 'object' ? rawState : {};
   const hasExplicitControlSettings = Object.prototype.hasOwnProperty.call(source, 'controlSettings');
+  const hasExplicitClassrooms =
+    Array.isArray(source.onlineClassrooms) || Array.isArray(source.classrooms);
   const hasExplicitLibraries =
     Array.isArray(source.contentLibraries) || Array.isArray(source.libraries);
+  const rawClassrooms = Array.isArray(source.onlineClassrooms)
+    ? source.onlineClassrooms
+    : Array.isArray(source.classrooms)
+      ? source.classrooms
+      : fallbackClassroomList;
   const rawLibraries = Array.isArray(source.contentLibraries)
     ? source.contentLibraries
     : Array.isArray(source.libraries)
@@ -896,6 +1038,11 @@ function normalizeStudyData(rawState, fallbackLibraries = []) {
       : fallbackLibraryList;
   const libraries = normalizeLibraries(rawLibraries, {
     fallbackToDefault: !hasExplicitLibraries
+  });
+  const classrooms = normalizeOnlineClassrooms(rawClassrooms, {
+    defaultStartUrl: fallbackClassroomList[0] ? fallbackClassroomList[0].entryUrl : '',
+    fallbackToDefault: !hasExplicitClassrooms,
+    reservedIds: new Set(libraries.map((library) => library.id))
   });
   const rawParentItems = Array.isArray(rawState)
     ? rawState
@@ -905,16 +1052,17 @@ function normalizeStudyData(rawState, fallbackLibraries = []) {
         ? source.items
         : [];
   const rawStudentItems = Array.isArray(source.studentItems) ? source.studentItems : [];
-  const parentItems = normalizeStudySchedule(rawParentItems, libraries, {
+  const parentItems = normalizeStudySchedule(rawParentItems, classrooms, libraries, {
     planScope: 'parent'
   });
-  const studentItems = normalizeStudySchedule(rawStudentItems, libraries, {
+  const studentItems = normalizeStudySchedule(rawStudentItems, classrooms, libraries, {
     planScope: 'student'
   });
 
   return {
     parentItems,
     studentItems,
+    onlineClassrooms: classrooms,
     contentLibraries: libraries,
     controlSettings: hasExplicitControlSettings
       ? normalizeControlSettings(source.controlSettings)
@@ -944,15 +1092,27 @@ function loadConfig() {
     throw createConfigError(`无法解析 ${configPath}：${error.message}`);
   }
 
-  const startUrl = normalizePrefix(rawConfig.startUrl);
-  const startUrlObject = parseUrl(startUrl);
+  const configuredStartUrl = normalizePrefix(rawConfig.startUrl);
+  const configuredStartUrlObject = configuredStartUrl ? parseUrl(configuredStartUrl) : null;
 
-  if (!startUrlObject || !['http:', 'https:'].includes(startUrlObject.protocol)) {
+  if (configuredStartUrl && (!configuredStartUrlObject || !['http:', 'https:'].includes(configuredStartUrlObject.protocol))) {
     throw createConfigError('config.json 中的 startUrl 必须是有效的 http/https 地址。');
   }
 
+  const libraries = normalizeLibraries(rawConfig.contentLibraries);
+  const classrooms = normalizeOnlineClassrooms(rawConfig.onlineClassrooms || rawConfig.classrooms, {
+    defaultStartUrl: configuredStartUrl,
+    reservedIds: new Set(libraries.map((library) => library.id))
+  });
+
+  if (!classrooms.length) {
+    throw createConfigError('至少需要一个在线课堂入口。可以配置 onlineClassrooms，或者保留有效的 startUrl。');
+  }
+
+  const startUrl = classrooms[0].entryUrl;
+  const classroomEntryUrls = classrooms.map((classroom) => classroom.entryUrl);
   const topLevelPrefixes = dedupe(
-    (Array.isArray(rawConfig.allowedTopLevelUrlPrefixes) ? rawConfig.allowedTopLevelUrlPrefixes : [startUrl])
+    [...(Array.isArray(rawConfig.allowedTopLevelUrlPrefixes) ? rawConfig.allowedTopLevelUrlPrefixes : classroomEntryUrls), ...classroomEntryUrls]
       .map(normalizePrefix)
       .filter(Boolean)
   );
@@ -961,16 +1121,11 @@ function loadConfig() {
     throw createConfigError('至少需要一个 allowedTopLevelUrlPrefixes 项。');
   }
 
-  if (!topLevelPrefixes.some((prefix) => startUrl.startsWith(prefix))) {
-    throw createConfigError(
-      `startUrl (${startUrl}) 必须包含在 allowedTopLevelUrlPrefixes 中，否则启动时会被自己拦截。`
-    );
-  }
-
   const allowedHostnames = dedupe(
-    (Array.isArray(rawConfig.allowedResourceHostnames)
-      ? rawConfig.allowedResourceHostnames
-      : [startUrlObject.hostname])
+    [...(Array.isArray(rawConfig.allowedResourceHostnames) ? rawConfig.allowedResourceHostnames : []), ...classroomEntryUrls.map((entryUrl) => {
+      const parsed = parseUrl(entryUrl);
+      return parsed ? parsed.hostname : '';
+    })]
       .map(normalizeHostname)
       .filter(Boolean)
   );
@@ -994,8 +1149,7 @@ function loadConfig() {
       .map(normalizePrefix)
       .filter(Boolean)
   );
-  const libraries = normalizeLibraries(rawConfig.contentLibraries);
-  const parentStudySchedule = normalizeStudySchedule(rawConfig.studySchedule, libraries, {
+  const parentStudySchedule = normalizeStudySchedule(rawConfig.studySchedule, classrooms, libraries, {
     planScope: 'parent'
   });
   const stateDir = path.basename(configPath).toLowerCase() === EMBEDDED_CONFIG_FILE ? STABLE_USER_DATA_DIR : path.dirname(configPath);
@@ -1011,6 +1165,8 @@ function loadConfig() {
     stateDir,
     appTitle: normalizePrefix(rawConfig.appTitle) || '学习入口',
     startUrl,
+    baseClassrooms: serializeOnlineClassrooms(classrooms),
+    classrooms,
     topLevelPrefixes,
     allowedHostnames: new Set(allowedHostnames),
     allowedHostnameSuffixes,
@@ -1042,8 +1198,22 @@ function loadConfig() {
 }
 
 function rebuildLibraryIndex() {
+  classroomDefinitions = appConfig.classrooms;
+  classroomIndex = new Map(classroomDefinitions.map((classroom) => [classroom.id, classroom]));
   libraryDefinitions = appConfig.libraries;
   libraryIndex = new Map(libraryDefinitions.map((library) => [library.id, library]));
+}
+
+function resolveClassroom(classroomId) {
+  if (classroomId && classroomIndex.has(classroomId)) {
+    return classroomIndex.get(classroomId);
+  }
+
+  if (classroomId) {
+    return null;
+  }
+
+  return classroomDefinitions[0] || null;
 }
 
 function resolveLibrary(libraryId) {
@@ -1051,11 +1221,19 @@ function resolveLibrary(libraryId) {
     return libraryIndex.get(libraryId);
   }
 
+  if (libraryId) {
+    return null;
+  }
+
   return libraryDefinitions[0] || null;
 }
 
 function matchesPrefix(url, prefixes) {
   return prefixes.some((prefix) => url.startsWith(prefix));
+}
+
+function matchesClassroomEntryUrl(url) {
+  return classroomDefinitions.some((classroom) => url.startsWith(classroom.entryUrl));
 }
 
 function matchesAllowedHostname(url) {
@@ -1068,6 +1246,15 @@ function matchesAllowedHostname(url) {
   const hostname = parsed.hostname.toLowerCase();
 
   if (appConfig.allowedHostnames.has(hostname)) {
+    return true;
+  }
+
+  if (
+    classroomDefinitions.some((classroom) => {
+      const classroomUrl = parseUrl(classroom.entryUrl);
+      return classroomUrl && classroomUrl.hostname.toLowerCase() === hostname;
+    })
+  ) {
     return true;
   }
 
@@ -1091,10 +1278,16 @@ function topLevelDecision(url) {
     };
   }
 
-  if (matchesPrefix(url, appConfig.topLevelPrefixes)) {
+  const classroom = resolveClassroomForUrl(url);
+
+  if (matchesPrefix(url, appConfig.topLevelPrefixes) || matchesClassroomEntryUrl(url) || classroom) {
     return {
       allowed: true,
-      reason: 'matched_prefix'
+      reason: classroom
+        ? 'matched_classroom_runtime'
+        : matchesClassroomEntryUrl(url)
+          ? 'matched_classroom_entry'
+          : 'matched_prefix'
     };
   }
 
@@ -1118,6 +1311,10 @@ function sessionStatePath() {
 
 function navigationDebugLogPath() {
   return path.join(appConfig.stateDir, 'navigation-debug.log');
+}
+
+function reminderDebugLogPath() {
+  return path.join(appConfig.stateDir, 'reminder-debug.log');
 }
 
 function siteCredentialStatePath() {
@@ -1339,6 +1536,20 @@ function logNavigationDebug(eventName, payload = {}) {
   }
 }
 
+function logReminderDebug(eventName, payload = {}) {
+  const logLine = JSON.stringify({
+    at: new Date().toISOString(),
+    event: eventName,
+    ...payload
+  });
+
+  try {
+    fs.appendFileSync(reminderDebugLogPath(), `${logLine}${os.EOL}`, 'utf8');
+  } catch {
+    // Ignore logging failures.
+  }
+}
+
 function isAllowedTopLevelDestination(url) {
   const parsed = parseUrl(url);
 
@@ -1549,6 +1760,33 @@ function goForwardIfPossible() {
   }
 }
 
+function resolveClassroomForUrl(url) {
+  const normalizedUrl = normalizePrefix(url);
+
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  const exactPrefixMatch = classroomDefinitions.find((classroom) => normalizedUrl.startsWith(classroom.entryUrl));
+
+  if (exactPrefixMatch) {
+    return exactPrefixMatch;
+  }
+
+  const parsed = parseUrl(normalizedUrl);
+
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return null;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  return classroomDefinitions.find((classroom) => {
+    const classroomUrl = parseUrl(classroom.entryUrl);
+    return classroomUrl && classroomUrl.hostname.toLowerCase() === hostname;
+  }) || null;
+}
+
 function currentNavigationModel() {
   const url = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : '';
   const parsed = parseUrl(url);
@@ -1591,23 +1829,17 @@ function currentNavigationModel() {
     return model;
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-  const isCoursePage = hostname.endsWith('talk915.com');
-  const isClassroomPage =
-    hostname.endsWith('chindle.com') ||
-    hostname.endsWith('keyclass.cn') ||
-    hostname.endsWith('xuedianyun.com');
+  const classroom = resolveClassroomForUrl(url);
 
   model.crumbs.push({ label: '首页', target: 'internal:home', current: false });
 
-  if (isCoursePage) {
-    model.crumbs.push({ label: '说课英语', target: appConfig.startUrl, current: true });
+  if (classroom) {
+    model.crumbs.push({ label: classroom.title, target: classroom.entryUrl, current: true });
     return model;
   }
 
-  model.crumbs.push({ label: '说课英语', target: appConfig.startUrl, current: false });
   model.crumbs.push({
-    label: isClassroomPage ? '在线课堂' : '当前页面',
+    label: '当前页面',
     target: url,
     current: true
   });
@@ -1911,6 +2143,16 @@ function courseEcosystemOrigins() {
     }
   }
 
+  for (const classroom of classroomDefinitions) {
+    if (isCourseEcosystemOrigin(classroom.entryUrl)) {
+      const origin = storageOriginKey(classroom.entryUrl);
+
+      if (origin) {
+        origins.add(origin);
+      }
+    }
+  }
+
   for (const origin of Object.keys(originStorageState.origins || {})) {
     if (isCourseEcosystemOrigin(origin)) {
       origins.add(origin);
@@ -2074,12 +2316,14 @@ function serializeStudySchedule(schedule = appConfig.studySchedule) {
 function serializeStudyData(state = {}) {
   const parentItems = Array.isArray(state.parentItems) ? state.parentItems : appConfig.parentStudySchedule;
   const studentItems = Array.isArray(state.studentItems) ? state.studentItems : appConfig.studentStudySchedule;
+  const onlineClassrooms = Array.isArray(state.onlineClassrooms) ? state.onlineClassrooms : appConfig.classrooms;
   const contentLibraries = Array.isArray(state.contentLibraries) ? state.contentLibraries : appConfig.libraries;
   const controlSettings = normalizeControlSettings(state.controlSettings || appConfig.controlSettings);
 
   return {
     parentItems: serializeStudySchedule(parentItems),
     studentItems: serializeStudySchedule(studentItems),
+    onlineClassrooms: serializeOnlineClassrooms(onlineClassrooms),
     contentLibraries: serializeLibraries(contentLibraries),
     controlSettings,
     items: serializeStudySchedule(mergeStudySchedules(parentItems, studentItems))
@@ -2090,6 +2334,7 @@ function currentStudyData() {
   return {
     parentItems: appConfig.parentStudySchedule || [],
     studentItems: appConfig.studentStudySchedule || [],
+    onlineClassrooms: appConfig.classrooms || [],
     contentLibraries: appConfig.libraries || [],
     controlSettings: normalizeControlSettings(appConfig.controlSettings)
   };
@@ -2101,7 +2346,13 @@ function bumpStudyDataMutation() {
 }
 
 function applyStudyData(state, source = 'local') {
-  const normalized = normalizeStudyData(state, appConfig.baseLibraries || appConfig.libraries);
+  const normalized = normalizeStudyData(
+    state,
+    appConfig.baseClassrooms || appConfig.classrooms,
+    appConfig.baseLibraries || appConfig.libraries
+  );
+  appConfig.classrooms = normalized.onlineClassrooms;
+  appConfig.startUrl = normalized.onlineClassrooms[0] ? normalized.onlineClassrooms[0].entryUrl : appConfig.startUrl;
   appConfig.libraries = normalized.contentLibraries;
   rebuildLibraryIndex();
   appConfig.parentStudySchedule = normalized.parentItems;
@@ -2112,6 +2363,8 @@ function applyStudyData(state, source = 'local') {
   if (source === 'remote') {
     remoteScheduleStatus.source = 'remote';
   }
+
+  scheduleReminderAudioPrewarm();
 }
 
 function loadPersistedStudySchedule() {
@@ -2139,14 +2392,79 @@ function saveStructuredStudyData(state, source = 'local') {
   return currentStudyData();
 }
 
+async function syncStudentDeviceAccessStatus(options = {}) {
+  if (!appConfig.remoteSchedule.enabled) {
+    studentDeviceAccessStatus = createEmptyStudentDeviceAccessStatus();
+    return studentDeviceAccessStatus;
+  }
+
+  const statusToken = appConfig.remoteSchedule.studentWriteToken || appConfig.remoteSchedule.authToken;
+
+  if (!statusToken) {
+    studentDeviceAccessStatus = normalizeStudentDeviceAccessStatus({
+      mode: 'error',
+      approved: false,
+      message: '云端学生计划未配置可用的访问令牌。'
+    });
+
+    if (options.throwOnError) {
+      throw new Error(studentDeviceAccessStatus.message);
+    }
+
+    return studentDeviceAccessStatus;
+  }
+
+  try {
+    const payload = await fetchJson(appConfig.remoteSchedule.url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${statusToken}`
+      },
+      body: JSON.stringify({
+        action: 'getStudentDeviceAccessStatus',
+        ...studentDeviceCredentialPayload()
+      })
+    });
+
+    if (!payload || payload.error) {
+      const errorCode = normalizePrefix(payload && payload.error);
+      throw new Error(
+        errorCode === 'missing_device_credential'
+          ? '当前客户端缺少身份凭据，请稍后重试。'
+          : errorCode
+            ? `学生计划授权状态同步失败：${errorCode}`
+            : '学生计划授权状态同步失败。'
+      );
+    }
+
+    studentDeviceAccessStatus = normalizeStudentDeviceAccessStatus(payload);
+    return studentDeviceAccessStatus;
+  } catch (error) {
+    studentDeviceAccessStatus = normalizeStudentDeviceAccessStatus({
+      mode: 'error',
+      approved: false,
+      message: error && error.message ? error.message : '学生计划授权状态同步失败。'
+    });
+
+    if (options.throwOnError) {
+      throw new Error(studentDeviceAccessStatus.message);
+    }
+
+    return studentDeviceAccessStatus;
+  }
+}
+
 function saveStudySchedule(rawSchedule) {
-  const normalizedParentItems = normalizeStudySchedule(rawSchedule, libraryDefinitions, {
+  const normalizedParentItems = normalizeStudySchedule(rawSchedule, classroomDefinitions, libraryDefinitions, {
     planScope: 'parent'
   });
   const savedState = saveStructuredStudyData(
     {
       parentItems: normalizedParentItems,
       studentItems: appConfig.studentStudySchedule,
+      onlineClassrooms: appConfig.classrooms,
       contentLibraries: appConfig.libraries
     },
     'local'
@@ -2168,7 +2486,11 @@ function loadRemoteScheduleCache() {
 
   try {
     const rawState = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    const normalizedState = normalizeStudyData(rawState, appConfig.baseLibraries || libraryDefinitions);
+    const normalizedState = normalizeStudyData(
+      rawState,
+      appConfig.baseClassrooms || classroomDefinitions,
+      appConfig.baseLibraries || libraryDefinitions
+    );
     applyStudyData(normalizedState, 'remote');
     remoteScheduleStatus = {
       ...remoteScheduleStatus,
@@ -2188,6 +2510,7 @@ function saveRemoteScheduleCache(schedule) {
       : serializeStudyData({
           parentItems: appConfig.parentStudySchedule,
           studentItems: Array.isArray(schedule) ? schedule : appConfig.studentStudySchedule,
+          onlineClassrooms: appConfig.classrooms,
           contentLibraries: appConfig.libraries
         });
 
@@ -2216,11 +2539,114 @@ function loadStudyToolsState() {
     studyToolsState = {
       classMarks: rawState.classMarks && typeof rawState.classMarks === 'object' ? rawState.classMarks : {},
       mobileToken: normalizePrefix(rawState.mobileToken) || crypto.randomBytes(12).toString('hex'),
-      uiZoomFactor: normalizeUiZoomFactor(rawState.uiZoomFactor)
+      uiZoomFactor: normalizeUiZoomFactor(rawState.uiZoomFactor),
+      studentDeviceCredential: {
+        deviceId: normalizeLibraryId(
+          rawState &&
+            rawState.studentDeviceCredential &&
+            rawState.studentDeviceCredential.deviceId,
+          `desktop-${crypto.randomBytes(8).toString('hex')}`
+        ),
+        deviceSecret:
+          normalizePrefix(
+            rawState &&
+              rawState.studentDeviceCredential &&
+              rawState.studentDeviceCredential.deviceSecret
+          ) || crypto.randomBytes(16).toString('hex'),
+        label: normalizePrefix(
+          rawState &&
+            rawState.studentDeviceCredential &&
+            rawState.studentDeviceCredential.label
+        )
+      }
     };
   } catch {
     studyToolsState = createEmptyStudyToolsState();
   }
+}
+
+function preferredStudentDeviceLabel() {
+  const username = (() => {
+    try {
+      return normalizePrefix(os.userInfo().username);
+    } catch {
+      return '';
+    }
+  })();
+  const host = normalizePrefix(os.hostname());
+  return [host, username].filter(Boolean).join(' / ') || '当前桌面客户端';
+}
+
+function ensureStudentDeviceCredential() {
+  if (!studyToolsState.studentDeviceCredential || typeof studyToolsState.studentDeviceCredential !== 'object') {
+    studyToolsState.studentDeviceCredential = createEmptyStudyToolsState().studentDeviceCredential;
+  }
+
+  const credential = studyToolsState.studentDeviceCredential;
+  credential.deviceId = normalizeLibraryId(credential.deviceId, `desktop-${crypto.randomBytes(8).toString('hex')}`);
+  credential.deviceSecret = normalizePrefix(credential.deviceSecret) || crypto.randomBytes(16).toString('hex');
+  credential.label = preferredStudentDeviceLabel();
+  return credential;
+}
+
+function normalizeStudentDeviceAccessMode(value) {
+  const normalized = normalizePrefix(value).toLowerCase();
+  return ['local', 'approval', 'token', 'error'].includes(normalized) ? normalized : 'approval';
+}
+
+function normalizeStudentDeviceAccessStatus(rawStatus = {}) {
+  const source = rawStatus && typeof rawStatus === 'object' ? rawStatus : {};
+  const mode = normalizeStudentDeviceAccessMode(source.mode);
+  const approved = Boolean(source.approved) || mode === 'local' || mode === 'token';
+  return {
+    mode,
+    approved,
+    status: approved ? 'approved' : 'pending',
+    deviceId: normalizePrefix(source.deviceId),
+    label: normalizePrefix(source.label),
+    requestedAt: normalizePrefix(source.requestedAt),
+    approvedAt: normalizePrefix(source.approvedAt),
+    updatedAt: normalizePrefix(source.updatedAt),
+    message:
+      normalizePrefix(source.message) ||
+      (approved
+        ? '当前客户端已获准修改学生计划。'
+        : '已自动提交学生计划写入申请，等待家长在手机端批准。')
+  };
+}
+
+function canWriteStudentPlan(status = studentDeviceAccessStatus) {
+  return Boolean(status && (status.approved || status.mode === 'local' || status.mode === 'token'));
+}
+
+function studentDeviceCredentialPayload() {
+  const previousId =
+    studyToolsState &&
+    studyToolsState.studentDeviceCredential &&
+    studyToolsState.studentDeviceCredential.deviceId;
+  const previousSecret =
+    studyToolsState &&
+    studyToolsState.studentDeviceCredential &&
+    studyToolsState.studentDeviceCredential.deviceSecret;
+  const previousLabel =
+    studyToolsState &&
+    studyToolsState.studentDeviceCredential &&
+    studyToolsState.studentDeviceCredential.label;
+  ensureStudentDeviceCredential();
+
+  if (
+    previousId !== studyToolsState.studentDeviceCredential.deviceId ||
+    previousSecret !== studyToolsState.studentDeviceCredential.deviceSecret ||
+    previousLabel !== studyToolsState.studentDeviceCredential.label
+  ) {
+    saveStudyToolsState();
+  }
+
+  return {
+    deviceId: studyToolsState.studentDeviceCredential.deviceId,
+    deviceSecret: studyToolsState.studentDeviceCredential.deviceSecret,
+    deviceLabel: studyToolsState.studentDeviceCredential.label
+  };
 }
 
 function pruneStudyToolsState() {
@@ -2242,6 +2668,7 @@ function pruneStudyToolsState() {
 
 function saveStudyToolsState() {
   pruneStudyToolsState();
+  ensureStudentDeviceCredential();
   fs.writeFileSync(studyToolsStatePath(), JSON.stringify(studyToolsState, null, 2), 'utf8');
 }
 
@@ -2272,12 +2699,16 @@ function scheduleMessage(schedule) {
 }
 
 function resolveStudyTargetById(targetId) {
-  if (targetId === 'english-course') {
+  const classroom = targetId === 'english-course' ? resolveClassroom(null) : resolveClassroom(targetId);
+
+  if (classroom && (targetId === 'english-course' || targetId === classroom.id)) {
     return {
-      target: appConfig.startUrl,
+      target: classroom.entryUrl,
+      classroomId: classroom.id,
+      classroomTitle: classroom.title,
       libraryId: '',
       libraryTitle: '',
-      entryLabel: '进入课程'
+      entryLabel: '进入课堂'
     };
   }
 
@@ -2640,6 +3071,36 @@ function buildStudyCalendarModel(selectedDate = new Date()) {
   };
 }
 
+function buildHomeModel() {
+  return {
+    appTitle: appConfig.appTitle,
+    todaySchedule: buildStudyScheduleModel(),
+    calendarSchedule: buildStudyCalendarModel(),
+    cards: [
+      ...classroomDefinitions.map((classroom) => ({
+        id: classroom.id,
+        title: classroom.title,
+        tone: classroom.tone,
+        badge: '在线课堂',
+        target: classroom.entryUrl,
+        scheduleTargetId: classroom.id,
+        classroomId: classroom.id,
+        libraryId: '',
+        supportsStateReset: isCourseEcosystemOrigin(classroom.entryUrl)
+      })),
+      ...libraryDefinitions.map((library) => ({
+        id: library.id,
+        title: library.title,
+        tone: library.tone,
+        badge: '百度网盘',
+        target: libraryTarget(library.id),
+        scheduleTargetId: library.id,
+        libraryId: library.id
+      }))
+    ]
+  };
+}
+
 function buildPlanItemsForDate(dateKey, options = {}) {
   const normalizedDateKey = normalizeSpecificDate(dateKey) || formatLocalDateKey(new Date());
   const date = new Date(`${normalizedDateKey}T00:00:00`);
@@ -2760,10 +3221,15 @@ function buildStudentPlanModel(options = {}) {
   };
 }
 
-function buildStudentPlanResponse(options = {}) {
+async function buildStudentPlanResponse(options = {}) {
+  const accessStatus = await syncStudentDeviceAccessStatus({
+    throwOnError: false
+  });
+
   return {
     model: buildStudentPlanModel(options),
-    studentItems: serializeStudySchedule(appConfig.studentStudySchedule || [])
+    studentItems: serializeStudySchedule(appConfig.studentStudySchedule || []),
+    accessStatus
   };
 }
 
@@ -2809,6 +3275,107 @@ function createReminderSegmentCacheKey(segmentText) {
     .digest('hex');
 }
 
+function createReminderTitleComponentCacheKey(title) {
+  return crypto
+    .createHash('sha1')
+    .update(`${REMINDER_AUDIO_TEMPLATE_VERSION}|title|${normalizePrefix(title)}`)
+    .digest('hex');
+}
+
+function createReminderPlanAudioCacheKey(title, leadMinutes) {
+  return crypto
+    .createHash('sha1')
+    .update(
+      JSON.stringify({
+        version: REMINDER_AUDIO_TEMPLATE_VERSION,
+        title: normalizePrefix(title),
+        leadMinutes: Number(leadMinutes)
+      })
+    )
+    .digest('hex');
+}
+
+function reminderAudioComponentDirPath() {
+  return path.join(reminderAudioCacheDirPath(), 'components');
+}
+
+function reminderAudioPlanDirPath() {
+  return path.join(reminderAudioCacheDirPath(), 'plans');
+}
+
+function reminderStaticAudioDirCandidates() {
+  return dedupe([
+    path.join(path.dirname(process.execPath), 'videos'),
+    path.join(app.getAppPath(), 'videos'),
+    path.join(path.resolve(app.getAppPath(), '..'), 'videos'),
+    path.join(path.resolve(app.getAppPath(), '..', '..'), 'videos'),
+    path.join(process.cwd(), 'videos')
+  ]);
+}
+
+function resolveReminderStaticAudioPath(componentName) {
+  const normalizedComponentName = normalizePrefix(componentName).toLowerCase();
+
+  if (!normalizedComponentName) {
+    return '';
+  }
+
+  for (const candidateDirectory of reminderStaticAudioDirCandidates()) {
+    if (!candidateDirectory || !fs.existsSync(candidateDirectory)) {
+      continue;
+    }
+
+    try {
+      const fileEntries = fs.readdirSync(candidateDirectory, { withFileTypes: true }).filter((entry) => {
+        if (!entry.isFile()) {
+          return false;
+        }
+
+        const parsed = path.parse(entry.name);
+        return ['.wav', '.mp3'].includes(parsed.ext.toLowerCase()) && parsed.name.trim().toLowerCase() === normalizedComponentName;
+      });
+      const sortedMatches = fileEntries.sort((left, right) => {
+        const leftExt = path.extname(left.name).toLowerCase();
+        const rightExt = path.extname(right.name).toLowerCase();
+
+        if (leftExt === rightExt) {
+          return left.name.localeCompare(right.name, 'en-US');
+        }
+
+        if (leftExt === '.wav') {
+          return -1;
+        }
+
+        if (rightExt === '.wav') {
+          return 1;
+        }
+
+        return left.name.localeCompare(right.name, 'en-US');
+      });
+
+      if (sortedMatches.length) {
+        return path.join(candidateDirectory, sortedMatches[0].name);
+      }
+    } catch {
+      // Ignore scan failures for optional static audio directories.
+    }
+  }
+
+  return '';
+}
+
+function reminderTemplateForLeadMinutes(leadMinutes) {
+  if (Number(leadMinutes) === 5) {
+    return ['alarm', 's120', 'alarm', 's220', 'distance', 's180', 'planName', 's180', 'remain', 's120', 'five_minutes'];
+  }
+
+  if (Number(leadMinutes) === 1) {
+    return ['alarm', 's120', 'alarm', 's220', 'distance', 's180', 'planName', 's180', 'remain', 's120', 'one_minutes'];
+  }
+
+  return null;
+}
+
 function pruneReminderAudioCache(cacheDirectory) {
   if (!fs.existsSync(cacheDirectory)) {
     return;
@@ -2840,6 +3407,10 @@ function runPiperToWave(text, outputPath) {
     const executablePath = bundledPiperExecutablePath();
     const modelPath = bundledPiperModelPath();
     const modelConfigPath = bundledPiperModelConfigPath();
+    logReminderDebug('audio-segment-build-start', {
+      text: normalizePrefix(text),
+      outputPath
+    });
     const child = spawn(
       executablePath,
       ['--model', modelPath, '--config', modelConfigPath, '--output_file', outputPath],
@@ -2857,11 +3428,19 @@ function runPiperToWave(text, outputPath) {
     });
 
     child.on('error', () => {
+      logReminderDebug('audio-segment-build-error', {
+        text: normalizePrefix(text),
+        outputPath
+      });
       resolve(false);
     });
 
     child.on('close', (code) => {
       if (code === 0 && fs.existsSync(outputPath)) {
+        logReminderDebug('audio-segment-build-complete', {
+          text: normalizePrefix(text),
+          outputPath
+        });
         resolve(true);
         return;
       }
@@ -2877,6 +3456,13 @@ function runPiperToWave(text, outputPath) {
       if (stderr.trim()) {
         process.stderr.write(`[Piper] ${stderr.trim()}${os.EOL}`);
       }
+
+      logReminderDebug('audio-segment-build-failed', {
+        text: normalizePrefix(text),
+        outputPath,
+        code,
+        stderr: stderr.trim()
+      });
 
       resolve(false);
     });
@@ -2960,6 +3546,235 @@ function createSilenceDataBuffer(format, durationMs) {
   return Buffer.alloc(frameCount * format.blockAlign);
 }
 
+function createToneDataBuffer(format, frequency, durationMs, amplitude = 0.25) {
+  const frameCount = Math.max(1, Math.round((format.sampleRate * durationMs) / 1000));
+  const sampleCount = frameCount * format.channels;
+  const buffer = Buffer.alloc(frameCount * format.blockAlign);
+
+  if (format.bitsPerSample !== 16) {
+    return buffer;
+  }
+
+  const peak = Math.max(0, Math.min(0.9, amplitude)) * 32767;
+
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+    const t = frameIndex / format.sampleRate;
+    const envelope = Math.sin(Math.PI * Math.min(1, frameIndex / Math.max(1, frameCount - 1)));
+    const sampleValue = Math.round(Math.sin(2 * Math.PI * frequency * t) * peak * envelope);
+
+    for (let channelIndex = 0; channelIndex < format.channels; channelIndex += 1) {
+      buffer.writeInt16LE(sampleValue, (frameIndex * format.channels + channelIndex) * 2);
+    }
+  }
+
+  return buffer;
+}
+
+function createReminderAlarmIntroData(format) {
+  return Buffer.concat([
+    createToneDataBuffer(format, 1046.5, 140, 0.24),
+    createSilenceDataBuffer(format, 90),
+    createToneDataBuffer(format, 1046.5, 140, 0.24),
+    createSilenceDataBuffer(format, 120),
+    createToneDataBuffer(format, 1318.5, 220, 0.28),
+    createSilenceDataBuffer(format, 180)
+  ]);
+}
+
+function createReminderAlarmClipData(format) {
+  return Buffer.concat([
+    createToneDataBuffer(format, 1046.5, 150, 0.26),
+    createSilenceDataBuffer(format, 30)
+  ]);
+}
+
+function loadWaveFormat(filePath) {
+  const wave = readPcmWaveFile(filePath);
+  return {
+    channels: wave.channels,
+    sampleRate: wave.sampleRate,
+    bitsPerSample: wave.bitsPerSample,
+    blockAlign: wave.blockAlign
+  };
+}
+
+function ensureGeneratedPcmWaveFile(filePath, format, buildDataBuffer) {
+  if (fs.existsSync(filePath)) {
+    return filePath;
+  }
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const dataBuffer = buildDataBuffer();
+  fs.writeFileSync(filePath, buildPcmWaveBuffer(format, dataBuffer));
+  return filePath;
+}
+
+async function ensureReminderFixedTextComponentWave(componentName, cacheDirectory) {
+  const text = REMINDER_FIXED_TEXT_COMPONENTS[componentName];
+
+  if (!text) {
+    return '';
+  }
+
+  const componentPath = path.join(cacheDirectory, `${componentName}.wav`);
+
+  if (!fs.existsSync(componentPath)) {
+    const built = await runPiperToWave(text, componentPath);
+
+    if (!built) {
+      return '';
+    }
+  }
+
+  return componentPath;
+}
+
+async function ensureReminderTitleComponentWave(title, cacheDirectory) {
+  const normalizedTitle = normalizePrefix(title) || '学习计划';
+  const componentPath = path.join(cacheDirectory, `title-${createReminderTitleComponentCacheKey(normalizedTitle)}.wav`);
+
+  if (!fs.existsSync(componentPath)) {
+    const built = await runPiperToWave(normalizedTitle, componentPath);
+
+    if (!built) {
+      return '';
+    }
+  }
+
+  return componentPath;
+}
+
+function ensureReminderGeneratedComponentWaves(cacheDirectory, format) {
+  const generatedPaths = {};
+
+  generatedPaths.alarm = ensureGeneratedPcmWaveFile(
+    path.join(cacheDirectory, 'alarm.wav'),
+    format,
+    () => createReminderAlarmClipData(format)
+  );
+
+  for (const [componentName, durationMs] of Object.entries(REMINDER_SILENCE_COMPONENTS_MS)) {
+    generatedPaths[componentName] = ensureGeneratedPcmWaveFile(
+      path.join(cacheDirectory, `${componentName}.wav`),
+      format,
+      () => createSilenceDataBuffer(format, durationMs)
+    );
+  }
+
+  return generatedPaths;
+}
+
+async function synthesizeReminderAudioFromTemplate(schedule, leadMinutes) {
+  const sequence = reminderTemplateForLeadMinutes(leadMinutes);
+
+  if (!sequence) {
+    return '';
+  }
+
+  const title = normalizePrefix(schedule && schedule.title) || '学习计划';
+  const cacheRoot = reminderAudioCacheDirPath();
+  const componentDirectory = reminderAudioComponentDirPath();
+  const planDirectory = reminderAudioPlanDirPath();
+  const outputPath = path.join(planDirectory, `${createReminderPlanAudioCacheKey(title, leadMinutes)}.wav`);
+
+  if (fs.existsSync(outputPath)) {
+    logReminderDebug('audio-template-cache-hit', {
+      title,
+      leadMinutes,
+      outputPath
+    });
+    return outputPath;
+  }
+
+  fs.mkdirSync(cacheRoot, { recursive: true });
+  fs.mkdirSync(componentDirectory, { recursive: true });
+  fs.mkdirSync(planDirectory, { recursive: true });
+  pruneReminderAudioCache(planDirectory);
+
+  const distancePath = await ensureReminderFixedTextComponentWave('distance', componentDirectory);
+  const remainPath = await ensureReminderFixedTextComponentWave('remain', componentDirectory);
+  const leadPath = await ensureReminderFixedTextComponentWave(leadMinutes === 5 ? 'five_minutes' : 'one_minutes', componentDirectory);
+  const titlePath = await ensureReminderTitleComponentWave(title, componentDirectory);
+
+  if (!distancePath || !remainPath || !leadPath || !titlePath) {
+    logReminderDebug('audio-template-component-missing', {
+      title,
+      leadMinutes,
+      distancePath,
+      remainPath,
+      leadPath,
+      titlePath
+    });
+    return '';
+  }
+
+  const format = loadWaveFormat(distancePath);
+  const generatedPaths = ensureReminderGeneratedComponentWaves(componentDirectory, format);
+  const componentPathMap = {
+    alarm: generatedPaths.alarm,
+    s120: generatedPaths.s120,
+    s180: generatedPaths.s180,
+    s220: generatedPaths.s220,
+    distance: distancePath,
+    remain: remainPath,
+    five_minutes: leadMinutes === 5 ? leadPath : path.join(componentDirectory, 'five_minutes.wav'),
+    one_minutes: leadMinutes === 1 ? leadPath : path.join(componentDirectory, 'one_minutes.wav'),
+    planName: titlePath
+  };
+
+  if (leadMinutes !== 5) {
+    componentPathMap.five_minutes = await ensureReminderFixedTextComponentWave('five_minutes', componentDirectory);
+  }
+
+  if (leadMinutes !== 1) {
+    componentPathMap.one_minutes = await ensureReminderFixedTextComponentWave('one_minutes', componentDirectory);
+  }
+
+  const chunks = [];
+
+  for (const componentName of sequence) {
+    const componentPath = componentPathMap[componentName];
+
+    if (!componentPath || !fs.existsSync(componentPath)) {
+      logReminderDebug('audio-template-sequence-missing', {
+        title,
+        leadMinutes,
+        componentName,
+        componentPath
+      });
+      return '';
+    }
+
+    const componentWave = readPcmWaveFile(componentPath);
+
+    if (
+      componentWave.channels !== format.channels ||
+      componentWave.sampleRate !== format.sampleRate ||
+      componentWave.bitsPerSample !== format.bitsPerSample ||
+      componentWave.blockAlign !== format.blockAlign
+    ) {
+      logReminderDebug('audio-template-format-mismatch', {
+        title,
+        leadMinutes,
+        componentName,
+        componentPath
+      });
+      return '';
+    }
+
+    chunks.push(componentWave.data);
+  }
+
+  fs.writeFileSync(outputPath, buildPcmWaveBuffer(format, Buffer.concat(chunks)));
+  logReminderDebug('audio-template-built', {
+    title,
+    leadMinutes,
+    outputPath,
+    sequence
+  });
+  return outputPath;
+}
+
 async function synthesizeReminderSegmentWave(segmentText, cacheDirectory) {
   const normalizedText = normalizePrefix(segmentText);
 
@@ -2973,6 +3788,10 @@ async function synthesizeReminderSegmentWave(segmentText, cacheDirectory) {
     const built = await runPiperToWave(normalizedText, segmentCachePath);
 
     if (!built) {
+      logReminderDebug('audio-segment-cache-build-miss', {
+        text: normalizedText,
+        segmentCachePath
+      });
       return null;
     }
   }
@@ -2990,6 +3809,9 @@ async function synthesizeReminderAudioWithPiper(speechSegments, repeatCount) {
     .filter(Boolean);
 
   if (!normalizedSegments.length || !appConfig) {
+    logReminderDebug('audio-build-skip', {
+      reason: !normalizedSegments.length ? 'empty_segments' : 'missing_app_config'
+    });
     return Promise.resolve('');
   }
 
@@ -2998,6 +3820,12 @@ async function synthesizeReminderAudioWithPiper(speechSegments, repeatCount) {
   const modelConfigPath = bundledPiperModelConfigPath();
 
   if (!fs.existsSync(executablePath) || !fs.existsSync(modelPath) || !fs.existsSync(modelConfigPath)) {
+    logReminderDebug('audio-build-skip', {
+      reason: 'missing_piper_runtime',
+      executablePath,
+      modelPath,
+      modelConfigPath
+    });
     return Promise.resolve('');
   }
 
@@ -3006,7 +3834,11 @@ async function synthesizeReminderAudioWithPiper(speechSegments, repeatCount) {
   const outputPath = path.join(cacheDirectory, `${cacheKey}.wav`);
 
   if (fs.existsSync(outputPath)) {
-    return Promise.resolve(pathToFileURL(outputPath).href);
+    logReminderDebug('audio-build-cache-hit', {
+      outputPath,
+      cacheKey
+    });
+    return Promise.resolve(outputPath);
   }
 
   if (reminderAudioBuilds.has(cacheKey)) {
@@ -3014,56 +3846,88 @@ async function synthesizeReminderAudioWithPiper(speechSegments, repeatCount) {
   }
 
   const buildPromise = (async () => {
-    fs.mkdirSync(cacheDirectory, { recursive: true });
-    pruneReminderAudioCache(cacheDirectory);
+    try {
+      logReminderDebug('audio-build-start', {
+        cacheKey,
+        outputPath,
+        repeatCount: normalizeRepeatCount(repeatCount),
+        speechSegments: normalizedSegments
+      });
 
-    const segmentWaves = [];
+      fs.mkdirSync(cacheDirectory, { recursive: true });
+      pruneReminderAudioCache(cacheDirectory);
 
-    for (const segmentText of normalizedSegments) {
-      const wave = await synthesizeReminderSegmentWave(segmentText, cacheDirectory);
+      const segmentWaves = [];
 
-      if (!wave) {
+      for (const segmentText of normalizedSegments) {
+        const wave = await synthesizeReminderSegmentWave(segmentText, cacheDirectory);
+
+        if (!wave) {
+          logReminderDebug('audio-build-segment-failed', {
+            cacheKey,
+            segmentText
+          });
+          return '';
+        }
+
+        segmentWaves.push(wave);
+      }
+
+      const format = segmentWaves[0];
+
+      if (
+        segmentWaves.some(
+          (wave) =>
+            wave.channels !== format.channels ||
+            wave.sampleRate !== format.sampleRate ||
+            wave.bitsPerSample !== format.bitsPerSample ||
+            wave.blockAlign !== format.blockAlign
+        )
+      ) {
+        logReminderDebug('audio-build-format-mismatch', {
+          cacheKey
+        });
         return '';
       }
 
-      segmentWaves.push(wave);
-    }
+      const segmentPause = createSilenceDataBuffer(format, REMINDER_SEGMENT_PAUSE_MS);
+      const repeatPause = createSilenceDataBuffer(format, REMINDER_REPEAT_PAUSE_MS);
+      const alarmIntro = createReminderAlarmIntroData(format);
+      const chunks = [];
+      const normalizedRepeatCount = normalizeRepeatCount(repeatCount);
 
-    const format = segmentWaves[0];
+      if (alarmIntro.length) {
+        chunks.push(alarmIntro);
+      }
 
-    if (
-      segmentWaves.some(
-        (wave) =>
-          wave.channels !== format.channels ||
-          wave.sampleRate !== format.sampleRate ||
-          wave.bitsPerSample !== format.bitsPerSample ||
-          wave.blockAlign !== format.blockAlign
-      )
-    ) {
+      for (let repeatIndex = 0; repeatIndex < normalizedRepeatCount; repeatIndex += 1) {
+        segmentWaves.forEach((wave, segmentIndex) => {
+          chunks.push(wave.data);
+
+          if (segmentIndex < segmentWaves.length - 1) {
+            chunks.push(segmentPause);
+          }
+        });
+
+        if (repeatIndex < normalizedRepeatCount - 1) {
+          chunks.push(repeatPause);
+        }
+      }
+
+      fs.writeFileSync(outputPath, buildPcmWaveBuffer(format, Buffer.concat(chunks)));
+      logReminderDebug('audio-build-complete', {
+        cacheKey,
+        outputPath
+      });
+      return outputPath;
+    } catch (error) {
+      logReminderDebug('audio-build-error', {
+        cacheKey,
+        outputPath,
+        message: error && error.message ? error.message : 'unknown'
+      });
       return '';
     }
-
-    const segmentPause = createSilenceDataBuffer(format, REMINDER_SEGMENT_PAUSE_MS);
-    const repeatPause = createSilenceDataBuffer(format, REMINDER_REPEAT_PAUSE_MS);
-    const chunks = [];
-    const normalizedRepeatCount = normalizeRepeatCount(repeatCount);
-
-    for (let repeatIndex = 0; repeatIndex < normalizedRepeatCount; repeatIndex += 1) {
-      segmentWaves.forEach((wave, segmentIndex) => {
-        chunks.push(wave.data);
-
-        if (segmentIndex < segmentWaves.length - 1) {
-          chunks.push(segmentPause);
-        }
-      });
-
-      if (repeatIndex < normalizedRepeatCount - 1) {
-        chunks.push(repeatPause);
-      }
-    }
-
-    fs.writeFileSync(outputPath, buildPcmWaveBuffer(format, Buffer.concat(chunks)));
-    return pathToFileURL(outputPath).href;
   }).finally(() => {
     reminderAudioBuilds.delete(cacheKey);
   });
@@ -3096,7 +3960,7 @@ function reminderIsDue(now, targetTime) {
   }
 
   const deltaMs = now.getTime() - targetTime.getTime();
-  return deltaMs >= 0 && deltaMs < REMINDER_POLL_INTERVAL_MS;
+  return deltaMs >= 0 && deltaMs < REMINDER_TRIGGER_GRACE_MS;
 }
 
 function buildReminderSpeechText(schedule, leadMinutes) {
@@ -3119,51 +3983,689 @@ function buildReminderSpeechSegments(schedule, leadMinutes) {
   return [title, '现在开始'];
 }
 
-async function buildReminderPayload(schedule, leadMinutes) {
+function collectReminderAudioPrewarmEntries() {
+  if (!appConfig || !Array.isArray(appConfig.studySchedule) || !appConfig.studySchedule.length) {
+    return [];
+  }
+
+  const leadMinutes = Array.isArray(appConfig.reminders && appConfig.reminders.leadMinutes)
+    ? appConfig.reminders.leadMinutes
+    : DEFAULT_REMINDER_LEAD_MINUTES;
+  const seen = new Set();
+  const entries = [];
+
+  for (const schedule of appConfig.studySchedule) {
+    if (!schedule || schedule.enabled === false) {
+      continue;
+    }
+
+    const title = normalizePrefix(schedule.title);
+
+    if (!title) {
+      continue;
+    }
+
+    for (const leadMinute of leadMinutes) {
+      const key = `${title}|${leadMinute}`;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      entries.push({
+        title,
+        leadMinute
+      });
+    }
+  }
+
+  return entries;
+}
+
+async function prewarmReminderAudioCache() {
+  if (reminderAudioPrewarmInFlight) {
+    reminderAudioPrewarmQueued = true;
+    return;
+  }
+
+  const entries = collectReminderAudioPrewarmEntries();
+
+  if (!entries.length) {
+    logReminderDebug('audio-prewarm-skip', {
+      reason: 'empty_schedule'
+    });
+    return;
+  }
+
+  reminderAudioPrewarmInFlight = true;
+  reminderAudioPrewarmQueued = false;
+
+  try {
+    logReminderDebug('audio-prewarm-start', {
+      count: entries.length
+    });
+
+    for (const entry of entries) {
+      const audioPath = await ensureReminderPlanTitleAudioPath(entry.title);
+      logReminderDebug('audio-prewarm-entry', {
+        title: entry.title,
+        leadMinute: entry.leadMinute,
+        audioPath
+      });
+    }
+
+    logReminderDebug('audio-prewarm-complete', {
+      count: entries.length
+    });
+  } catch (error) {
+    logReminderDebug('audio-prewarm-error', {
+      message: error && error.message ? error.message : 'unknown'
+    });
+  } finally {
+    reminderAudioPrewarmInFlight = false;
+
+    if (reminderAudioPrewarmQueued) {
+      reminderAudioPrewarmQueued = false;
+      scheduleReminderAudioPrewarm(200);
+    }
+  }
+}
+
+function scheduleReminderAudioPrewarm(delayMs = 400) {
+  if (reminderAudioPrewarmTimer) {
+    clearTimeout(reminderAudioPrewarmTimer);
+  }
+
+  reminderAudioPrewarmTimer = setTimeout(() => {
+    reminderAudioPrewarmTimer = null;
+    void prewarmReminderAudioCache();
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+async function ensureReminderPlanTitleAudioPath(title) {
+  const componentDirectory = reminderAudioComponentDirPath();
+  fs.mkdirSync(componentDirectory, { recursive: true });
+  return ensureReminderTitleComponentWave(title, componentDirectory);
+}
+
+async function buildReminderAudioSequence(schedule, leadMinutes) {
+  const sequence = reminderTemplateForLeadMinutes(leadMinutes);
+
+  if (!sequence) {
+    return [];
+  }
+
+  const title = normalizePrefix(schedule && schedule.title) || '学习计划';
+  const titlePath = await ensureReminderPlanTitleAudioPath(title);
+
+  if (!titlePath || !fs.existsSync(titlePath)) {
+    logReminderDebug('audio-sequence-title-missing', {
+      title,
+      leadMinutes,
+      titlePath
+    });
+    return [];
+  }
+
+  const componentDirectory = reminderAudioComponentDirPath();
+  const titleFormat = loadWaveFormat(titlePath);
+  const sequenceParts = [];
+  let fallbackAlarmPath = '';
+
+  for (const componentName of sequence) {
+    if (Object.prototype.hasOwnProperty.call(REMINDER_SILENCE_COMPONENTS_MS, componentName)) {
+      sequenceParts.push({
+        componentName,
+        kind: 'pause',
+        ms: REMINDER_SILENCE_COMPONENTS_MS[componentName]
+      });
+      continue;
+    }
+
+    if (componentName === 'planName') {
+      sequenceParts.push({
+        componentName,
+        kind: 'file',
+        path: titlePath,
+        source: 'title'
+      });
+      continue;
+    }
+
+    const staticPath = resolveReminderStaticAudioPath(componentName);
+
+    if (staticPath) {
+      sequenceParts.push({
+        componentName,
+        kind: 'file',
+        path: staticPath,
+        source: 'videos'
+      });
+      continue;
+    }
+
+    if (componentName === 'alarm') {
+      if (!fallbackAlarmPath) {
+        fallbackAlarmPath = ensureGeneratedPcmWaveFile(
+          path.join(componentDirectory, 'alarm-generated.wav'),
+          titleFormat,
+          () => createReminderAlarmClipData(titleFormat)
+        );
+      }
+
+      sequenceParts.push({
+        componentName,
+        kind: 'file',
+        path: fallbackAlarmPath,
+        source: 'generated'
+      });
+      continue;
+    }
+
+    const fallbackSpeechPath = await ensureReminderFixedTextComponentWave(componentName, componentDirectory);
+
+    if (fallbackSpeechPath) {
+      sequenceParts.push({
+        componentName,
+        kind: 'file',
+        path: fallbackSpeechPath,
+        source: 'generated'
+      });
+      continue;
+    }
+
+    logReminderDebug('audio-sequence-component-missing', {
+      title,
+      leadMinutes,
+      componentName
+    });
+    return [];
+  }
+
+  const spokenStartIndex = sequenceParts.findIndex((part) => part.componentName === 'distance');
+  let finalParts = sequenceParts;
+
+  if (spokenStartIndex >= 0 && REMINDER_SEQUENCE_REPEAT_COUNT > 1) {
+    const preamble = sequenceParts.slice(0, spokenStartIndex).map((part) => ({ ...part }));
+    const spoken = sequenceParts.slice(spokenStartIndex).map((part) => ({ ...part }));
+    finalParts = [...preamble];
+
+    for (let repeatIndex = 0; repeatIndex < REMINDER_SEQUENCE_REPEAT_COUNT; repeatIndex += 1) {
+      finalParts.push(...spoken.map((part) => ({ ...part })));
+
+      if (repeatIndex < REMINDER_SEQUENCE_REPEAT_COUNT - 1) {
+        finalParts.push({
+          componentName: 'repeatPause',
+          kind: 'pause',
+          ms: REMINDER_REPEAT_PAUSE_MS
+        });
+      }
+    }
+  }
+
+  logReminderDebug('audio-sequence-built', {
+    title,
+    leadMinutes,
+    repeatCount: REMINDER_SEQUENCE_REPEAT_COUNT,
+    sequenceParts: finalParts.map((part) => (part.kind === 'pause' ? `pause:${part.ms}` : `${part.source}:${path.basename(part.path)}`))
+  });
+  return finalParts.map((part) =>
+    part.kind === 'pause'
+      ? {
+          kind: 'pause',
+          ms: part.ms
+        }
+      : {
+          kind: 'file',
+          path: part.path,
+          source: part.source
+        }
+  );
+}
+
+function playReminderAlarmFallback() {
+  for (const offsetMs of [0, 220, 480]) {
+    setTimeout(() => {
+      try {
+        electronShell.beep();
+        logReminderDebug('alarm-fallback-beep', {
+          offsetMs
+        });
+      } catch {
+        // Ignore system beep failures.
+      }
+    }, offsetMs);
+  }
+}
+
+function showReminderNotification(payload) {
+  if (!Notification || (typeof Notification.isSupported === 'function' && !Notification.isSupported())) {
+    logReminderDebug('notification-unsupported');
+    return false;
+  }
+
+  try {
+    const notification = new Notification({
+      title: normalizePrefix(payload && payload.title) || '学习提醒',
+      body: normalizePrefix(payload && payload.message) || '到学习时间了。',
+      silent: false
+    });
+
+    notification.on('click', () => {
+      focusMainWindow();
+    });
+    notification.show();
+    logReminderDebug('notification-shown', {
+      title: normalizePrefix(payload && payload.title),
+      message: normalizePrefix(payload && payload.message)
+    });
+    return true;
+  } catch {
+    // Ignore OS notification failures.
+    logReminderDebug('notification-failed');
+    return false;
+  }
+}
+
+function closeReminderPopup() {
+  if (reminderPopupTimer) {
+    clearTimeout(reminderPopupTimer);
+    reminderPopupTimer = null;
+  }
+
+  if (reminderPopupWindow && !reminderPopupWindow.isDestroyed()) {
+    reminderPopupWindow.close();
+  }
+
+  reminderPopupWindow = null;
+}
+
+function renderReminderPopupHtml(payload = {}) {
+  const title = (normalizePrefix(payload.title) || '学习提醒')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const time = (normalizePrefix(payload.time) || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const message = (normalizePrefix(payload.message) || '到学习时间了。')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  return `<!doctype html>
+  <html lang="zh-CN">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>学习提醒</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+          background: linear-gradient(145deg, #1f1414, #12131a 65%, #152127);
+          color: #f7f7fb;
+          display: grid;
+          min-height: 100vh;
+          place-items: center;
+          padding: 16px;
+        }
+        .shell {
+          width: 100%;
+          border-radius: 22px;
+          padding: 20px 22px;
+          background: rgba(15, 20, 28, 0.96);
+          border: 1px solid rgba(255,255,255,0.08);
+          box-shadow: 0 22px 60px rgba(0,0,0,0.3);
+        }
+        .time {
+          margin: 0 0 10px;
+          font-size: 13px;
+          color: #f0b65d;
+          letter-spacing: 0.08em;
+        }
+        h1 {
+          margin: 0 0 12px;
+          font-size: 28px;
+          line-height: 1.2;
+        }
+        p {
+          margin: 0;
+          font-size: 16px;
+          line-height: 1.5;
+          color: rgba(247,247,251,0.84);
+        }
+      </style>
+    </head>
+    <body>
+      <main class="shell">
+        <div class="time">${time}</div>
+        <h1>${title}</h1>
+        <p>${message}</p>
+      </main>
+    </body>
+  </html>`;
+}
+
+async function showReminderPopup(payload) {
+  try {
+    if (!app.isReady()) {
+      return false;
+    }
+
+    if (!reminderPopupWindow || reminderPopupWindow.isDestroyed()) {
+      reminderPopupWindow = new BrowserWindow({
+        width: 420,
+        height: 220,
+        frame: false,
+        resizable: false,
+        minimizable: false,
+        maximizable: false,
+        movable: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        show: false,
+        transparent: false,
+        backgroundColor: '#12131a',
+        webPreferences: {
+          contextIsolation: true,
+          sandbox: true,
+          nodeIntegration: false,
+          devTools: false,
+          spellcheck: false
+        }
+      });
+
+      reminderPopupWindow.on('closed', () => {
+        reminderPopupWindow = null;
+      });
+
+      reminderPopupWindow.on('focus', () => {
+        focusMainWindow();
+        closeReminderPopup();
+      });
+    }
+
+    const display = screen.getPrimaryDisplay();
+    const workArea = display.workArea;
+    const width = 420;
+    const height = 220;
+    const x = Math.round(workArea.x + workArea.width - width - 18);
+    const y = Math.round(workArea.y + 18);
+    reminderPopupWindow.setBounds({ x, y, width, height });
+    await reminderPopupWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderReminderPopupHtml(payload))}`);
+    if (reminderPopupWindow && !reminderPopupWindow.isDestroyed()) {
+      reminderPopupWindow.showInactive();
+    }
+
+    if (reminderPopupTimer) {
+      clearTimeout(reminderPopupTimer);
+    }
+
+    reminderPopupTimer = setTimeout(() => {
+      closeReminderPopup();
+    }, 20000);
+
+    logReminderDebug('popup-shown', {
+      title: normalizePrefix(payload && payload.title),
+      time: normalizePrefix(payload && payload.time)
+    });
+    return true;
+  } catch (error) {
+    logReminderDebug('popup-failed', {
+      message: error && error.message ? error.message : 'unknown'
+    });
+    return false;
+  }
+}
+
+function escapePowerShellSingleQuotedString(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+function stopReminderAudioProcess() {
+  if (reminderAudioProcess && !reminderAudioProcess.killed) {
+    try {
+      reminderAudioProcess.kill();
+    } catch {
+      // Ignore player termination failures.
+    }
+  }
+
+  reminderAudioProcess = null;
+}
+
+function playReminderSequenceNative(sequenceParts) {
+  if (!Array.isArray(sequenceParts) || !sequenceParts.length) {
+    logReminderDebug('audio-sequence-empty');
+    playReminderAlarmFallback();
+    return;
+  }
+
+  stopReminderAudioProcess();
+
+  const encodedSequence = Buffer.from(JSON.stringify(sequenceParts), 'utf8').toString('base64');
+  const command = [
+    'Add-Type -AssemblyName PresentationCore',
+    `$json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${encodedSequence}'))`,
+    '$sequence = $json | ConvertFrom-Json',
+    'function Play-StudyGateMedia([string] $mediaPath) {',
+    '  $player = New-Object System.Windows.Media.MediaPlayer',
+    '  try {',
+    '    $uri = New-Object System.Uri($mediaPath)',
+    '    $player.Open($uri)',
+    '    $player.Volume = 1.0',
+    '    $player.Play()',
+    '    $deadline = [DateTime]::UtcNow.AddSeconds(30)',
+    '    while ([DateTime]::UtcNow -lt $deadline) {',
+    '      Start-Sleep -Milliseconds 50',
+    '      if ($player.NaturalDuration.HasTimeSpan) {',
+    '        if ($player.Position -ge $player.NaturalDuration.TimeSpan -and $player.NaturalDuration.TimeSpan.TotalMilliseconds -gt 0) { break }',
+    '      }',
+    '    }',
+    '  } finally {',
+    '    $player.Stop()',
+    '    $player.Close()',
+    '  }',
+    '}',
+    'foreach ($item in $sequence) {',
+    "  if ($item.kind -eq 'pause') { Start-Sleep -Milliseconds ([int]$item.ms); continue }",
+    "  if ($item.kind -eq 'file' -and (Test-Path -LiteralPath $item.path)) { Play-StudyGateMedia $item.path }",
+    '}'
+  ].join('; ');
+  const playerProcess = spawn(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', command],
+    {
+      windowsHide: true
+    }
+  );
+
+  reminderAudioProcess = playerProcess;
+  logReminderDebug('audio-sequence-play-start', {
+    pid: playerProcess.pid,
+    parts: sequenceParts.map((part) => (part.kind === 'pause' ? `pause:${part.ms}` : path.basename(part.path)))
+  });
+  playerProcess.stderr.on('data', (chunk) => {
+    logReminderDebug('audio-sequence-play-stderr', {
+      message: String(chunk || '').trim()
+    });
+  });
+  playerProcess.on('exit', () => {
+    logReminderDebug('audio-sequence-play-exit');
+    if (reminderAudioProcess === playerProcess) {
+      reminderAudioProcess = null;
+    }
+  });
+  playerProcess.on('error', (error) => {
+    if (reminderAudioProcess === playerProcess) {
+      reminderAudioProcess = null;
+    }
+    logReminderDebug('audio-sequence-play-error', {
+      message: error && error.message ? error.message : 'unknown'
+    });
+    playReminderAlarmFallback();
+  });
+}
+
+function playReminderAudioNative(audioPath) {
+  const normalizedPath = normalizePrefix(audioPath);
+
+  if (!normalizedPath || !fs.existsSync(normalizedPath)) {
+    logReminderDebug('audio-path-missing', {
+      audioPath: normalizedPath
+    });
+    playReminderAlarmFallback();
+    return;
+  }
+
+  stopReminderAudioProcess();
+
+  const command = `$player = New-Object System.Media.SoundPlayer('${escapePowerShellSingleQuotedString(normalizedPath)}'); $player.PlaySync();`;
+  const playerProcess = spawn(
+    'powershell',
+    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', command],
+    {
+      windowsHide: true
+    }
+  );
+
+  reminderAudioProcess = playerProcess;
+  logReminderDebug('audio-play-start', {
+    audioPath: normalizedPath,
+    pid: playerProcess.pid
+  });
+  playerProcess.stderr.on('data', (chunk) => {
+    logReminderDebug('audio-play-stderr', {
+      message: String(chunk || '').trim()
+    });
+  });
+  playerProcess.on('exit', () => {
+    logReminderDebug('audio-play-exit', {
+      audioPath: normalizedPath
+    });
+    if (reminderAudioProcess === playerProcess) {
+      reminderAudioProcess = null;
+    }
+  });
+  playerProcess.on('error', (error) => {
+    if (reminderAudioProcess === playerProcess) {
+      reminderAudioProcess = null;
+    }
+    logReminderDebug('audio-play-error', {
+      audioPath: normalizedPath,
+      message: error && error.message ? error.message : 'unknown'
+    });
+    playReminderAlarmFallback();
+  });
+}
+
+function createBaseReminderPayload(schedule, leadMinutes) {
   const offsetLabel = leadMinutes > 0 ? `提前${leadMinutes}分钟` : '到点提醒';
   const speechText = buildReminderSpeechText(schedule, leadMinutes);
-  const speechSegments = buildReminderSpeechSegments(schedule, leadMinutes);
-  const repeatCount = 3;
-
   return {
     id: schedule.id,
     time: `${offsetLabel} · ${schedule.time}`,
     title: schedule.title,
     message: speechText,
     speechText,
-    repeatCount,
-    audioUrl: await synthesizeReminderAudioWithPiper(speechSegments, repeatCount)
+    leadMinutes,
+    audioPath: ''
   };
 }
 
 async function pushReminderToWindow(schedule, leadMinutes) {
+  const payload = createBaseReminderPayload(schedule, leadMinutes);
+  logReminderDebug('reminder-dispatch-start', {
+    scheduleId: schedule.id,
+    title: schedule.title,
+    leadMinutes,
+    time: schedule.time
+  });
+
+  closeReminderPopup();
+  const notificationShown = showReminderNotification(payload);
+  const popupShown = false;
+  let rendererShown = false;
+
   if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-
-  if (reminderFlashTimer) {
-    clearTimeout(reminderFlashTimer);
-    reminderFlashTimer = null;
-  }
-
-  mainWindow.flashFrame(true);
-  mainWindow.webContents.send('shell:study-reminder', await buildReminderPayload(schedule, leadMinutes));
-
-  reminderFlashTimer = setTimeout(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.flashFrame(false);
+    logReminderDebug('reminder-main-window-missing', {
+      scheduleId: schedule.id
+    });
+  } else {
+    if (reminderFlashTimer) {
+      clearTimeout(reminderFlashTimer);
+      reminderFlashTimer = null;
     }
 
-    reminderFlashTimer = null;
-  }, 8000);
+    try {
+      mainWindow.flashFrame(true);
+      mainWindow.webContents.send('shell:study-reminder', payload);
+      rendererShown = true;
+    } catch (error) {
+      logReminderDebug('renderer-reminder-failed', {
+        scheduleId: schedule.id,
+        message: error && error.message ? error.message : 'unknown'
+      });
+    }
+
+    reminderFlashTimer = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.flashFrame(false);
+      }
+
+      reminderFlashTimer = null;
+    }, 8000);
+  }
+
+  let audioSequence = [];
+
+  try {
+    audioSequence = await buildReminderAudioSequence(schedule, leadMinutes);
+  } catch (error) {
+    logReminderDebug('audio-sequence-build-uncaught', {
+      scheduleId: schedule.id,
+      message: error && error.message ? error.message : 'unknown'
+    });
+    audioSequence = [];
+  }
+
+  if (audioSequence.length) {
+    playReminderSequenceNative(audioSequence);
+  } else {
+    logReminderDebug('audio-sequence-empty-fallback', {
+      scheduleId: schedule.id,
+      title: schedule.title
+    });
+    playReminderAlarmFallback();
+  }
+
+  logReminderDebug('reminder-dispatch-complete', {
+    scheduleId: schedule.id,
+    title: schedule.title,
+    leadMinutes,
+    time: schedule.time,
+    notificationShown,
+    popupShown,
+    rendererShown,
+    audioPath: payload.audioPath,
+    audioSequenceCount: audioSequence.length
+  });
+
+  return notificationShown || popupShown || rendererShown;
 }
 
 async function checkStudyReminders() {
   if (!appConfig || !Array.isArray(appConfig.studySchedule) || !appConfig.studySchedule.length) {
+    logReminderDebug('check-skip-empty-schedule');
     return;
   }
 
   if (reminderCheckInFlight) {
+    logReminderDebug('check-skip-inflight');
     return;
   }
 
@@ -3175,8 +4677,16 @@ async function checkStudyReminders() {
     const leadMinutes = Array.isArray(appConfig.reminders && appConfig.reminders.leadMinutes)
       ? appConfig.reminders.leadMinutes
       : DEFAULT_REMINDER_LEAD_MINUTES;
+    const todaySchedules = getTodaySchedules(now);
 
-    for (const schedule of getTodaySchedules(now)) {
+    logReminderDebug('check-start', {
+      now: now.toISOString(),
+      todayKey,
+      scheduleCount: todaySchedules.length,
+      leadMinutes
+    });
+
+    for (const schedule of todaySchedules) {
       if (!schedule.enabled) {
         continue;
       }
@@ -3208,6 +4718,27 @@ async function checkStudyReminders() {
           continue;
         }
 
+        logReminderDebug('check-due', {
+          scheduleId: schedule.id,
+          title: schedule.title,
+          leadMinute,
+          scheduleTime: schedule.time,
+          reminderTime: reminderTime.toISOString(),
+          now: now.toISOString()
+        });
+
+        const delivered = await pushReminderToWindow(schedule, leadMinute);
+
+        if (!delivered) {
+          logReminderDebug('check-delivery-failed', {
+            scheduleId: schedule.id,
+            title: schedule.title,
+            leadMinute,
+            scheduleTime: schedule.time
+          });
+          continue;
+        }
+
         upsertScheduleMark(
           schedule,
           {
@@ -3219,10 +4750,19 @@ async function checkStudyReminders() {
           },
           now
         );
-        await pushReminderToWindow(schedule, leadMinute);
         return;
       }
     }
+
+    logReminderDebug('check-no-trigger', {
+      now: now.toISOString(),
+      todayKey
+    });
+  } catch (error) {
+    logReminderDebug('check-error', {
+      message: error && error.message ? error.message : 'unknown',
+      stack: error && error.stack ? error.stack : ''
+    });
   } finally {
     reminderCheckInFlight = false;
   }
@@ -3234,16 +4774,35 @@ function startReminderPolling() {
   }
 
   void checkStudyReminders();
-  reminderPollTimer = setInterval(() => {
-    void checkStudyReminders();
-  }, REMINDER_POLL_INTERVAL_MS);
+
+  const scheduleNextRun = () => {
+    const delayMs = Math.max(250, 60000 - (Date.now() % 60000) + REMINDER_CHECK_ALIGNMENT_FUZZ_MS);
+    reminderPollTimer = setTimeout(async () => {
+      reminderPollTimer = null;
+
+      try {
+        await checkStudyReminders();
+      } finally {
+        scheduleNextRun();
+      }
+    }, delayMs);
+  };
+
+  scheduleNextRun();
 }
 
 function stopReminderPolling() {
   if (reminderPollTimer) {
-    clearInterval(reminderPollTimer);
+    clearTimeout(reminderPollTimer);
     reminderPollTimer = null;
   }
+
+  if (reminderAudioPrewarmTimer) {
+    clearTimeout(reminderAudioPrewarmTimer);
+    reminderAudioPrewarmTimer = null;
+  }
+
+  stopReminderAudioProcess();
 
   if (reminderFlashTimer) {
     clearTimeout(reminderFlashTimer);
@@ -3258,6 +4817,7 @@ function stopReminderPolling() {
 async function syncRemoteStudySchedule() {
   if (!appConfig.remoteSchedule.enabled) {
     remoteScheduleStatus = createEmptyRemoteScheduleStatus();
+    studentDeviceAccessStatus = createEmptyStudentDeviceAccessStatus();
     return false;
   }
 
@@ -3308,13 +4868,16 @@ async function syncRemoteStudySchedule() {
     }
     let controlSettings = normalizeControlSettings(appConfig.controlSettings);
 
-    if (appConfig.remoteSchedule.studentWriteToken) {
+    const controlSettingsToken =
+      appConfig.remoteSchedule.studentWriteToken || appConfig.remoteSchedule.authToken;
+
+    if (controlSettingsToken) {
       const protectedPayload = await fetchRemotePayload({
         method: 'POST',
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${appConfig.remoteSchedule.studentWriteToken}`
+          Authorization: `Bearer ${controlSettingsToken}`
         },
         body: JSON.stringify({
           action: 'getControlSettings'
@@ -3329,13 +4892,18 @@ async function syncRemoteStudySchedule() {
         );
       }
 
-      controlSettings = normalizeControlSettings(protectedPayload.controlSettings);
+      const syncedControlSettings = normalizeControlSettings(protectedPayload.controlSettings);
+
+      if (syncedControlSettings.exitPasswordHash && syncedControlSettings.exitPasswordSalt) {
+        controlSettings = syncedControlSettings;
+      }
     }
 
     const normalizedState = normalizeStudyData(
       Array.isArray(payload)
         ? {
             items: payload,
+            onlineClassrooms: appConfig.classrooms,
             contentLibraries: appConfig.libraries,
             controlSettings
           }
@@ -3343,6 +4911,7 @@ async function syncRemoteStudySchedule() {
             ...payload,
             controlSettings
           },
+      appConfig.baseClassrooms || classroomDefinitions,
       appConfig.baseLibraries || libraryDefinitions
     );
 
@@ -3352,6 +4921,7 @@ async function syncRemoteStudySchedule() {
 
     applyStudyData(normalizedState, 'remote');
     saveRemoteScheduleCache(normalizedState);
+    void syncStudentDeviceAccessStatus();
     const mergedCount = normalizedState.parentItems.length + normalizedState.studentItems.length;
     remoteScheduleStatus = {
       enabled: true,
@@ -3376,7 +4946,7 @@ async function syncRemoteStudySchedule() {
 }
 
 async function persistStudentStudySchedule(rawSchedule) {
-  const normalizedStudentItems = normalizeStudySchedule(rawSchedule, libraryDefinitions, {
+  const normalizedStudentItems = normalizeStudySchedule(rawSchedule, classroomDefinitions, libraryDefinitions, {
     planScope: 'student'
   });
 
@@ -3385,6 +4955,7 @@ async function persistStudentStudySchedule(rawSchedule) {
       {
         parentItems: appConfig.parentStudySchedule,
         studentItems: normalizedStudentItems,
+        onlineClassrooms: appConfig.classrooms,
         contentLibraries: appConfig.libraries
       },
       'local'
@@ -3394,11 +4965,27 @@ async function persistStudentStudySchedule(rawSchedule) {
   }
 
   const mutationSerial = bumpStudyDataMutation();
-
-  const writeToken = appConfig.remoteSchedule.studentWriteToken;
+  const writeToken = appConfig.remoteSchedule.studentWriteToken || appConfig.remoteSchedule.authToken;
 
   if (!writeToken) {
-    throw new Error('没有配置 remoteSchedule.studentWriteToken。');
+    throw new Error('云端学生计划未配置可用的访问令牌。');
+  }
+
+  const accessStatus = await syncStudentDeviceAccessStatus({
+    throwOnError: false
+  });
+
+  if (!canWriteStudentPlan(accessStatus)) {
+    throw new Error(accessStatus.message || '已自动提交学生计划写入申请，等待家长在手机端批准。');
+  }
+
+  const requestBody = {
+    action: 'saveStudentItems',
+    items: serializeStudySchedule(normalizedStudentItems)
+  };
+
+  if (!appConfig.remoteSchedule.studentWriteToken) {
+    Object.assign(requestBody, studentDeviceCredentialPayload());
   }
 
   const payload = await fetchJson(appConfig.remoteSchedule.url, {
@@ -3408,13 +4995,17 @@ async function persistStudentStudySchedule(rawSchedule) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${writeToken}`
     },
-    body: JSON.stringify({
-      action: 'saveStudentItems',
-      items: serializeStudySchedule(normalizedStudentItems)
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!payload || payload.error) {
+    if (payload && payload.error === 'device_not_approved') {
+      const latestStatus = await syncStudentDeviceAccessStatus({
+        throwOnError: false
+      });
+      throw new Error(latestStatus.message || '已自动提交学生计划写入申请，等待家长在手机端批准。');
+    }
+
     throw new Error(payload && payload.error ? `学生计划保存失败：${payload.error}` : '学生计划保存失败。');
   }
 
@@ -3422,7 +5013,11 @@ async function persistStudentStudySchedule(rawSchedule) {
     return currentStudyData();
   }
 
-  const normalizedState = normalizeStudyData(payload, appConfig.baseLibraries || libraryDefinitions);
+  const normalizedState = normalizeStudyData(
+    payload,
+    appConfig.baseClassrooms || classroomDefinitions,
+    appConfig.baseLibraries || libraryDefinitions
+  );
   applyStudyData(normalizedState, 'remote');
   saveRemoteScheduleCache(normalizedState);
   remoteScheduleStatus = {
@@ -3432,6 +5027,14 @@ async function persistStudentStudySchedule(rawSchedule) {
     lastSuccessAt: new Date().toISOString(),
     message: '学生计划已经同步到服务器。'
   };
+  studentDeviceAccessStatus = normalizeStudentDeviceAccessStatus({
+    ...studentDeviceAccessStatus,
+    mode: appConfig.remoteSchedule.studentWriteToken ? 'token' : studentDeviceAccessStatus.mode || 'approval',
+    approved: true,
+    message: appConfig.remoteSchedule.studentWriteToken
+      ? '当前客户端已通过专用写入令牌授权。'
+      : '当前客户端已获准修改学生计划。'
+  });
 
   return currentStudyData();
 }
@@ -3812,7 +5415,10 @@ function isAuthorizedMobileRequest(requestUrl) {
 function mobileTargetOptions() {
   return [
     { id: '', label: '只提醒，不跳转' },
-    { id: 'english-course', label: '说课英语' },
+    ...classroomDefinitions.map((classroom) => ({
+      id: classroom.id,
+      label: classroom.title
+    })),
     ...libraryDefinitions.map((library) => ({
       id: library.id,
       label: library.title
@@ -4091,6 +5697,23 @@ function requestAppQuit() {
     }
   });
   void exitPasswordWindow.loadFile(exitPasswordPagePath());
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.focus();
+  return true;
 }
 
 async function requestNetdiskDeviceCode() {
@@ -4689,35 +6312,12 @@ function registerIpc() {
     saveSiteCredentialSnapshot(payload);
   });
   ipcMain.handle('shell:reset-course-site-state', async () => clearCourseSiteState());
-  ipcMain.handle('shell:get-home-model', async () => {
-    const todaySchedule = buildStudyScheduleModel();
-    const calendarSchedule = buildStudyCalendarModel();
+  ipcMain.handle('shell:get-home-model', async (_event, options = {}) => {
+    if (options && options.syncRemote && appConfig.remoteSchedule.enabled) {
+      await syncRemoteStudySchedule();
+    }
 
-    return {
-      appTitle: appConfig.appTitle,
-      todaySchedule,
-      calendarSchedule,
-      cards: [
-        {
-          id: 'english-course',
-          title: '说课英语',
-          tone: 'amber',
-          badge: '在线课堂',
-          target: appConfig.startUrl,
-          scheduleTargetId: 'english-course',
-          libraryId: ''
-        },
-        ...libraryDefinitions.map((library) => ({
-          id: library.id,
-          title: library.title,
-          tone: library.tone,
-          badge: '百度网盘',
-          target: libraryTarget(library.id),
-          scheduleTargetId: library.id,
-          libraryId: library.id
-        }))
-      ]
-    };
+    return buildHomeModel();
   });
 
   ipcMain.handle('shell:get-library-model', async (_event, libraryId) => buildLibraryModel(libraryId));
@@ -4841,39 +6441,47 @@ function showStartupError(error) {
   dialog.showErrorBox('启动失败', error.message);
 }
 
-app.whenReady().then(async () => {
-  try {
-    appConfig = loadConfig();
-    rebuildLibraryIndex();
-    configureAutoLaunch();
-    loadPersistedStudySchedule();
-    loadRemoteScheduleCache();
-    loadNetdiskState();
-    loadOriginStorageState();
-    loadSiteCredentialState();
-    loadStudyToolsState();
-    await startInternalServer();
-    app.setName(appConfig.appTitle);
-    configureSessionGuards();
-    registerIpc();
-    await restoreSessionState();
-    await syncRemoteStudySchedule();
-    startRemoteSchedulePolling();
-    createMainWindow();
-    startReminderPolling();
-  } catch (error) {
-    showStartupError(error);
-    app.quit();
-  }
-});
+if (gotSingleInstanceLock) {
+  app.whenReady().then(async () => {
+    try {
+      appConfig = loadConfig();
+      app.setAppUserModelId('StudyGate');
+      rebuildLibraryIndex();
+      configureAutoLaunch();
+      loadPersistedStudySchedule();
+      loadRemoteScheduleCache();
+      loadNetdiskState();
+      loadOriginStorageState();
+      loadSiteCredentialState();
+      loadStudyToolsState();
+      scheduleReminderAudioPrewarm(50);
+      await startInternalServer();
+      app.setName(appConfig.appTitle);
+      configureSessionGuards();
+      registerIpc();
+      await restoreSessionState();
+      await syncRemoteStudySchedule();
+      await syncStudentDeviceAccessStatus({
+        throwOnError: false
+      });
+      startRemoteSchedulePolling();
+      createMainWindow();
+      startReminderPolling();
+    } catch (error) {
+      showStartupError(error);
+      app.quit();
+    }
+  });
+}
 
 app.on('second-instance', () => {
   logNavigationDebug('second-instance');
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-    }
-    mainWindow.focus();
+  if (focusMainWindow()) {
+    return;
+  }
+
+  if (app.isReady() && appConfig) {
+    createMainWindow();
   }
 });
 
