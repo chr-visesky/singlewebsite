@@ -7,29 +7,29 @@
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src 'self' file: https: http: blob:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>媒体库</title>
+    <title>加载中</title>
     <link rel="stylesheet" href="./library.css" />
   </head>
   <body>
     <main class="page">
       <header class="page-header">
         <div>
-          <p class="eyebrow">Cloud Library</p>
-          <h1 id="library-title">媒体库</h1>
+          <h1 id="library-title">加载中</h1>
           <p id="library-description" class="description"></p>
         </div>
         <div class="actions">
           <button id="authorize-netdisk" type="button" class="ghost">连接百度网盘</button>
-          <button id="back-home" type="button" class="ghost">返回首页</button>
-          <button id="reload-library" type="button" class="ghost">刷新列表</button>
         </div>
       </header>
 
       <section class="layout">
         <aside class="playlist">
           <div class="playlist-head">
-            <h2>视频列表</h2>
-            <span id="playlist-count"></span>
+            <h2>目录</h2>
+            <div class="playlist-head__side">
+              <span id="playlist-count"></span>
+              <button id="playlist-refresh" type="button" class="ghost ghost--tiny">刷新</button>
+            </div>
           </div>
           <div id="lesson-list" class="lesson-list"></div>
         </aside>
@@ -38,14 +38,21 @@
           <div class="player-shell">
             <video
               id="player"
-              controls
               playsinline
               disablepictureinpicture
-              controlslist="nodownload noplaybackrate"
+              controlslist="nodownload noplaybackrate nofullscreen"
             ></video>
             <div id="empty-player" class="empty-player">
               <h2 id="empty-title">还没有视频</h2>
               <p id="empty-description">先连接百度网盘，再读取指定目录里的视频。</p>
+            </div>
+            <div class="player-controls">
+              <button id="player-toggle" type="button" class="control-button">播放</button>
+              <button id="player-backward" type="button" class="control-button">-10秒</button>
+              <button id="player-forward" type="button" class="control-button">+10秒</button>
+              <button id="player-fullscreen" type="button" class="control-button">全屏</button>
+              <input id="player-seek" class="seekbar" type="range" min="0" max="1000" value="0" />
+              <span id="player-time" class="player-time">00:00 / 00:00</span>
             </div>
           </div>
           <div class="meta">

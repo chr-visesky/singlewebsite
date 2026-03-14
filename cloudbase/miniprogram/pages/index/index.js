@@ -11,6 +11,9 @@ const CALENDAR_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 const AUTO_REFRESH_INTERVAL_MS = 30000;
 
 let autoRefreshTimer = null;
+let identityRequestSerial = 0;
+let itemsRequestSerial = 0;
+let planMutationSerial = 0;
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -184,6 +187,17 @@ function buildViewState(items, monthKey, selectedDate) {
   };
 }
 
+function emptyPlanState(monthKey, selectedDate) {
+  return {
+    parentItems: [],
+    studentItems: [],
+    contentLibraries: [],
+    items: [],
+    updatedAtDisplay: '还没有保存记录。',
+    ...buildViewState([], monthKey, selectedDate)
+  };
+}
+
 Page({
   data: {
     authorized: false,
@@ -265,13 +279,35 @@ Page({
   },
 
   async refreshIdentity() {
+    const requestSerial = ++identityRequestSerial;
+
     try {
       const result = await callAdmin('whoami');
+
+      if (requestSerial !== identityRequestSerial) {
+        return;
+      }
+
+      const authorized = Boolean(result.authorized);
       this.setData({
-        authorized: Boolean(result.authorized),
-        identityHint: result.authorized ? '已授权' : '未授权'
+        authorized,
+        identityHint: authorized ? '已授权' : '未授权'
       });
+
+      if (!authorized) {
+        this.setData(emptyPlanState(this.data.currentMonthKey, this.data.selectedDate));
+      }
     } catch (error) {
+      if (requestSerial !== identityRequestSerial) {
+        return;
+      }
+
+      this.setData({
+        authorized: false,
+        identityHint: '身份获取失败，请刷新重试。',
+        ...emptyPlanState(this.data.currentMonthKey, this.data.selectedDate)
+      });
+
       wx.showToast({
         title: (error && (error.errMsg || error.message)) || '身份获取失败',
         icon: 'none'
@@ -280,8 +316,16 @@ Page({
   },
 
   async reloadItems() {
+    const requestSerial = ++itemsRequestSerial;
+    const mutationSerialAtStart = planMutationSerial;
+
     try {
       const result = await callAdmin('list');
+
+      if (requestSerial !== itemsRequestSerial || mutationSerialAtStart !== planMutationSerial) {
+        return;
+      }
+
       const parentItems = decorateScheduleItems(result.parentItems, {
         planScope: 'parent'
       });
@@ -299,6 +343,10 @@ Page({
         ...buildViewState(items, this.data.currentMonthKey, this.data.selectedDate)
       });
     } catch (error) {
+      if (requestSerial !== itemsRequestSerial) {
+        return;
+      }
+
       wx.showToast({
         title: error && error.message ? error.message : '加载失败',
         icon: 'none'
@@ -502,12 +550,19 @@ Page({
   },
 
   async persistState(parentItems, studentItems, successText, options = {}) {
+    const mutationSerial = ++planMutationSerial;
+
     try {
       const result = await callAdmin('saveAll', {
         parentItems,
         studentItems,
         contentLibraries: this.data.contentLibraries
       });
+
+      if (mutationSerial !== planMutationSerial) {
+        return;
+      }
+
       const decoratedParentItems = decorateScheduleItems(result.parentItems, {
         planScope: 'parent'
       });

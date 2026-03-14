@@ -101,6 +101,9 @@ if (window.location.protocol === 'file:') {
     reloadLibraryModel(libraryId) {
       return ipcRenderer.invoke('shell:reload-library-model', libraryId);
     },
+    getLibraryFolderModel(libraryId, folderPath) {
+      return ipcRenderer.invoke('shell:get-library-folder-model', libraryId, folderPath);
+    },
     getStudentPlanModel(options) {
       return ipcRenderer.invoke('shell:get-student-plan-model', options);
     },
@@ -109,6 +112,26 @@ if (window.location.protocol === 'file:') {
     },
     authorizeNetdisk() {
       return ipcRenderer.invoke('shell:authorize-netdisk');
+    },
+    toggleWindowFullscreen() {
+      return ipcRenderer.invoke('shell:toggle-window-fullscreen');
+    },
+    getWindowFullscreenState() {
+      return ipcRenderer.invoke('shell:get-window-fullscreen');
+    },
+    onWindowFullscreenChanged(listener) {
+      if (typeof listener !== 'function') {
+        return () => {};
+      }
+
+      const handler = (_event, payload) => {
+        listener(Boolean(payload && payload.fullscreen));
+      };
+
+      ipcRenderer.on('window:fullscreen-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('window:fullscreen-changed', handler);
+      };
     },
     enterStudyTarget(payload) {
       return ipcRenderer.invoke('shell:enter-study-target', payload);

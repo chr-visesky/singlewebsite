@@ -23,6 +23,9 @@ const INTERNAL_MEDIA_ROUTE = `${INTERNAL_SERVER_PREFIX}/baidu/media`;
 const INTERNAL_OAUTH_CALLBACK_ROUTE = `${INTERNAL_SERVER_PREFIX}/baidu/oauth/callback`;
 const INTERNAL_MOBILE_CONFIG_ROUTE = `${INTERNAL_SERVER_PREFIX}/mobile`;
 const INTERNAL_MOBILE_SCHEDULE_API_ROUTE = `${INTERNAL_SERVER_PREFIX}/mobile/api/schedule`;
+const INTERNAL_SERVER_PORT = 32147;
+const NETDISK_AUTH_USER_AGENT =
+  'pan.baidu.com';
 const ALLOWED_APP_SCHEMES = new Set(['about:', 'blob:', 'data:', 'file:']);
 const ALLOWED_MEDIA_PERMISSIONS = new Set(['media', 'speaker-selection']);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.m4v', '.mov', '.mp3', '.m4a']);
@@ -33,6 +36,8 @@ const AUTH_ERRNOS = new Set([111]);
 const RESOURCE_ACCESS_MODES = new Set(['whitelist', 'top-level-only']);
 const REMINDER_POLL_INTERVAL_MS = 30 * 1000;
 const DEFAULT_REMINDER_LEAD_MINUTES = [5, 1];
+const NETDISK_DEVICE_SCOPE = 'basic,netdisk';
+const NETDISK_DEVICE_MIN_POLL_MS = 5000;
 const PIPER_RUNTIME_RELATIVE_DIR = path.join('vendor', 'piper', 'runtime', 'piper');
 const PIPER_EXECUTABLE_NAME = 'piper.exe';
 const PIPER_MODEL_RELATIVE_PATH = path.join('vendor', 'piper', 'models', 'zh_CN-huayan-medium.onnx');
@@ -259,6 +264,8 @@ let reminderCheckInFlight = false;
 let reminderAudioBuilds = new Map();
 let remoteSchedulePollTimer = null;
 let remoteScheduleStatus = createEmptyRemoteScheduleStatus();
+let remoteScheduleSyncSerial = 0;
+let studyDataMutationSerial = 0;
 
 app.setPath('userData', STABLE_USER_DATA_DIR);
 app.disableHardwareAcceleration();
@@ -1684,6 +1691,11 @@ function currentStudyData() {
   };
 }
 
+function bumpStudyDataMutation() {
+  studyDataMutationSerial += 1;
+  return studyDataMutationSerial;
+}
+
 function applyStudyData(state, source = 'local') {
   const normalized = normalizeStudyData(state, appConfig.baseLibraries || appConfig.libraries);
   appConfig.libraries = normalized.contentLibraries;
@@ -1713,6 +1725,10 @@ function loadPersistedStudySchedule() {
 }
 
 function saveStructuredStudyData(state, source = 'local') {
+  if (source !== 'remote') {
+    bumpStudyDataMutation();
+  }
+
   applyStudyData(state, source);
   fs.writeFileSync(studySchedulePath(), JSON.stringify(serializeStudyData(currentStudyData()), null, 2), 'utf8');
   return currentStudyData();
@@ -2821,6 +2837,9 @@ async function syncRemoteStudySchedule() {
     return false;
   }
 
+  const syncSerial = ++remoteScheduleSyncSerial;
+  const mutationSerialAtStart = studyDataMutationSerial;
+
   const headers = {
     Accept: 'application/json'
   };
@@ -2857,6 +2876,11 @@ async function syncRemoteStudySchedule() {
     }
 
     const normalizedState = normalizeStudyData(payload, appConfig.baseLibraries || libraryDefinitions);
+
+    if (syncSerial !== remoteScheduleSyncSerial || mutationSerialAtStart !== studyDataMutationSerial) {
+      return false;
+    }
+
     applyStudyData(normalizedState, 'remote');
     saveRemoteScheduleCache(normalizedState);
     const mergedCount = normalizedState.parentItems.length + normalizedState.studentItems.length;
@@ -2869,6 +2893,10 @@ async function syncRemoteStudySchedule() {
     };
     return true;
   } catch (error) {
+    if (syncSerial !== remoteScheduleSyncSerial) {
+      return false;
+    }
+
     remoteScheduleStatus = {
       ...remoteScheduleStatus,
       enabled: true,
@@ -2896,6 +2924,8 @@ async function persistStudentStudySchedule(rawSchedule) {
     return currentStudyData();
   }
 
+  const mutationSerial = bumpStudyDataMutation();
+
   const writeToken = appConfig.remoteSchedule.studentWriteToken || appConfig.remoteSchedule.authToken;
 
   if (!writeToken) {
@@ -2917,6 +2947,10 @@ async function persistStudentStudySchedule(rawSchedule) {
 
   if (!payload || payload.error) {
     throw new Error(payload && payload.error ? `学生计划保存失败：${payload.error}` : '学生计划保存失败。');
+  }
+
+  if (mutationSerial !== studyDataMutationSerial) {
+    return currentStudyData();
   }
 
   const normalizedState = normalizeStudyData(payload, appConfig.baseLibraries || libraryDefinitions);
@@ -3071,7 +3105,7 @@ async function invokeNetdiskApi(buildUrl) {
   throw createNetdiskApiError('百度网盘接口调用失败。');
 }
 
-async function listNetdiskFolder(library) {
+async function listNetdiskFolderEntries(folderPath) {
   const items = [];
   let start = 0;
 
@@ -3080,7 +3114,7 @@ async function listNetdiskFolder(library) {
       const url = new URL('https://pan.baidu.com/rest/2.0/xpan/file');
       url.searchParams.set('method', 'list');
       url.searchParams.set('access_token', accessToken);
-      url.searchParams.set('dir', library.folderPath);
+      url.searchParams.set('dir', folderPath);
       url.searchParams.set('web', '1');
       url.searchParams.set('order', 'name');
       url.searchParams.set('desc', '0');
@@ -3102,6 +3136,17 @@ async function listNetdiskFolder(library) {
   return items;
 }
 
+function netdiskPathName(fullPath, fallback = '') {
+  const normalized = normalizePrefix(fullPath);
+
+  if (!normalized || normalized === '/') {
+    return fallback || '/';
+  }
+
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : fallback || normalized;
+}
+
 function isSupportedVideoFileName(fileName) {
   return VIDEO_EXTENSIONS.has(path.extname(normalizePrefix(fileName)).toLowerCase());
 }
@@ -3117,6 +3162,57 @@ function buildNetdiskVideoItems(library, rawItems) {
       sourceUrl: `${internalServerOrigin}${INTERNAL_MEDIA_ROUTE}?libraryId=${encodeURIComponent(library.id)}&fsId=${encodeURIComponent(String(item.fs_id))}`
     }))
     .sort((left, right) => left.title.localeCompare(right.title, 'zh-CN', { numeric: true }));
+}
+
+async function buildNetdiskTreeNode(library, folderPath, options = {}) {
+  const rawItems = await listNetdiskFolderEntries(folderPath);
+  const folderItems = rawItems
+    .filter((item) => Number(item.isdir) === 1)
+    .sort((left, right) =>
+      normalizeTitle(left.server_filename || left.path).localeCompare(
+        normalizeTitle(right.server_filename || right.path),
+        'zh-CN',
+        { numeric: true }
+      )
+    );
+  const files = buildNetdiskVideoItems(library, rawItems);
+  const folders = folderItems.map((item) => {
+    const childPath = normalizeNetdiskFolderPath(item.path || item.server_filename, folderPath);
+
+    return {
+      id: `folder:${childPath}`,
+      name: netdiskPathName(childPath, library.title),
+      path: childPath,
+      folders: [],
+      files: [],
+      isLoaded: false
+    };
+  });
+
+  return {
+    id: `folder:${folderPath}`,
+    name: options.isRoot ? library.title : netdiskPathName(folderPath, library.title),
+    path: folderPath,
+    folders,
+    files,
+    isLoaded: true
+  };
+}
+
+function flattenTreeFiles(node, result = []) {
+  if (!node || typeof node !== 'object') {
+    return result;
+  }
+
+  if (Array.isArray(node.files)) {
+    result.push(...node.files);
+  }
+
+  for (const child of Array.isArray(node.folders) ? node.folders : []) {
+    flattenTreeFiles(child, result);
+  }
+
+  return result;
 }
 
 async function getNetdiskFileDlink(fsId) {
@@ -3173,8 +3269,8 @@ async function buildLibraryModel(libraryId) {
 
   try {
     ensureNetdiskConfigured();
-    const rawItems = await listNetdiskFolder(library);
-    const items = buildNetdiskVideoItems(library, rawItems);
+    const tree = await buildNetdiskTreeNode(library, library.folderPath, { isRoot: true });
+    const items = flattenTreeFiles(tree);
 
     return {
       id: library.id,
@@ -3185,6 +3281,7 @@ async function buildLibraryModel(libraryId) {
       folderPath: library.folderPath,
       authorizeLabel: netdiskState.refreshToken ? '重新连接百度网盘' : '连接百度网盘',
       canAuthorize: true,
+      tree,
       status: libraryStatus('ready', items.length ? '' : '这个目录里还没有可播放的视频。'),
       items
     };
@@ -3205,10 +3302,22 @@ async function buildLibraryModel(libraryId) {
       folderPath: library.folderPath,
       authorizeLabel: netdiskState.refreshToken ? '重新连接百度网盘' : '连接百度网盘',
       canAuthorize: true,
+      tree: null,
       status: libraryStatus(kind, error.message || '媒体库加载失败。'),
       items: []
     };
   }
+}
+
+async function buildLibraryFolderModel(libraryId, folderPath) {
+  const library = resolveLibrary(libraryId);
+
+  if (!library) {
+    throw createNetdiskApiError('没有找到这个媒体库。');
+  }
+
+  ensureNetdiskConfigured();
+  return buildNetdiskTreeNode(library, normalizeNetdiskFolderPath(folderPath, library.folderPath));
 }
 
 function sendHtml(response, statusCode, html) {
@@ -3358,11 +3467,28 @@ async function proxyNetdiskMedia(request, response, requestUrl) {
     headers.Range = request.headers.range;
   }
 
-  const upstreamResponse = await fetch(upstreamUrl, {
-    method: request.method,
-    headers,
-    redirect: 'follow'
-  });
+  let upstreamResponse = null;
+  let currentUpstreamUrl = upstreamUrl;
+
+  for (let redirectCount = 0; redirectCount < 4; redirectCount += 1) {
+    upstreamResponse = await fetch(currentUpstreamUrl, {
+      method: request.method,
+      headers,
+      redirect: 'manual'
+    });
+
+    if (![301, 302, 303, 307, 308].includes(upstreamResponse.status)) {
+      break;
+    }
+
+    const location = upstreamResponse.headers.get('location');
+
+    if (!location) {
+      break;
+    }
+
+    currentUpstreamUrl = new URL(location, currentUpstreamUrl);
+  }
 
   response.statusCode = upstreamResponse.status;
   response.setHeader('Access-Control-Allow-Origin', '*');
@@ -3407,6 +3533,232 @@ function clearPendingNetdiskAuth() {
   pendingNetdiskAuth = null;
 }
 
+async function requestNetdiskDeviceCode() {
+  ensureNetdiskConfigured();
+  const url = new URL('https://openapi.baidu.com/oauth/2.0/device/code');
+  url.searchParams.set('response_type', 'device_code');
+  url.searchParams.set('client_id', appConfig.baiduNetdisk.clientId);
+  url.searchParams.set('scope', NETDISK_DEVICE_SCOPE);
+
+  const payload = await fetchJson(url, {
+    headers: {
+      'User-Agent': NETDISK_AUTH_USER_AGENT
+    }
+  });
+
+  if (!payload || payload.error || !payload.device_code || !payload.user_code || !payload.qrcode_url) {
+    throw createNetdiskAuthError(
+      `百度网盘设备授权初始化失败：${payload && payload.error_description ? payload.error_description : '没有拿到设备码。'}`
+    );
+  }
+
+  return {
+    deviceCode: normalizePrefix(payload.device_code),
+    userCode: normalizePrefix(payload.user_code),
+    verificationUrl: normalizePrefix(payload.verification_url) || 'https://openapi.baidu.com/device',
+    qrCodeUrl: normalizePrefix(payload.qrcode_url),
+    expiresIn: Math.max(60, Number(payload.expires_in) || 300),
+    intervalMs: Math.max(NETDISK_DEVICE_MIN_POLL_MS, (Number(payload.interval) || 5) * 1000)
+  };
+}
+
+function renderNetdiskDeviceAuthHtml(deviceAuth) {
+  const title = '连接百度网盘';
+  const qrCodeUrl = deviceAuth.qrCodeUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const verificationUrl = deviceAuth.verificationUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const userCode = deviceAuth.userCode.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  return `<!doctype html>
+  <html lang="zh-CN">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>${title}</title>
+      <style>
+        :root { color-scheme: dark; }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          min-height: 100vh;
+          font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+          background:
+            radial-gradient(circle at top left, rgba(105, 216, 194, 0.18), transparent 24%),
+            linear-gradient(145deg, #071019, #10131c 58%, #15111a);
+          color: #eef7fb;
+          display: grid;
+          place-items: center;
+          padding: 24px;
+        }
+        .shell {
+          width: min(860px, 100%);
+          display: grid;
+          grid-template-columns: 320px minmax(0, 1fr);
+          gap: 24px;
+          padding: 24px;
+          border-radius: 28px;
+          background: rgba(10, 21, 30, 0.88);
+          border: 1px solid rgba(255,255,255,0.08);
+          box-shadow: 0 24px 80px rgba(0,0,0,0.28);
+        }
+        .qr-panel {
+          display: grid;
+          gap: 14px;
+          justify-items: center;
+        }
+        .qr-box {
+          width: 280px;
+          height: 280px;
+          border-radius: 22px;
+          background: rgba(255,255,255,0.96);
+          display: grid;
+          place-items: center;
+          padding: 14px;
+        }
+        .qr-box img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        .content {
+          display: grid;
+          align-content: center;
+          gap: 14px;
+        }
+        .eyebrow {
+          margin: 0;
+          color: #69d8c2;
+          letter-spacing: 0.16em;
+          font-size: 12px;
+          text-transform: uppercase;
+        }
+        h1 {
+          margin: 0;
+          font-size: 34px;
+        }
+        p {
+          margin: 0;
+          color: #a6c0cf;
+          line-height: 1.7;
+        }
+        .code {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 54px;
+          padding: 0 18px;
+          border-radius: 16px;
+          background: rgba(255,255,255,0.06);
+          border: 1px solid rgba(255,255,255,0.08);
+          font-size: 28px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+        }
+        .link {
+          color: #f4bb64;
+          word-break: break-all;
+        }
+        .hint {
+          font-size: 13px;
+        }
+        @media (max-width: 760px) {
+          .shell { grid-template-columns: 1fr; }
+          .qr-box { width: min(72vw, 280px); height: min(72vw, 280px); }
+        }
+      </style>
+    </head>
+    <body>
+      <main class="shell">
+        <section class="qr-panel">
+          <div class="qr-box">
+            <img src="${qrCodeUrl}" alt="百度网盘授权二维码" />
+          </div>
+          <p class="hint">用手机百度 App、百度网盘 App 或微信扫码</p>
+        </section>
+        <section class="content">
+          <p class="eyebrow">Baidu Netdisk</p>
+          <h1>连接百度网盘</h1>
+          <p>不跳系统浏览器。请直接用手机扫码授权，程序会自动完成连接。</p>
+          <div class="code">${userCode}</div>
+          <p>如果扫码不方便，也可以在手机浏览器打开：</p>
+          <p class="link">${verificationUrl}</p>
+          <p>然后输入上面的授权码。</p>
+          <p class="hint">授权完成后，这个窗口会自动关闭。</p>
+        </section>
+      </main>
+    </body>
+  </html>`;
+}
+
+async function pollNetdiskDeviceAuthorization(deviceAuth, authToken) {
+  const deadline = Date.now() + deviceAuth.expiresIn * 1000;
+  let intervalMs = deviceAuth.intervalMs;
+
+  while (Date.now() < deadline) {
+    if (!pendingNetdiskAuth || pendingNetdiskAuth.token !== authToken) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+
+    if (!pendingNetdiskAuth || pendingNetdiskAuth.token !== authToken) {
+      return;
+    }
+
+    const url = new URL('https://openapi.baidu.com/oauth/2.0/token');
+    url.searchParams.set('grant_type', 'device_token');
+    url.searchParams.set('code', deviceAuth.deviceCode);
+    url.searchParams.set('client_id', appConfig.baiduNetdisk.clientId);
+    url.searchParams.set('client_secret', appConfig.baiduNetdisk.clientSecret);
+
+    const payload = await fetchJson(url, {
+      headers: {
+        'User-Agent': NETDISK_AUTH_USER_AGENT
+      }
+    });
+
+    if (payload && !payload.error && payload.access_token) {
+      updateNetdiskState(payload);
+      if (pendingNetdiskAuth && pendingNetdiskAuth.token === authToken) {
+        const resolve = pendingNetdiskAuth.resolve;
+        clearPendingNetdiskAuth();
+        closeAuthWindow();
+        resolve({ success: true });
+      }
+      return;
+    }
+
+    const errorCode = normalizePrefix(payload && payload.error);
+
+    if (!errorCode || errorCode === 'authorization_pending') {
+      continue;
+    }
+
+    if (errorCode === 'slow_down') {
+      intervalMs += NETDISK_DEVICE_MIN_POLL_MS;
+      continue;
+    }
+
+    if (pendingNetdiskAuth && pendingNetdiskAuth.token === authToken) {
+      const reject = pendingNetdiskAuth.reject;
+      clearPendingNetdiskAuth();
+      closeAuthWindow();
+      reject(
+        createNetdiskAuthError(
+          `百度网盘授权失败：${normalizePrefix(payload && payload.error_description) || errorCode}`
+        )
+      );
+    }
+    return;
+  }
+
+  if (pendingNetdiskAuth && pendingNetdiskAuth.token === authToken) {
+    const reject = pendingNetdiskAuth.reject;
+    clearPendingNetdiskAuth();
+    closeAuthWindow();
+    reject(createNetdiskAuthError('百度网盘授权超时，请重新扫码。'));
+  }
+}
+
 async function authorizeNetdisk() {
   ensureNetdiskConfigured();
 
@@ -3414,23 +3766,22 @@ async function authorizeNetdisk() {
     return pendingNetdiskAuth.promise;
   }
 
-  const authState = crypto.randomBytes(16).toString('hex');
-  const authorizeUrl = new URL('https://openapi.baidu.com/oauth/2.0/authorize');
-  authorizeUrl.searchParams.set('response_type', 'code');
-  authorizeUrl.searchParams.set('client_id', appConfig.baiduNetdisk.clientId);
-  authorizeUrl.searchParams.set('redirect_uri', currentRedirectUri());
-  authorizeUrl.searchParams.set('scope', appConfig.baiduNetdisk.scope);
-  authorizeUrl.searchParams.set('state', authState);
+  const deviceAuth = await requestNetdiskDeviceCode();
+  const authToken = crypto.randomBytes(12).toString('hex');
 
   const authPromise = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
+      if (!pendingNetdiskAuth || pendingNetdiskAuth.token !== authToken) {
+        return;
+      }
+
       clearPendingNetdiskAuth();
       closeAuthWindow();
       reject(createNetdiskAuthError('百度网盘授权超时，请重试。'));
     }, 5 * 60 * 1000);
 
     pendingNetdiskAuth = {
-      state: authState,
+      token: authToken,
       resolve,
       reject,
       timer
@@ -3438,12 +3789,11 @@ async function authorizeNetdisk() {
   });
 
   pendingNetdiskAuth.promise = authPromise;
-
   authWindow = new BrowserWindow({
     title: '连接百度网盘',
-    width: 980,
-    height: 760,
-    show: false,
+    width: 920,
+    height: 640,
+    show: true,
     frame: true,
     autoHideMenuBar: true,
     backgroundColor: '#0f172a',
@@ -3459,7 +3809,6 @@ async function authorizeNetdisk() {
   authWindow.removeMenu();
   authWindow.once('ready-to-show', () => {
     if (authWindow && !authWindow.isDestroyed()) {
-      authWindow.show();
       authWindow.focus();
     }
   });
@@ -3467,14 +3816,15 @@ async function authorizeNetdisk() {
   authWindow.on('closed', () => {
     authWindow = null;
 
-    if (pendingNetdiskAuth) {
+    if (pendingNetdiskAuth && pendingNetdiskAuth.token === authToken) {
       const reject = pendingNetdiskAuth.reject;
       clearPendingNetdiskAuth();
       reject(createNetdiskAuthError('已取消百度网盘授权。'));
     }
   });
 
-  await authWindow.loadURL(authorizeUrl.href);
+  await authWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(renderNetdiskDeviceAuthHtml(deviceAuth))}`);
+  void pollNetdiskDeviceAuthorization(deviceAuth, authToken);
 
   return authPromise;
 }
@@ -3568,9 +3918,18 @@ async function startInternalServer() {
   });
 
   await new Promise((resolve, reject) => {
-    internalServer.once('error', reject);
-    internalServer.listen(0, '0.0.0.0', () => {
-      internalServer.off('error', reject);
+    const onError = (error) => {
+      if (error && error.code === 'EADDRINUSE') {
+        reject(createConfigError(`内部服务端口 ${INTERNAL_SERVER_PORT} 已被占用。请关闭占用该端口的程序后重试。`));
+        return;
+      }
+
+      reject(error);
+    };
+
+    internalServer.once('error', onError);
+    internalServer.listen(INTERNAL_SERVER_PORT, '0.0.0.0', () => {
+      internalServer.off('error', onError);
       resolve();
     });
   });
@@ -3616,6 +3975,20 @@ function createMainWindow() {
   mainWindow.removeMenu();
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setAlwaysOnTop(appConfig.alwaysOnTop, 'screen-saver');
+  mainWindow.on('enter-full-screen', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('window:fullscreen-changed', {
+        fullscreen: true
+      });
+    }
+  });
+  mainWindow.on('leave-full-screen', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('window:fullscreen-changed', {
+        fullscreen: false
+      });
+    }
+  });
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (shouldBlockShortcut(input)) {
@@ -3733,6 +4106,8 @@ function registerIpc() {
 
   ipcMain.handle('shell:get-library-model', async (_event, libraryId) => buildLibraryModel(libraryId));
   ipcMain.handle('shell:reload-library-model', async (_event, libraryId) => buildLibraryModel(libraryId));
+  ipcMain.handle('shell:get-library-folder-model', async (_event, libraryId, folderPath) =>
+    buildLibraryFolderModel(libraryId, folderPath));
   ipcMain.handle('shell:get-student-plan-model', async (_event, options = {}) =>
     buildStudentPlanResponse({
       monthKey: normalizePrefix(options.monthKey),
@@ -3779,6 +4154,18 @@ function registerIpc() {
     goForwardIfPossible();
     return { success: true };
   });
+  ipcMain.handle('shell:toggle-window-fullscreen', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { fullscreen: false };
+    }
+
+    const nextState = !mainWindow.isFullScreen();
+    mainWindow.setFullScreen(nextState);
+    return { fullscreen: nextState };
+  });
+  ipcMain.handle('shell:get-window-fullscreen', async () => ({
+    fullscreen: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFullScreen())
+  }));
   ipcMain.handle('shell:navigate', async (_event, target) => ({
     success: navigateMainWindow(target)
   }));

@@ -12,6 +12,7 @@ const calendarSelectedDate = document.getElementById('calendar-selected-date');
 const calendarSelectedList = document.getElementById('calendar-selected-list');
 
 let refreshPromise = null;
+let queuedRefresh = false;
 let selectedCalendarDateKey = '';
 let currentCalendarModel = null;
 
@@ -255,6 +256,7 @@ function renderModel(model) {
 
 async function refreshHomeModel() {
   if (refreshPromise) {
+    queuedRefresh = true;
     return refreshPromise;
   }
 
@@ -267,6 +269,11 @@ async function refreshHomeModel() {
     await refreshPromise;
   } finally {
     refreshPromise = null;
+  }
+
+  if (queuedRefresh) {
+    queuedRefresh = false;
+    await refreshHomeModel();
   }
 }
 

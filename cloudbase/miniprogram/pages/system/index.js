@@ -1,5 +1,9 @@
 const { callAdmin, decorateAdmins } = require('../../utils/studygate-admin');
 
+let identityRequestSerial = 0;
+let adminsRequestSerial = 0;
+let adminsMutationSerial = 0;
+
 Page({
   data: {
     openId: '',
@@ -27,12 +31,26 @@ Page({
 
     if (this.data.authorized) {
       await this.reloadAdmins();
+      return;
     }
+
+    this.setData({
+      admins: [],
+      hasAdmins: false,
+      adminUpdatedAtDisplay: '还没有管理员记录。'
+    });
   },
 
   async refreshIdentity() {
+    const requestSerial = ++identityRequestSerial;
+
     try {
       const result = await callAdmin('whoami');
+
+      if (requestSerial !== identityRequestSerial) {
+        return;
+      }
+
       const identityHint = result.authorized
         ? '当前账号已授权，可以管理管理员名单。'
         : '当前账号还不是管理员。请让现有管理员把这个 OPENID 加进列表。';
@@ -44,6 +62,19 @@ Page({
         identityHint
       });
     } catch (error) {
+      if (requestSerial !== identityRequestSerial) {
+        return;
+      }
+
+      this.setData({
+        openId: '',
+        openIdDisplay: '未获取到',
+        authorized: false,
+        identityHint: '身份获取失败，请刷新重试。',
+        admins: [],
+        hasAdmins: false
+      });
+
       wx.showToast({
         title: (error && (error.errMsg || error.message)) || '身份获取失败',
         icon: 'none'
@@ -52,8 +83,16 @@ Page({
   },
 
   async reloadAdmins() {
+    const requestSerial = ++adminsRequestSerial;
+    const mutationSerialAtStart = adminsMutationSerial;
+
     try {
       const result = await callAdmin('listAdmins');
+
+      if (requestSerial !== adminsRequestSerial || mutationSerialAtStart !== adminsMutationSerial) {
+        return;
+      }
+
       const admins = decorateAdmins(result.openIds, this.data.openId);
 
       this.setData({
@@ -62,6 +101,10 @@ Page({
         adminUpdatedAtDisplay: result.updatedAt ? `最近更新：${result.updatedAt}` : '还没有管理员记录。'
       });
     } catch (error) {
+      if (requestSerial !== adminsRequestSerial) {
+        return;
+      }
+
       wx.showToast({
         title: error && error.message ? error.message : '管理员加载失败',
         icon: 'none'
@@ -97,9 +140,14 @@ Page({
     }
 
     try {
+      const mutationSerial = ++adminsMutationSerial;
       const result = await callAdmin('addAdmin', {
         openId
       });
+
+      if (mutationSerial !== adminsMutationSerial) {
+        return;
+      }
 
       const admins = decorateAdmins(result.openIds, this.data.openId);
 
@@ -140,9 +188,14 @@ Page({
     }
 
     try {
+      const mutationSerial = ++adminsMutationSerial;
       const result = await callAdmin('removeAdmin', {
         openId
       });
+
+      if (mutationSerial !== adminsMutationSerial) {
+        return;
+      }
 
       const admins = decorateAdmins(result.openIds, this.data.openId);
       const stillAuthorized = admins.some((item) => item.isSelf);

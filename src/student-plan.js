@@ -32,8 +32,11 @@ let currentMonthKey = '';
 let selectedDateKey = '';
 let studentItems = [];
 let pendingRefresh = null;
+let queuedRefreshOptions = null;
 let formState = createEmptyFormState();
 let autoRefreshTimer = null;
+let refreshRequestSerial = 0;
+let viewMutationSerial = 0;
 
 function createEmptyFormState() {
   return {
@@ -282,14 +285,27 @@ function renderModel(response) {
 
 async function refreshModel(options = {}) {
   if (pendingRefresh) {
+    queuedRefreshOptions = {
+      monthKey: options.monthKey || currentMonthKey,
+      selectedDate: options.selectedDate || selectedDateKey
+    };
     return pendingRefresh;
   }
 
+  const requestOptions = {
+    monthKey: options.monthKey || currentMonthKey,
+    selectedDate: options.selectedDate || selectedDateKey
+  };
+  const requestSerial = ++refreshRequestSerial;
+  const mutationSerialAtStart = viewMutationSerial;
+
   pendingRefresh = (async () => {
-    const response = await window.studyGate.getStudentPlanModel({
-      monthKey: options.monthKey || currentMonthKey,
-      selectedDate: options.selectedDate || selectedDateKey
-    });
+    const response = await window.studyGate.getStudentPlanModel(requestOptions);
+
+    if (requestSerial !== refreshRequestSerial || mutationSerialAtStart !== viewMutationSerial) {
+      return;
+    }
+
     renderModel(response);
   })();
 
@@ -297,6 +313,12 @@ async function refreshModel(options = {}) {
     await pendingRefresh;
   } finally {
     pendingRefresh = null;
+  }
+
+  if (queuedRefreshOptions) {
+    const nextOptions = queuedRefreshOptions;
+    queuedRefreshOptions = null;
+    await refreshModel(nextOptions);
   }
 }
 
@@ -313,11 +335,17 @@ function startAutoRefresh() {
 }
 
 async function saveStudentItems(items) {
+  const mutationSerial = ++viewMutationSerial;
   const response = await window.studyGate.saveStudentPlanItems({
     items,
     monthKey: currentMonthKey,
     selectedDate: selectedDateKey
   });
+
+  if (mutationSerial !== viewMutationSerial) {
+    return;
+  }
+
   renderModel(response);
 }
 

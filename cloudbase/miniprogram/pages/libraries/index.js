@@ -3,6 +3,8 @@ const { callAdmin, decorateLibraryItems } = require('../../utils/studygate-admin
 const AUTO_REFRESH_INTERVAL_MS = 30000;
 
 let autoRefreshTimer = null;
+let librariesRequestSerial = 0;
+let librariesMutationSerial = 0;
 
 function emptyForm() {
   return {
@@ -75,8 +77,16 @@ Page({
   },
 
   async reloadLibraries() {
+    const requestSerial = ++librariesRequestSerial;
+    const mutationSerialAtStart = librariesMutationSerial;
+
     try {
       const result = await callAdmin('list');
+
+      if (requestSerial !== librariesRequestSerial || mutationSerialAtStart !== librariesMutationSerial) {
+        return;
+      }
+
       const libraries = decorateLibraryItems(result.contentLibraries);
 
       this.setData({
@@ -85,6 +95,10 @@ Page({
         updatedAtDisplay: result.updatedAt ? `最近更新：${result.updatedAt}` : '还没有模块记录。'
       });
     } catch (error) {
+      if (requestSerial !== librariesRequestSerial) {
+        return;
+      }
+
       wx.showToast({
         title: error && error.message ? error.message : '加载失败',
         icon: 'none'
@@ -144,10 +158,17 @@ Page({
   },
 
   async persistLibraries(libraries, successText, options = {}) {
+    const mutationSerial = ++librariesMutationSerial;
+
     try {
       const result = await callAdmin('saveLibraries', {
         contentLibraries: libraries
       });
+
+      if (mutationSerial !== librariesMutationSerial) {
+        return;
+      }
+
       const nextLibraries = decorateLibraryItems(result.contentLibraries);
       const nextState = {
         libraries: nextLibraries,
