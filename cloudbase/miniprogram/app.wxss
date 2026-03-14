@@ -1,5 +1,6 @@
 page {
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(198, 117, 62, 0.18), transparent 26%),
     radial-gradient(circle at top right, rgba(49, 111, 111, 0.12), transparent 22%),
@@ -18,6 +19,8 @@ button::after {
   box-sizing: border-box;
   display: grid;
   gap: 22rpx;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .masthead {
@@ -169,8 +172,14 @@ button::after {
 .action-row {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: 16rpx;
   margin-top: 22rpx;
+}
+
+.action-row--start {
+  justify-content: flex-start;
 }
 
 .action-row button {
@@ -180,6 +189,40 @@ button::after {
   font-size: 26rpx;
   min-height: 80rpx;
   line-height: 80rpx;
+}
+
+.tap-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  min-height: 64rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  line-height: 1;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.tap-button--primary {
+  background: linear-gradient(135deg, #ca6d33, #b8572d);
+  color: #fff;
+}
+
+.tap-button--secondary {
+  background: rgba(202, 109, 51, 0.12);
+  color: #c05f2d;
+}
+
+.tap-button--danger {
+  background: rgba(157, 37, 37, 0.12);
+  color: #a52b2b;
+}
+
+.tap-button--active {
+  filter: brightness(0.96);
 }
 
 .btn-primary {

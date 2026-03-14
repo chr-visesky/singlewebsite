@@ -7,16 +7,27 @@
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
+  min-width: 0;
 }
 
-.refresh-button {
-  min-width: 108rpx;
-  height: 76rpx;
-  line-height: 76rpx;
-  padding: 0 22rpx;
+.header-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  height: 60rpx;
+  padding: 0 18rpx;
   border-radius: 999rpx;
   background: rgba(31, 39, 45, 0.08);
   color: #394851;
-  font-size: 24rpx;
+  font-size: 22rpx;
+  line-height: 1;
   text-align: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+.header-chip--active {
+  background: rgba(31, 39, 45, 0.14);
 }

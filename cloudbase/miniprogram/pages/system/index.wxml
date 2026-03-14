@@ -10,15 +10,15 @@
     <view class="meta meta--light">OPENID</view>
     <view class="meta meta--light meta--break">{{openIdDisplay}}</view>
     <view class="action-row">
-      <button class="btn-secondary" bindtap="refreshIdentity">刷新身份</button>
-      <button class="btn-secondary" bindtap="copyOpenId">复制 OPENID</button>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="refreshIdentity">刷新身份</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="copyOpenId">复制 OPENID</view>
     </view>
   </view>
 
   <view wx:if="{{authorized}}" class="panel">
     <view class="panel__title">设置</view>
-    <view class="action-row">
-      <button class="btn-secondary" bindtap="openLibrariesPage">百度网盘视频模块</button>
+    <view class="action-row action-row--start">
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="openLibrariesPage">百度网盘视频模块</view>
     </view>
   </view>
 
@@ -49,9 +49,9 @@
     </view>
 
     <view class="action-row">
-      <button class="btn-primary" bindtap="saveExitPassword">保存密码</button>
-      <button class="btn-secondary" bindtap="reloadControlSettings">刷新</button>
-      <button wx:if="{{hasExitPassword}}" class="btn-danger" bindtap="clearExitPassword">清空</button>
+      <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="saveExitPassword">保存密码</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="reloadControlSettings">刷新</view>
+      <view wx:if="{{hasExitPassword}}" class="tap-button tap-button--danger" hover-class="tap-button--active" bindtap="clearExitPassword">清空</view>
     </view>
   </view>
 
@@ -65,8 +65,8 @@
     </view>
 
     <view class="action-row">
-      <button class="btn-primary" bindtap="addAdmin">添加管理员</button>
-      <button class="btn-secondary" bindtap="reloadAdmins">刷新列表</button>
+      <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="addAdmin">添加管理员</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="reloadAdmins">刷新列表</view>
     </view>
 
     <view wx:if="{{!hasAdmins}}" class="empty-state">
@@ -85,7 +85,7 @@
         </view>
 
         <view class="action-row">
-          <button class="btn-danger" data-openid="{{item.openId}}" bindtap="removeAdmin">移除</button>
+          <view class="tap-button tap-button--danger" hover-class="tap-button--active" data-openid="{{item.openId}}" bindtap="removeAdmin">移除</view>
         </view>
       </view>
     </view>

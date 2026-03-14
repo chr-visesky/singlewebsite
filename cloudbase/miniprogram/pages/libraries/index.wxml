@@ -5,7 +5,7 @@
         <view class="masthead__title">百度网盘视频模块</view>
         <view class="status-pill">{{updatedAtDisplay}}</view>
       </view>
-      <button class="refresh-button" bindtap="manualRefresh">刷新</button>
+      <view class="header-chip" hover-class="header-chip--active" bindtap="manualRefresh">刷新</view>
     </view>
   </view>
 
@@ -23,8 +23,8 @@
     </view>
 
     <view class="action-row">
-      <button class="btn-primary" bindtap="saveLibrary">{{submitText}}</button>
-      <button class="btn-secondary" bindtap="resetForm">清空</button>
+      <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="saveLibrary">{{submitText}}</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="resetForm">清空</view>
     </view>
   </view>
 
@@ -44,8 +44,8 @@
           </view>
         </view>
         <view class="action-row">
-          <button class="btn-secondary" data-id="{{item.id}}" bindtap="editLibrary">编辑</button>
-          <button class="btn-danger" data-id="{{item.id}}" bindtap="removeLibrary">删除</button>
+          <view class="tap-button tap-button--secondary" hover-class="tap-button--active" data-id="{{item.id}}" bindtap="editLibrary">编辑</view>
+          <view class="tap-button tap-button--danger" hover-class="tap-button--active" data-id="{{item.id}}" bindtap="removeLibrary">删除</view>
         </view>
       </view>
     </view>

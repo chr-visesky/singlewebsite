@@ -1,50 +1,75 @@
 .grow {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .masthead {
   padding: 28rpx 30rpx;
+  min-width: 0;
 }
 
-.masthead__bar {
+.masthead__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .masthead__title {
   margin-top: 0;
   font-size: 46rpx;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .status-pill {
   margin-top: 12rpx;
+  max-width: 100%;
+  min-width: 0;
 }
 
-.gear-button {
-  width: 76rpx;
-  min-width: 76rpx;
-  height: 76rpx;
-  line-height: 76rpx;
+.masthead__actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex: 0 0 auto;
+}
+
+.header-chip,
+.header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  height: 60rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: rgba(31, 39, 45, 0.08);
+  color: #394851;
+  text-align: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+.header-chip {
+  font-size: 22rpx;
+  line-height: 1;
+}
+
+.header-icon {
+  width: 60rpx;
+  height: 60rpx;
   padding: 0;
-  border-radius: 999rpx;
-  background: rgba(31, 39, 45, 0.08);
-  color: #394851;
-  font-size: 32rpx;
-  text-align: center;
+  font-size: 28rpx;
+  line-height: 1;
 }
 
-.refresh-button {
-  min-width: 108rpx;
-  height: 76rpx;
-  line-height: 76rpx;
-  padding: 0 22rpx;
-  border-radius: 999rpx;
-  background: rgba(31, 39, 45, 0.08);
-  color: #394851;
-  font-size: 24rpx;
-  text-align: center;
+.header-chip--active {
+  background: rgba(31, 39, 45, 0.14);
 }
 
 .calendar-toolbar {
@@ -52,11 +77,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
+  min-width: 0;
 }
 
 .calendar-toolbar__title {
   font-size: 30rpx;
   font-weight: 700;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
 }
 
 .calendar-nav {
@@ -76,12 +105,14 @@
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8rpx;
   margin-top: 20rpx;
+  min-width: 0;
 }
 
 .calendar-weekdays__item {
   text-align: center;
   color: rgba(248, 242, 232, 0.72);
   font-size: 22rpx;
+  min-width: 0;
 }
 
 .calendar-grid {
@@ -89,10 +120,12 @@
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8rpx;
   margin-top: 12rpx;
+  min-width: 0;
 }
 
 .calendar-cell {
-  min-height: 130rpx;
+  min-width: 0;
+  min-height: 118rpx;
   padding: 10rpx 8rpx;
   border-radius: 18rpx;
   background: rgba(255, 255, 255, 0.08);
@@ -118,18 +151,21 @@
   align-items: center;
   justify-content: space-between;
   gap: 10rpx;
+  min-width: 0;
 }
 
 .calendar-cell__day {
   font-size: 22rpx;
   font-weight: 700;
   color: #f8f2e8;
+  min-width: 0;
 }
 
 .calendar-cell__count {
   font-size: 20rpx;
   color: #ffd37c;
   text-align: right;
+  flex: 0 0 auto;
 }
 
 .calendar-cell__preview {
@@ -152,6 +188,7 @@
 
 .selected-list {
   margin-top: 18rpx;
+  min-width: 0;
 }
 
 .selected-card {
@@ -183,6 +220,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
+  min-width: 0;
 }
 
 .selected-row__main {
@@ -200,8 +238,17 @@
   gap: 4rpx;
 }
 
+.selected-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
 .selected-row__title {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -219,6 +266,7 @@
 .selected-badge {
   padding: 6rpx 12rpx;
   font-size: 18rpx;
+  flex: 0 0 auto;
 }
 
 .selected-action {
@@ -255,6 +303,7 @@
 
 .split--compact {
   align-items: end;
+  min-width: 0;
 }
 
 .picker-input {
@@ -273,6 +322,12 @@
 .target-grid {
   display: grid;
   gap: 14rpx;
+  min-width: 0;
+}
+
+.target-grid checkbox-group {
+  display: block;
+  min-width: 0;
 }
 
 .target-chip {
@@ -299,6 +354,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12rpx;
+  min-width: 0;
 }
 
 .weekday-chip {
@@ -328,11 +384,41 @@
 
 .weekly-card {
   padding: 22rpx;
+  min-width: 0;
+}
+
+.weekly-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  min-width: 0;
+}
+
+.weekly-row__main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.weekly-row__title-line {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.weekly-row__title-line .list-card__title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .weekly-delete {
-  align-self: flex-start;
-  min-width: 104rpx;
+  align-self: center;
+  width: auto;
+  min-width: 0;
   min-height: 64rpx;
   line-height: 64rpx;
   padding: 0 18rpx;
@@ -340,6 +426,80 @@
   background: rgba(191, 61, 49, 0.12);
   color: #af352b;
   font-size: 24rpx;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+@media (max-width: 520px) {
+  .masthead__top {
+    gap: 12rpx;
+  }
+
+  .masthead__title {
+    font-size: 42rpx;
+  }
+
+  .status-pill {
+    font-size: 22rpx;
+    line-height: 1.3;
+  }
+
+  .calendar-weekdays,
+  .calendar-grid {
+    gap: 6rpx;
+  }
+
+  .calendar-cell {
+    min-height: 104rpx;
+    padding: 8rpx 6rpx;
+    border-radius: 16rpx;
+  }
+
+  .calendar-cell__day {
+    font-size: 20rpx;
+  }
+
+  .calendar-cell__count {
+    font-size: 18rpx;
+  }
+
+  .calendar-cell__preview {
+    margin-top: 4rpx;
+    font-size: 16rpx;
+    line-height: 1.25;
+  }
+
+  .selected-row {
+    gap: 12rpx;
+  }
+
+  .selected-row__main {
+    gap: 8rpx;
+  }
+
+  .selected-row__title-line,
+  .weekly-row__title-line {
+    gap: 6rpx;
+  }
+
+  .selected-badge {
+    padding: 4rpx 10rpx;
+    font-size: 16rpx;
+  }
+
+  .selected-action {
+    height: 38rpx;
+    line-height: 38rpx;
+    font-size: 16rpx;
+    padding: 0 8rpx;
+  }
+
+  .weekly-delete {
+    min-height: 56rpx;
+    line-height: 56rpx;
+    font-size: 22rpx;
+    padding: 0 14rpx;
+  }
 }
 
 @media (max-width: 420px) {
@@ -348,6 +508,25 @@
   }
 
   .weekday-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .masthead__actions {
+    gap: 10rpx;
+  }
+
+  .header-chip {
+    padding: 0 16rpx;
+    font-size: 20rpx;
+  }
+
+  .header-icon {
+    width: 56rpx;
+    height: 56rpx;
+    font-size: 26rpx;
+  }
+
+  .calendar-toolbar__title {
+    font-size: 28rpx;
   }
 }

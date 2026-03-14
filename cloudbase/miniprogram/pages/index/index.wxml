@@ -1,13 +1,13 @@
 <view class="shell">
   <view class="masthead">
-    <view class="masthead__bar">
-      <view class="grow">
-        <view class="masthead__title">计划管理</view>
-        <view class="status-pill">{{identityHint}}</view>
+    <view class="masthead__top">
+      <view class="masthead__title">计划管理</view>
+      <view class="masthead__actions">
+        <view class="header-chip" hover-class="header-chip--active" bindtap="manualRefresh">刷新</view>
+        <view class="header-icon" hover-class="header-chip--active" bindtap="openSystemPage">⚙</view>
       </view>
-      <button class="refresh-button" bindtap="manualRefresh">刷新</button>
-      <button class="gear-button" bindtap="openSystemPage">⚙</button>
     </view>
+    <view class="status-pill">{{identityHint}}</view>
   </view>
 
   <view class="panel panel--ink">
@@ -50,10 +50,12 @@
       <view wx:for="{{selectedDateItems}}" wx:key="id" class="list-card selected-card {{item.isSkipped ? 'selected-card--skipped' : ''}}">
         <view class="selected-row">
           <view class="selected-row__main">
-            <view class="badge selected-badge {{item.planScope === 'student' ? 'badge--student' : 'badge--parent'}}">{{item.planScopeLabel}}</view>
-            <view class="badge selected-badge {{item.isSkipped ? 'badge--muted' : ''}}">{{item.stateLabel}}</view>
             <view class="selected-row__content">
-              <view class="selected-row__title">{{item.title}}</view>
+              <view class="selected-row__title-line">
+                <view class="selected-row__title">{{item.title}}</view>
+                <view class="badge selected-badge {{item.planScope === 'student' ? 'badge--student' : 'badge--parent'}}">{{item.planScopeLabel}}</view>
+                <view class="badge selected-badge {{item.isSkipped ? 'badge--muted' : ''}}">{{item.stateLabel}}</view>
+              </view>
               <view class="selected-row__meta">{{item.time}}</view>
             </view>
           </view>
@@ -124,8 +126,8 @@
     </view>
 
     <view class="action-row">
-      <button class="btn-primary" bindtap="saveComposer">保存</button>
-      <button class="btn-secondary" bindtap="resetComposer">清空</button>
+      <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="saveComposer">保存</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="resetComposer">清空</view>
     </view>
   </view>
 
@@ -133,15 +135,15 @@
     <view class="panel__title">周期计划</view>
     <view class="list-stack">
       <view wx:for="{{weeklyItems}}" wx:key="id" class="list-card weekly-card">
-        <view class="list-card__head">
-          <view class="grow">
-            <view class="list-card__title">{{item.title}}</view>
+        <view class="weekly-row">
+          <view class="grow weekly-row__main">
+            <view class="weekly-row__title-line">
+              <view class="list-card__title">{{item.title}}</view>
+              <view class="badge {{item.planScope === 'student' ? 'badge--student' : 'badge--parent'}}">{{item.planScopeLabel}}</view>
+            </view>
             <view class="meta">{{item.time}} · {{item.patternLabel}}</view>
           </view>
-          <view class="badge {{item.planScope === 'student' ? 'badge--student' : 'badge--parent'}}">{{item.planScopeLabel}}</view>
-        </view>
-        <view class="action-row">
-          <button class="weekly-delete" data-id="{{item.id}}" data-scope="{{item.planScope}}" bindtap="deleteWeeklyItem">删除</button>
+          <view class="weekly-delete" hover-class="tap-button--active" data-id="{{item.id}}" data-scope="{{item.planScope}}" bindtap="deleteWeeklyItem">删除</view>
         </view>
         <view wx:if="{{item.message}}" class="meta">{{item.message}}</view>
       </view>
