@@ -1,0 +1,53 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__bar">
+      <view class="grow">
+        <view class="masthead__title">学习工具模块</view>
+        <view class="status-pill">{{updatedAtDisplay}}</view>
+      </view>
+      <view class="header-chip" hover-class="header-chip--active" bindtap="manualRefresh">刷新</view>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">添加模块</view>
+
+    <view class="field">
+      <view class="field__label">显示名称</view>
+      <input class="input" placeholder="例如：词典" value="{{form.title}}" data-field="title" bindinput="onInput" />
+    </view>
+
+    <view class="field">
+      <view class="field__label">本机程序路径</view>
+      <input class="input" placeholder="例如：C:\\Program Files\\App\\App.exe" value="{{form.appPath}}" data-field="appPath" bindinput="onInput" />
+    </view>
+
+    <view class="action-row">
+      <view class="tap-button tap-button--primary" hover-class="tap-button--active" bindtap="saveTool">{{submitText}}</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="resetForm">清空</view>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel__title">当前模块</view>
+
+    <view wx:if="{{!hasTools}}" class="empty-state">
+      <view class="empty-state__title">还没有模块</view>
+    </view>
+
+    <view wx:if="{{hasTools}}" class="list-stack">
+      <view wx:for="{{tools}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.title}}</view>
+            <view class="meta meta--break">{{item.appPath}}</view>
+          </view>
+        </view>
+        <view class="action-row">
+          <view class="tap-button tap-button--secondary" hover-class="tap-button--active" data-id="{{item.id}}" bindtap="editTool">编辑</view>
+          <view class="tap-button tap-button--danger" hover-class="tap-button--active" data-id="{{item.id}}" bindtap="removeTool">删除</view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

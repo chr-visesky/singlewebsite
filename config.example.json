@@ -62,6 +62,15 @@
       "folderPath": "/陆老师讲义"
     }
   ],
+  "learningTools": [
+    {
+      "id": "dictionary-tool",
+      "title": "词典",
+      "description": "打开本机词典程序。",
+      "tone": "teal",
+      "appPath": "C:\\\\Windows\\\\System32\\\\notepad.exe"
+    }
+  ],
   "studySchedule": [
     {
       "id": "english-example",

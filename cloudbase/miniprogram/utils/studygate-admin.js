@@ -144,6 +144,18 @@ function decorateClassroomItems(items) {
     : [];
 }
 
+function decorateLearningToolItems(items) {
+  return Array.isArray(items)
+    ? items.map((item, index) => ({
+        id: item.id || `tool-${index + 1}`,
+        title: item.title || '',
+        appPath: item.appPath || item.path || item.executablePath || '',
+        description: item.description || '',
+        tone: item.tone || ''
+      }))
+    : [];
+}
+
 function decorateAdmins(openIds, currentOpenId) {
   return Array.isArray(openIds)
     ? openIds.map((openId) => ({
@@ -251,6 +263,7 @@ module.exports = {
   decorateScheduleItems,
   decorateClassroomItems,
   decorateLibraryItems,
+  decorateLearningToolItems,
   decorateAdmins,
   decorateStudentDevices,
   buildHomeTiles,

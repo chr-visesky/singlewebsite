@@ -163,6 +163,10 @@ function normalizeNetdiskFolderPath(value, fallback = '/') {
   return candidate.startsWith('/') ? candidate : `/${candidate}`;
 }
 
+function normalizeLearningToolPath(value) {
+  return normalizePrefix(value);
+}
+
 function normalizeContentLibraries(rawLibraries) {
   if (!Array.isArray(rawLibraries) || !rawLibraries.length) {
     return [];
@@ -197,6 +201,42 @@ function normalizeContentLibraries(rawLibraries) {
   }
 
   return libraries;
+}
+
+function normalizeLearningTools(rawTools) {
+  if (!Array.isArray(rawTools) || !rawTools.length) {
+    return [];
+  }
+
+  const tools = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < rawTools.length; index += 1) {
+    const item = rawTools[index] || {};
+    const title = normalizePrefix(item.title);
+    const appPath = normalizeLearningToolPath(item.appPath || item.path || item.executablePath);
+
+    if (!title || !appPath) {
+      continue;
+    }
+
+    const id = normalizeId(item.id, `tool-${index + 1}`);
+
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    tools.push({
+      id,
+      title,
+      description: normalizePrefix(item.description),
+      tone: normalizePrefix(item.tone),
+      appPath
+    });
+  }
+
+  return tools;
 }
 
 function normalizeOnlineClassrooms(rawClassrooms) {
@@ -390,6 +430,37 @@ function combineItems(parentItems, studentItems) {
   return [...parentItems, ...studentItems];
 }
 
+function assertLearningToolsNotInUse(currentState, nextLearningTools) {
+  const currentIds = new Set((Array.isArray(currentState.learningTools) ? currentState.learningTools : []).map((item) => item.id));
+  const nextIds = new Set((Array.isArray(nextLearningTools) ? nextLearningTools : []).map((item) => item.id));
+  const removedIds = [...currentIds].filter((item) => !nextIds.has(item));
+
+  if (!removedIds.length) {
+    return;
+  }
+
+  const removedIdSet = new Set(removedIds);
+  const removedTitleMap = new Map(
+    (Array.isArray(currentState.learningTools) ? currentState.learningTools : [])
+      .filter((item) => removedIdSet.has(item.id))
+      .map((item) => [item.id, item.title || item.id])
+  );
+  const referencedTitles = Array.from(
+    new Set(
+      combineItems(currentState.parentItems, currentState.studentItems)
+        .filter((item) => removedIdSet.has(normalizeTarget(item.target || item.targetId)))
+        .map((item) => removedTitleMap.get(normalizeTarget(item.target || item.targetId)) || normalizeTarget(item.target || item.targetId))
+        .filter(Boolean)
+    )
+  );
+
+  if (!referencedTitles.length) {
+    return;
+  }
+
+  throw new Error(`以下学习工具仍被计划引用，不能删除：${referencedTitles.join('、')}`);
+}
+
 function adminOpenIds() {
   return normalizeOpenIds(normalizePrefix(process.env.ADMIN_OPENIDS).split(','));
 }
@@ -553,6 +624,7 @@ async function readState() {
     const studentItems = normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student');
     const onlineClassrooms = fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms));
     const contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    const learningTools = normalizeLearningTools(data.learningTools || data.tools);
     const studentDeviceAccess = normalizeStudentDeviceAccess(data.studentDeviceAccess);
     const controlSettings = normalizeControlSettings(data.controlSettings);
 
@@ -562,6 +634,7 @@ async function readState() {
       studentItems,
       onlineClassrooms,
       contentLibraries,
+      learningTools,
       studentDeviceAccess,
       studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
       controlSettings,
@@ -577,6 +650,7 @@ async function readState() {
         studentItems: [],
         onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
         contentLibraries: [],
+        learningTools: [],
         studentDeviceAccess: [],
         studentDeviceAccessUpdatedAt: '',
         controlSettings: createEmptyControlSettings(),
@@ -597,6 +671,7 @@ async function writeState(rawState = {}, options = {}) {
       studentItems: [],
       onlineClassrooms: [],
       contentLibraries: [],
+      learningTools: [],
       studentDeviceAccess: [],
       studentDeviceAccessUpdatedAt: '',
       controlSettings: createEmptyControlSettings()
@@ -615,6 +690,7 @@ async function writeState(rawState = {}, options = {}) {
           studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
           onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms)),
           contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+          learningTools: normalizeLearningTools(data.learningTools || data.tools),
           studentDeviceAccess: normalizeStudentDeviceAccess(data.studentDeviceAccess),
           studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
           controlSettings: normalizeControlSettings(data.controlSettings)
@@ -640,6 +716,9 @@ async function writeState(rawState = {}, options = {}) {
     const contentLibraries = Object.prototype.hasOwnProperty.call(rawState, 'contentLibraries')
       ? normalizeContentLibraries(rawState.contentLibraries)
       : currentState.contentLibraries;
+    const learningTools = Object.prototype.hasOwnProperty.call(rawState, 'learningTools')
+      ? normalizeLearningTools(rawState.learningTools)
+      : currentState.learningTools;
     const studentDeviceAccess = Object.prototype.hasOwnProperty.call(rawState, 'studentDeviceAccess')
       ? normalizeStudentDeviceAccess(rawState.studentDeviceAccess)
       : currentState.studentDeviceAccess;
@@ -655,6 +734,7 @@ async function writeState(rawState = {}, options = {}) {
       studentItems,
       onlineClassrooms: fallbackOnlineClassrooms(onlineClassrooms),
       contentLibraries,
+      learningTools,
       studentDeviceAccess,
       studentDeviceAccessUpdatedAt,
       controlSettings,
@@ -677,6 +757,7 @@ async function mutateStudentDeviceAccess(mutator) {
       studentItems: [],
       onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
       contentLibraries: [],
+      learningTools: [],
       studentDeviceAccess: [],
       studentDeviceAccessUpdatedAt: '',
       controlSettings: createEmptyControlSettings()
@@ -694,6 +775,7 @@ async function mutateStudentDeviceAccess(mutator) {
         studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
         onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms)),
         contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+        learningTools: normalizeLearningTools(data.learningTools || data.tools),
         studentDeviceAccess: normalizeStudentDeviceAccess(data.studentDeviceAccess),
         studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
         controlSettings: normalizeControlSettings(data.controlSettings)
@@ -714,6 +796,7 @@ async function mutateStudentDeviceAccess(mutator) {
       studentItems: currentState.studentItems,
       onlineClassrooms: currentState.onlineClassrooms,
       contentLibraries: currentState.contentLibraries,
+      learningTools: currentState.learningTools,
       studentDeviceAccess: nextDevices,
       studentDeviceAccessUpdatedAt: now,
       controlSettings: currentState.controlSettings,
@@ -748,6 +831,7 @@ exports.main = async (event = {}) => {
       scheduleCount: state.items.length,
       classroomCount: state.onlineClassrooms.length,
       libraryCount: state.contentLibraries.length,
+      learningToolCount: state.learningTools.length,
       hasExitPassword: Boolean(state.controlSettings.exitPasswordHash)
     };
   }
@@ -776,6 +860,10 @@ exports.main = async (event = {}) => {
 
     if (Array.isArray(event.contentLibraries)) {
       payload.contentLibraries = event.contentLibraries;
+    }
+
+    if (Array.isArray(event.learningTools)) {
+      payload.learningTools = event.learningTools;
     }
 
     if (Array.isArray(event.onlineClassrooms)) {
@@ -815,6 +903,27 @@ exports.main = async (event = {}) => {
       ...(await writeState(
         {
           onlineClassrooms: Array.isArray(event.onlineClassrooms) ? event.onlineClassrooms : event.classrooms
+        },
+        {
+          mergeWithExisting: true
+        }
+      ))
+    };
+  }
+
+  if (action === 'saveLearningTools') {
+    const currentState = await readState();
+    const nextLearningTools = normalizeLearningTools(
+      Array.isArray(event.learningTools) ? event.learningTools : event.tools
+    );
+
+    assertLearningToolsNotInUse(currentState, nextLearningTools);
+
+    return {
+      ok: true,
+      ...(await writeState(
+        {
+          learningTools: nextLearningTools
         },
         {
           mergeWithExisting: true

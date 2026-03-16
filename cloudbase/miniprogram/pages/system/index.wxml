@@ -20,6 +20,7 @@
     <view class="action-row action-row--start">
       <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="openClassroomsPage">在线课堂模块</view>
       <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="openLibrariesPage">百度网盘视频模块</view>
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="openToolsPage">学习工具模块</view>
     </view>
   </view>
 

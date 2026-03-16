@@ -17,6 +17,12 @@ const {
   nativeModuleTargetOptions,
   launchNativeModule
 } = require('./native-modules');
+const {
+  launchLearningTool,
+  normalizeLearningTools,
+  resolveLearningToolTitle: resolveLearningToolTitleFromList,
+  serializeLearningTools
+} = require('./learning-tools');
 
 const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
@@ -281,6 +287,8 @@ let classroomDefinitions = [];
 let classroomIndex = new Map();
 let libraryDefinitions = [];
 let libraryIndex = new Map();
+let learningToolDefinitions = [];
+let learningToolIndex = new Map();
 const nativeModuleDefinitions = listNativeModules();
 const nativeModuleIndex = new Map(nativeModuleDefinitions.map((moduleDefinition) => [moduleDefinition.id, moduleDefinition]));
 let sessionPersistTimer = null;
@@ -662,6 +670,9 @@ function normalizeStudySchedule(rawSchedule, classrooms, libraries, options = {}
   const classroomIds = new Set(classrooms.map((classroom) => classroom.id));
   const defaultClassroomId = classrooms[0] ? classrooms[0].id : '';
   const libraryIds = new Set(libraries.map((library) => library.id));
+  const learningToolIds = new Set(
+    (Array.isArray(options.learningTools) ? options.learningTools : []).map((learningTool) => learningTool.id)
+  );
   const nativeModuleIds = new Set(nativeModuleDefinitions.map((moduleDefinition) => moduleDefinition.id));
   const seenIds = new Set();
   const schedule = [];
@@ -677,12 +688,22 @@ function normalizeStudySchedule(rawSchedule, classrooms, libraries, options = {}
     const candidateTargetId = normalizeScheduleTargetId(item.target || item.targetId);
     const targetId = candidateTargetId === 'english-course'
       ? defaultClassroomId
-      : classroomIds.has(candidateTargetId) || libraryIds.has(candidateTargetId) || nativeModuleIds.has(candidateTargetId)
+      : classroomIds.has(candidateTargetId) ||
+          libraryIds.has(candidateTargetId) ||
+          learningToolIds.has(candidateTargetId) ||
+          nativeModuleIds.has(candidateTargetId)
         ? candidateTargetId
         : '';
     const title =
       normalizePrefix(item.title) ||
-      (targetId ? resolveStudyTargetTitle(classrooms, libraries, targetId) : '');
+      (targetId
+        ? resolveStudyTargetTitle(
+            classrooms,
+            libraries,
+            Array.isArray(options.learningTools) ? options.learningTools : [],
+            targetId
+          )
+        : '');
 
     if (!title) {
       continue;
@@ -978,9 +999,10 @@ function resolveLibraryTitle(libraries, libraryId) {
   return library ? library.title : '学习内容';
 }
 
-function resolveStudyTargetTitle(classrooms, libraries, targetId) {
+function resolveStudyTargetTitle(classrooms, libraries, learningTools, targetId) {
   return (
     resolveClassroomTitle(classrooms, targetId) ||
+    resolveLearningToolTitleFromList(learningTools, targetId) ||
     resolveNativeModuleTitle(targetId) ||
     resolveLibraryTitle(libraries, targetId)
   );
@@ -993,16 +1015,17 @@ function normalizeLibraries(rawLibraries, options = {}) {
       : options.fallbackToDefault === false
         ? []
         : defaultLibraries();
+  const reservedIds = options.reservedIds instanceof Set ? options.reservedIds : new Set();
   const seenIds = new Set();
   const libraries = [];
 
   for (let index = 0; index < source.length; index += 1) {
     const item = source[index] || {};
     const fallbackId = `library-${index + 1}`;
-    const id = normalizeLibraryId(item.id, fallbackId);
+    let id = normalizeLibraryId(item.id, fallbackId);
 
-    if (seenIds.has(id)) {
-      continue;
+    while (seenIds.has(id) || reservedIds.has(id)) {
+      id = normalizeLibraryId(`${id}-library`, fallbackId);
     }
 
     seenIds.add(id);
@@ -1029,18 +1052,20 @@ function serializeLibraries(libraries = libraryDefinitions) {
   }));
 }
 
-function normalizeStudyData(rawState, fallbackClassrooms = [], fallbackLibraries = []) {
+function normalizeStudyData(rawState, fallbackClassrooms = [], fallbackLibraries = [], fallbackLearningTools = []) {
   const fallbackClassroomList =
     Array.isArray(fallbackClassrooms) && fallbackClassrooms.length
       ? fallbackClassrooms
       : defaultOnlineClassrooms(appConfig && appConfig.startUrl);
   const fallbackLibraryList = Array.isArray(fallbackLibraries) && fallbackLibraries.length ? fallbackLibraries : defaultLibraries();
+  const fallbackLearningToolList = Array.isArray(fallbackLearningTools) ? fallbackLearningTools : [];
   const source = rawState && typeof rawState === 'object' ? rawState : {};
   const hasExplicitControlSettings = Object.prototype.hasOwnProperty.call(source, 'controlSettings');
   const hasExplicitClassrooms =
     Array.isArray(source.onlineClassrooms) || Array.isArray(source.classrooms);
   const hasExplicitLibraries =
     Array.isArray(source.contentLibraries) || Array.isArray(source.libraries);
+  const hasExplicitLearningTools = Array.isArray(source.learningTools) || Array.isArray(source.tools);
   const rawClassrooms = Array.isArray(source.onlineClassrooms)
     ? source.onlineClassrooms
     : Array.isArray(source.classrooms)
@@ -1051,13 +1076,31 @@ function normalizeStudyData(rawState, fallbackClassrooms = [], fallbackLibraries
     : Array.isArray(source.libraries)
       ? source.libraries
       : fallbackLibraryList;
-  const libraries = normalizeLibraries(rawLibraries, {
-    fallbackToDefault: !hasExplicitLibraries
-  });
+  const rawLearningTools = Array.isArray(source.learningTools)
+    ? source.learningTools
+    : Array.isArray(source.tools)
+      ? source.tools
+      : fallbackLearningToolList;
+  const nativeModuleIds = new Set(nativeModuleDefinitions.map((moduleDefinition) => moduleDefinition.id));
   const classrooms = normalizeOnlineClassrooms(rawClassrooms, {
     defaultStartUrl: fallbackClassroomList[0] ? fallbackClassroomList[0].entryUrl : '',
     fallbackToDefault: !hasExplicitClassrooms,
-    reservedIds: new Set(libraries.map((library) => library.id))
+    reservedIds: nativeModuleIds
+  });
+  const libraries = normalizeLibraries(rawLibraries, {
+    fallbackToDefault: !hasExplicitLibraries,
+    reservedIds: new Set([
+      ...nativeModuleIds,
+      ...classrooms.map((classroom) => classroom.id)
+    ])
+  });
+  const learningTools = normalizeLearningTools(rawLearningTools, {
+    fallbackToDefault: !hasExplicitLearningTools,
+    reservedIds: new Set([
+      ...nativeModuleIds,
+      ...classrooms.map((classroom) => classroom.id),
+      ...libraries.map((library) => library.id)
+    ])
   });
   const rawParentItems = Array.isArray(rawState)
     ? rawState
@@ -1068,10 +1111,12 @@ function normalizeStudyData(rawState, fallbackClassrooms = [], fallbackLibraries
         : [];
   const rawStudentItems = Array.isArray(source.studentItems) ? source.studentItems : [];
   const parentItems = normalizeStudySchedule(rawParentItems, classrooms, libraries, {
-    planScope: 'parent'
+    planScope: 'parent',
+    learningTools
   });
   const studentItems = normalizeStudySchedule(rawStudentItems, classrooms, libraries, {
-    planScope: 'student'
+    planScope: 'student',
+    learningTools
   });
 
   return {
@@ -1079,6 +1124,7 @@ function normalizeStudyData(rawState, fallbackClassrooms = [], fallbackLibraries
     studentItems,
     onlineClassrooms: classrooms,
     contentLibraries: libraries,
+    learningTools,
     controlSettings: hasExplicitControlSettings
       ? normalizeControlSettings(source.controlSettings)
       : normalizeControlSettings(appConfig && appConfig.controlSettings)
@@ -1114,10 +1160,23 @@ function loadConfig() {
     throw createConfigError('config.json 中的 startUrl 必须是有效的 http/https 地址。');
   }
 
-  const libraries = normalizeLibraries(rawConfig.contentLibraries);
+  const nativeModuleIds = new Set(nativeModuleDefinitions.map((moduleDefinition) => moduleDefinition.id));
   const classrooms = normalizeOnlineClassrooms(rawConfig.onlineClassrooms || rawConfig.classrooms, {
     defaultStartUrl: configuredStartUrl,
-    reservedIds: new Set(libraries.map((library) => library.id))
+    reservedIds: nativeModuleIds
+  });
+  const libraries = normalizeLibraries(rawConfig.contentLibraries, {
+    reservedIds: new Set([
+      ...nativeModuleIds,
+      ...classrooms.map((classroom) => classroom.id)
+    ])
+  });
+  const learningTools = normalizeLearningTools(rawConfig.learningTools || rawConfig.tools, {
+    reservedIds: new Set([
+      ...nativeModuleIds,
+      ...classrooms.map((classroom) => classroom.id),
+      ...libraries.map((library) => library.id)
+    ])
   });
 
   if (!classrooms.length) {
@@ -1165,7 +1224,8 @@ function loadConfig() {
       .filter(Boolean)
   );
   const parentStudySchedule = normalizeStudySchedule(rawConfig.studySchedule, classrooms, libraries, {
-    planScope: 'parent'
+    planScope: 'parent',
+    learningTools
   });
   const stateDir = path.basename(configPath).toLowerCase() === EMBEDDED_CONFIG_FILE ? STABLE_USER_DATA_DIR : path.dirname(configPath);
   const reminderLeadMinutes = normalizeReminderLeadMinutes(
@@ -1182,6 +1242,8 @@ function loadConfig() {
     startUrl,
     baseClassrooms: serializeOnlineClassrooms(classrooms),
     classrooms,
+    baseLearningTools: serializeLearningTools(learningTools),
+    learningTools,
     topLevelPrefixes,
     allowedHostnames: new Set(allowedHostnames),
     allowedHostnameSuffixes,
@@ -1217,6 +1279,8 @@ function rebuildLibraryIndex() {
   classroomIndex = new Map(classroomDefinitions.map((classroom) => [classroom.id, classroom]));
   libraryDefinitions = appConfig.libraries;
   libraryIndex = new Map(libraryDefinitions.map((library) => [library.id, library]));
+  learningToolDefinitions = appConfig.learningTools || [];
+  learningToolIndex = new Map(learningToolDefinitions.map((learningTool) => [learningTool.id, learningTool]));
 }
 
 function resolveClassroom(classroomId) {
@@ -1241,6 +1305,18 @@ function resolveLibrary(libraryId) {
   }
 
   return libraryDefinitions[0] || null;
+}
+
+function resolveLearningTool(learningToolId) {
+  if (learningToolId && learningToolIndex.has(learningToolId)) {
+    return learningToolIndex.get(learningToolId);
+  }
+
+  if (learningToolId) {
+    return null;
+  }
+
+  return learningToolDefinitions[0] || null;
 }
 
 function matchesPrefix(url, prefixes) {
@@ -1657,6 +1733,10 @@ function studentPlanTarget() {
   return 'internal:student-plan';
 }
 
+function learningToolEntryTarget(toolId) {
+  return `internal:learning-tool:${toolId}`;
+}
+
 function resolveNativeModuleDefinition(moduleId) {
   return nativeModuleIndex.get(normalizePrefix(moduleId)) || resolveNativeModule(moduleId);
 }
@@ -1681,6 +1761,31 @@ function launchNativeModuleEntry(moduleId) {
   logNavigationDebug('launch-native-module', {
     moduleId,
     executablePath: result.executablePath
+  });
+  return true;
+}
+
+function launchLearningToolEntry(toolId) {
+  const learningTool = resolveLearningTool(toolId);
+
+  if (!learningTool) {
+    return false;
+  }
+
+  const result = launchLearningTool(learningTool, {
+    executableDir: path.dirname(process.execPath),
+    projectRoot: path.resolve(__dirname, '..')
+  });
+
+  if (!result.ok) {
+    dialog.showErrorBox(learningTool.title, result.error || `${learningTool.title} 启动失败。`);
+    return false;
+  }
+
+  logNavigationDebug('launch-learning-tool', {
+    toolId,
+    appPath: learningTool.appPath,
+    command: result.launchPlan && result.launchPlan.command
   });
   return true;
 }
@@ -1745,6 +1850,10 @@ function navigateMainWindow(target) {
 
   if (normalizedTarget.startsWith('internal:native-module:')) {
     return launchNativeModuleEntry(normalizedTarget.slice('internal:native-module:'.length));
+  }
+
+  if (normalizedTarget.startsWith('internal:learning-tool:')) {
+    return launchLearningToolEntry(normalizedTarget.slice('internal:learning-tool:'.length));
   }
 
   if (normalizedTarget.startsWith('internal:library:')) {
@@ -2365,6 +2474,7 @@ function serializeStudyData(state = {}) {
   const studentItems = Array.isArray(state.studentItems) ? state.studentItems : appConfig.studentStudySchedule;
   const onlineClassrooms = Array.isArray(state.onlineClassrooms) ? state.onlineClassrooms : appConfig.classrooms;
   const contentLibraries = Array.isArray(state.contentLibraries) ? state.contentLibraries : appConfig.libraries;
+  const learningTools = Array.isArray(state.learningTools) ? state.learningTools : appConfig.learningTools;
   const controlSettings = normalizeControlSettings(state.controlSettings || appConfig.controlSettings);
 
   return {
@@ -2372,6 +2482,7 @@ function serializeStudyData(state = {}) {
     studentItems: serializeStudySchedule(studentItems),
     onlineClassrooms: serializeOnlineClassrooms(onlineClassrooms),
     contentLibraries: serializeLibraries(contentLibraries),
+    learningTools: serializeLearningTools(learningTools),
     controlSettings,
     items: serializeStudySchedule(mergeStudySchedules(parentItems, studentItems))
   };
@@ -2383,6 +2494,7 @@ function currentStudyData() {
     studentItems: appConfig.studentStudySchedule || [],
     onlineClassrooms: appConfig.classrooms || [],
     contentLibraries: appConfig.libraries || [],
+    learningTools: appConfig.learningTools || [],
     controlSettings: normalizeControlSettings(appConfig.controlSettings)
   };
 }
@@ -2396,11 +2508,13 @@ function applyStudyData(state, source = 'local') {
   const normalized = normalizeStudyData(
     state,
     appConfig.baseClassrooms || appConfig.classrooms,
-    appConfig.baseLibraries || appConfig.libraries
+    appConfig.baseLibraries || appConfig.libraries,
+    appConfig.baseLearningTools || appConfig.learningTools
   );
   appConfig.classrooms = normalized.onlineClassrooms;
   appConfig.startUrl = normalized.onlineClassrooms[0] ? normalized.onlineClassrooms[0].entryUrl : appConfig.startUrl;
   appConfig.libraries = normalized.contentLibraries;
+  appConfig.learningTools = normalized.learningTools;
   rebuildLibraryIndex();
   appConfig.parentStudySchedule = normalized.parentItems;
   appConfig.studentStudySchedule = normalized.studentItems;
@@ -2505,14 +2619,16 @@ async function syncStudentDeviceAccessStatus(options = {}) {
 
 function saveStudySchedule(rawSchedule) {
   const normalizedParentItems = normalizeStudySchedule(rawSchedule, classroomDefinitions, libraryDefinitions, {
-    planScope: 'parent'
+    planScope: 'parent',
+    learningTools: learningToolDefinitions
   });
   const savedState = saveStructuredStudyData(
     {
       parentItems: normalizedParentItems,
       studentItems: appConfig.studentStudySchedule,
       onlineClassrooms: appConfig.classrooms,
-      contentLibraries: appConfig.libraries
+      contentLibraries: appConfig.libraries,
+      learningTools: appConfig.learningTools
     },
     'local'
   );
@@ -2536,7 +2652,8 @@ function loadRemoteScheduleCache() {
     const normalizedState = normalizeStudyData(
       rawState,
       appConfig.baseClassrooms || classroomDefinitions,
-      appConfig.baseLibraries || libraryDefinitions
+      appConfig.baseLibraries || libraryDefinitions,
+      appConfig.baseLearningTools || learningToolDefinitions
     );
     applyStudyData(normalizedState, 'remote');
     remoteScheduleStatus = {
@@ -2558,7 +2675,8 @@ function saveRemoteScheduleCache(schedule) {
           parentItems: appConfig.parentStudySchedule,
           studentItems: Array.isArray(schedule) ? schedule : appConfig.studentStudySchedule,
           onlineClassrooms: appConfig.classrooms,
-          contentLibraries: appConfig.libraries
+          contentLibraries: appConfig.libraries,
+          learningTools: appConfig.learningTools
         });
 
   fs.writeFileSync(remoteScheduleCachePath(), JSON.stringify(payload, null, 2), 'utf8');
@@ -2756,6 +2874,19 @@ function resolveStudyTargetById(targetId) {
       libraryId: '',
       libraryTitle: '',
       entryLabel: '进入课堂'
+    };
+  }
+
+  const learningTool = resolveLearningTool(targetId);
+
+  if (learningTool) {
+    return {
+      target: learningToolEntryTarget(learningTool.id),
+      classroomId: '',
+      classroomTitle: '',
+      libraryId: '',
+      libraryTitle: '',
+      entryLabel: '打开工具'
     };
   }
 
@@ -3167,6 +3298,15 @@ function buildHomeModel() {
         target: libraryTarget(library.id),
         scheduleTargetId: library.id,
         libraryId: library.id
+      })),
+      ...learningToolDefinitions.map((learningTool) => ({
+        id: learningTool.id,
+        title: learningTool.title,
+        tone: learningTool.tone,
+        badge: '学习工具',
+        target: learningToolEntryTarget(learningTool.id),
+        scheduleTargetId: learningTool.id,
+        libraryId: ''
       })),
       ...nativeModuleDefinitions.map((moduleDefinition) => ({
         id: moduleDefinition.id,
@@ -4985,6 +5125,7 @@ async function syncRemoteStudySchedule() {
             items: payload,
             onlineClassrooms: appConfig.classrooms,
             contentLibraries: appConfig.libraries,
+            learningTools: appConfig.learningTools,
             controlSettings
           }
         : {
@@ -4992,7 +5133,8 @@ async function syncRemoteStudySchedule() {
             controlSettings
           },
       appConfig.baseClassrooms || classroomDefinitions,
-      appConfig.baseLibraries || libraryDefinitions
+      appConfig.baseLibraries || libraryDefinitions,
+      appConfig.baseLearningTools || learningToolDefinitions
     );
 
     if (syncSerial !== remoteScheduleSyncSerial || mutationSerialAtStart !== studyDataMutationSerial) {
@@ -5027,7 +5169,8 @@ async function syncRemoteStudySchedule() {
 
 async function persistStudentStudySchedule(rawSchedule) {
   const normalizedStudentItems = normalizeStudySchedule(rawSchedule, classroomDefinitions, libraryDefinitions, {
-    planScope: 'student'
+    planScope: 'student',
+    learningTools: learningToolDefinitions
   });
 
   if (!appConfig.remoteSchedule.enabled) {
@@ -5036,7 +5179,8 @@ async function persistStudentStudySchedule(rawSchedule) {
         parentItems: appConfig.parentStudySchedule,
         studentItems: normalizedStudentItems,
         onlineClassrooms: appConfig.classrooms,
-        contentLibraries: appConfig.libraries
+        contentLibraries: appConfig.libraries,
+        learningTools: appConfig.learningTools
       },
       'local'
     );
@@ -5498,6 +5642,10 @@ function mobileTargetOptions() {
     ...classroomDefinitions.map((classroom) => ({
       id: classroom.id,
       label: classroom.title
+    })),
+    ...learningToolDefinitions.map((learningTool) => ({
+      id: learningTool.id,
+      label: learningTool.title
     })),
     ...nativeModuleTargetOptions(),
     ...libraryDefinitions.map((library) => ({

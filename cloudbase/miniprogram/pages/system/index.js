@@ -42,6 +42,12 @@ Page({
     });
   },
 
+  openToolsPage() {
+    wx.navigateTo({
+      url: '/pages/tools/index'
+    });
+  },
+
   openClassroomsPage() {
     wx.navigateTo({
       url: '/pages/classrooms/index'

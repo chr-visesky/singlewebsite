@@ -140,6 +140,10 @@ function normalizeNetdiskFolderPath(value, fallback = '/') {
   return candidate.startsWith('/') ? candidate : `/${candidate}`;
 }
 
+function normalizeLearningToolPath(value) {
+  return normalizePrefix(value);
+}
+
 function normalizeContentLibraries(rawLibraries) {
   if (!Array.isArray(rawLibraries) || !rawLibraries.length) {
     return [];
@@ -174,6 +178,42 @@ function normalizeContentLibraries(rawLibraries) {
   }
 
   return libraries;
+}
+
+function normalizeLearningTools(rawTools) {
+  if (!Array.isArray(rawTools) || !rawTools.length) {
+    return [];
+  }
+
+  const tools = [];
+  const seenIds = new Set();
+
+  for (let index = 0; index < rawTools.length; index += 1) {
+    const item = rawTools[index] || {};
+    const title = normalizePrefix(item.title);
+    const appPath = normalizeLearningToolPath(item.appPath || item.path || item.executablePath);
+
+    if (!title || !appPath) {
+      continue;
+    }
+
+    const id = normalizeId(item.id, `tool-${index + 1}`);
+
+    if (seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    tools.push({
+      id,
+      title,
+      description: normalizePrefix(item.description),
+      tone: normalizePrefix(item.tone),
+      appPath
+    });
+  }
+
+  return tools;
 }
 
 function normalizeOnlineClassrooms(rawClassrooms) {
@@ -340,6 +380,7 @@ function sanitizePublicState(state = {}) {
     studentItems: normalizeSchedule(state.studentItems, 'student'),
     onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(state.onlineClassrooms)),
     contentLibraries: normalizeContentLibraries(state.contentLibraries),
+    learningTools: normalizeLearningTools(state.learningTools),
     items: combineItems(
       normalizeSchedule(state.parentItems, 'parent'),
       normalizeSchedule(state.studentItems, 'student')
@@ -450,6 +491,7 @@ async function readState() {
     const studentItems = normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student');
     const onlineClassrooms = fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms));
     const contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+    const learningTools = normalizeLearningTools(data.learningTools || data.tools);
     const studentDeviceAccess = normalizeStudentDeviceAccess(data.studentDeviceAccess);
     const controlSettings = normalizeControlSettings(data.controlSettings);
 
@@ -459,6 +501,7 @@ async function readState() {
       studentItems,
       onlineClassrooms,
       contentLibraries,
+      learningTools,
       studentDeviceAccess,
       studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
       controlSettings,
@@ -474,6 +517,7 @@ async function readState() {
         studentItems: [],
         onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
         contentLibraries: [],
+        learningTools: [],
         studentDeviceAccess: [],
         studentDeviceAccessUpdatedAt: '',
         controlSettings: createEmptyControlSettings(),
@@ -493,6 +537,7 @@ async function writeStudentItems(rawItems, options = {}) {
     let parentItems = [];
     let onlineClassrooms = [];
     let contentLibraries = [];
+    let learningTools = [];
     let studentDeviceAccess = [];
     let studentDeviceAccessUpdatedAt = '';
     let controlSettings = createEmptyControlSettings();
@@ -506,6 +551,7 @@ async function writeStudentItems(rawItems, options = {}) {
         'parent'
       );
       contentLibraries = normalizeContentLibraries(data.contentLibraries || data.libraries);
+      learningTools = normalizeLearningTools(data.learningTools || data.tools);
       onlineClassrooms = fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms));
       studentDeviceAccess = normalizeStudentDeviceAccess(data.studentDeviceAccess);
       studentDeviceAccessUpdatedAt = normalizePrefix(data.studentDeviceAccessUpdatedAt);
@@ -537,6 +583,7 @@ async function writeStudentItems(rawItems, options = {}) {
       studentItems: normalizedStudentItems,
       onlineClassrooms: fallbackOnlineClassrooms(onlineClassrooms),
       contentLibraries,
+      learningTools,
       studentDeviceAccess,
       studentDeviceAccessUpdatedAt,
       controlSettings
@@ -572,6 +619,7 @@ async function upsertStudentDeviceAccess(payload = {}) {
       studentItems: [],
       onlineClassrooms: normalizeOnlineClassrooms(DEFAULT_ONLINE_CLASSROOMS),
       contentLibraries: [],
+      learningTools: [],
       studentDeviceAccess: [],
       studentDeviceAccessUpdatedAt: '',
       controlSettings: createEmptyControlSettings()
@@ -589,6 +637,7 @@ async function upsertStudentDeviceAccess(payload = {}) {
         studentItems: normalizeSchedule(Array.isArray(data.studentItems) ? data.studentItems : [], 'student'),
         onlineClassrooms: fallbackOnlineClassrooms(normalizeOnlineClassrooms(data.onlineClassrooms || data.classrooms)),
         contentLibraries: normalizeContentLibraries(data.contentLibraries || data.libraries),
+        learningTools: normalizeLearningTools(data.learningTools || data.tools),
         studentDeviceAccess: normalizeStudentDeviceAccess(data.studentDeviceAccess),
         studentDeviceAccessUpdatedAt: normalizePrefix(data.studentDeviceAccessUpdatedAt),
         controlSettings: normalizeControlSettings(data.controlSettings)
@@ -657,6 +706,7 @@ async function upsertStudentDeviceAccess(payload = {}) {
         studentItems: currentState.studentItems,
         onlineClassrooms: currentState.onlineClassrooms,
         contentLibraries: currentState.contentLibraries,
+        learningTools: currentState.learningTools,
         studentDeviceAccess: normalizeStudentDeviceAccess(nextDevices),
         studentDeviceAccessUpdatedAt: now,
         controlSettings: currentState.controlSettings,
