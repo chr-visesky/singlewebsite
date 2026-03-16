@@ -29,9 +29,13 @@ function createEmptyNode(title) {
 
 async function launchStudyTarget(payload) {
   try {
-    await window.studyGate.enterStudyTarget(payload);
-  } catch {
-    // Ignore navigation failures on the home screen.
+    const result = await window.studyGate.enterStudyTarget(payload);
+
+    if (result && result.success === false) {
+      window.alert('打开失败。');
+    }
+  } catch (error) {
+    window.alert((error && error.message) || '打开失败。');
   }
 }
 
@@ -52,8 +56,8 @@ async function completeSchedule(scheduleId) {
   try {
     await window.studyGate.completeStudySchedule({ scheduleId });
     await refreshHomeModel();
-  } catch {
-    // Ignore completion failures on the home screen.
+  } catch (error) {
+    window.alert((error && error.message) || '打卡失败。');
   }
 }
 

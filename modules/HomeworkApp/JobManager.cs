@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using HomeworkApp.Models;
 using HomeworkApp.Services;
+using Newtonsoft.Json;
 using PDFtoImage;
 
 namespace HomeworkApp
@@ -23,6 +24,8 @@ namespace HomeworkApp
         private static readonly string JobsPath = Path.Combine(AppDataPath, "Jobs");
 
         private static readonly string LastJobPath = Path.Combine(AppDataPath, "lastJob.txt");
+        private static readonly string RecentJobsPath = Path.Combine(AppDataPath, "recentJobs.json");
+        private static readonly string[] CoreSubjects = { "语文", "数学", "英语" };
 
         static JobManager()
         {
@@ -37,10 +40,15 @@ namespace HomeworkApp
         /// </summary>
         public static JobSession CreateJob(string subject, List<string> sourceFiles)
         {
-            return CreateJob(subject, sourceFiles, DateTime.Today);
+            return CreateJob(subject, sourceFiles, DateTime.Today, null);
         }
 
         public static JobSession CreateJob(string subject, List<string> sourceFiles, DateTime targetDate)
+        {
+            return CreateJob(subject, sourceFiles, targetDate, null);
+        }
+
+        public static JobSession CreateJob(string subject, List<string> sourceFiles, DateTime targetDate, string? bucket)
         {
             if (sourceFiles == null || sourceFiles.Count == 0)
             {
@@ -48,15 +56,16 @@ namespace HomeworkApp
             }
 
             ValidateSourceFiles(sourceFiles);
-            var existingJob = FindJobBySubjectAndDate(subject, targetDate);
+            string normalizedBucket = NormalizeBucket(bucket, subject);
+            var existingJob = FindJobBySubjectAndDate(subject, targetDate, normalizedBucket);
             if (existingJob == null)
             {
-                return CreateNewImportedJob(subject, sourceFiles, targetDate);
+                return CreateNewImportedJob(subject, sourceFiles, targetDate, normalizedBucket);
             }
 
             if (IsUntouchedBlankJob(existingJob))
             {
-                return ReplaceUntouchedBlankJob(existingJob, sourceFiles, targetDate);
+                return ReplaceUntouchedBlankJob(existingJob, sourceFiles, targetDate, normalizedBucket);
             }
 
             return AppendSourcesToExistingJob(existingJob, sourceFiles);
@@ -64,7 +73,13 @@ namespace HomeworkApp
 
         public static JobSession CreateBlankJob(string subject)
         {
-            var existingJob = FindJobBySubjectAndDate(subject, DateTime.Today);
+            return CreateBlankJob(subject, null);
+        }
+
+        public static JobSession CreateBlankJob(string subject, string? bucket)
+        {
+            string normalizedBucket = NormalizeBucket(bucket, subject);
+            var existingJob = FindJobBySubjectAndDate(subject, DateTime.Today, normalizedBucket);
             if (existingJob != null)
             {
                 MarkAsLastJob(existingJob.JobId);
@@ -74,6 +89,7 @@ namespace HomeworkApp
             var job = new JobSession
             {
                 Subject = subject,
+                Bucket = normalizedBucket,
                 SourceFiles = new List<string>(),
                 CreateTime = DateTime.Now,
                 UpdateTime = DateTime.Now,
@@ -109,6 +125,52 @@ namespace HomeworkApp
 
             string lastJobId = File.ReadAllText(LastJobPath).Trim();
             return LoadJob(lastJobId);
+        }
+
+        public static List<JobSession> GetRecentJobs(int maxCount = 5)
+        {
+            var recentIds = LoadRecentJobIds();
+            var jobs = new List<JobSession>();
+            bool changed = false;
+
+            foreach (var jobId in recentIds)
+            {
+                if (jobs.Count >= Math.Max(1, maxCount))
+                {
+                    break;
+                }
+
+                var job = LoadJob(jobId);
+                if (job == null)
+                {
+                    changed = true;
+                    continue;
+                }
+
+                if (jobs.Any(existing => string.Equals(existing.JobId, job.JobId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                jobs.Add(job);
+            }
+
+            var lastJob = GetLastJob();
+            if (lastJob != null && jobs.All(item => !string.Equals(item.JobId, lastJob.JobId, StringComparison.OrdinalIgnoreCase)))
+            {
+                jobs.Insert(0, lastJob);
+                changed = true;
+            }
+
+            jobs = jobs.Take(Math.Max(1, maxCount)).ToList();
+
+            if (changed)
+            {
+                SaveRecentJobIds(jobs.Select(job => job.JobId));
+            }
+
+            return jobs;
         }
 
         public static JobSession GetPreferredStartupJob(string blankSubject = "作业")
@@ -206,11 +268,19 @@ namespace HomeworkApp
                     System.Diagnostics.Debug.WriteLine($"Error clearing last job pointer: {ex.Message}");
                 }
             }
+
+            SaveRecentJobIds(
+                LoadRecentJobIds().Where(id => !string.Equals(id, jobId, StringComparison.OrdinalIgnoreCase))
+            );
         }
 
         public static void MarkAsLastJob(string jobId)
         {
             File.WriteAllText(LastJobPath, jobId);
+            SaveRecentJobIds(
+                new[] { jobId }
+                    .Concat(LoadRecentJobIds().Where(id => !string.Equals(id, jobId, StringComparison.OrdinalIgnoreCase)))
+            );
         }
 
         public static void DeletePage(JobSession job, int pageIndex)
@@ -268,22 +338,24 @@ namespace HomeworkApp
             return jobs;
         }
 
-        private static JobSession? FindJobBySubjectAndDate(string subject, DateTime date)
+        private static JobSession? FindJobBySubjectAndDate(string subject, DateTime date, string bucket)
         {
             return GetAllJobs()
+                .Where(job => string.Equals(NormalizeBucket(job.Bucket, job.Subject), bucket, StringComparison.OrdinalIgnoreCase))
                 .Where(job => string.Equals(job.Subject, subject, StringComparison.CurrentCultureIgnoreCase))
                 .Where(job => job.CreateTime.Date == date.Date)
                 .OrderByDescending(job => job.UpdateTime)
                 .FirstOrDefault();
         }
 
-        private static JobSession CreateNewImportedJob(string subject, List<string> sourceFiles, DateTime targetDate)
+        private static JobSession CreateNewImportedJob(string subject, List<string> sourceFiles, DateTime targetDate, string bucket)
         {
             bool isPdfJob = sourceFiles.Count == 1 && IsPdfFile(sourceFiles[0]);
 
             var job = new JobSession
             {
                 Subject = subject,
+                Bucket = bucket,
                 SourceFiles = new List<string>(),
                 CreateTime = ComposeCreateTime(targetDate),
                 UpdateTime = DateTime.Now,
@@ -310,7 +382,7 @@ namespace HomeworkApp
             return job;
         }
 
-        private static JobSession ReplaceUntouchedBlankJob(JobSession job, List<string> sourceFiles, DateTime targetDate)
+        private static JobSession ReplaceUntouchedBlankJob(JobSession job, List<string> sourceFiles, DateTime targetDate, string bucket)
         {
             ClearDirectory(job.SourceDirectory);
             ClearDirectory(job.CacheDirectory);
@@ -323,6 +395,7 @@ namespace HomeworkApp
             }
 
             job.SourceFiles = importedFiles;
+            job.Bucket = bucket;
             job.DocumentType = isPdfJob ? "Pdf" : "Image";
             job.CreateTime = ComposeCreateTime(targetDate);
             job.TotalPages = isPdfJob
@@ -362,7 +435,12 @@ namespace HomeworkApp
             string lastJobId = GetLastJobId();
 
             var duplicateGroups = jobs
-                .GroupBy(job => new { Subject = job.Subject, Date = job.CreateTime.Date })
+                .GroupBy(job => new
+                {
+                    Subject = job.Subject,
+                    Date = job.CreateTime.Date,
+                    Bucket = NormalizeBucket(job.Bucket, job.Subject)
+                })
                 .Where(group => group.Count() > 1)
                 .ToList();
 
@@ -391,6 +469,7 @@ namespace HomeworkApp
 
                 target.CreateTime = orderedJobs.Min(job => job.CreateTime);
                 target.UpdateTime = orderedJobs.Max(job => job.UpdateTime);
+                target.Bucket = NormalizeBucket(target.Bucket, target.Subject);
                 target.Save(target.JobDirectory);
             }
 
@@ -627,6 +706,55 @@ namespace HomeworkApp
         {
             var now = DateTime.Now;
             return targetDate.Date.Add(new TimeSpan(now.Hour, now.Minute, now.Second));
+        }
+
+        public static string NormalizeBucket(string? bucket, string? subject)
+        {
+            string normalized = (bucket ?? string.Empty).Trim();
+
+            if (string.Equals(normalized, "课外", StringComparison.OrdinalIgnoreCase))
+            {
+                return "课外";
+            }
+
+            if (string.Equals(normalized, "课内", StringComparison.OrdinalIgnoreCase))
+            {
+                return "课内";
+            }
+
+            return CoreSubjects.Contains(subject ?? string.Empty, StringComparer.CurrentCultureIgnoreCase) ? "课内" : "课外";
+        }
+
+        private static List<string> LoadRecentJobIds()
+        {
+            try
+            {
+                if (!File.Exists(RecentJobsPath))
+                {
+                    return new List<string>();
+                }
+
+                string json = File.ReadAllText(RecentJobsPath);
+                return (JsonConvert.DeserializeObject<List<string>>(json) ?? new List<string>())
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
+        private static void SaveRecentJobIds(IEnumerable<string> jobIds)
+        {
+            var ids = jobIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .ToList();
+
+            File.WriteAllText(RecentJobsPath, JsonConvert.SerializeObject(ids, Formatting.Indented));
         }
 
         private static void ClearDirectory(string path)

@@ -91,13 +91,17 @@ namespace HomeworkApp.Views
             var recentJobs = allJobs
                 .Where(job => job.CreateTime.Date >= recentCutoff)
                 .ToList();
+            var recentOpenedJobs = JobManager.GetRecentJobs(5);
 
+            var recentRoot = CreateHomeworkRootNode("最近打开");
             var internalRoot = CreateHomeworkRootNode("课内");
             var externalRoot = CreateHomeworkRootNode("课外");
 
-            PopulateInternalHomeworkTree(internalRoot, recentJobs.Where(job => CoreSubjects.Contains(job.Subject)).ToList());
-            PopulateHomeworkTreeByDate(externalRoot, recentJobs.Where(job => !CoreSubjects.Contains(job.Subject)).ToList(), false);
+            PopulateRecentOpenedTree(recentRoot, recentOpenedJobs);
+            PopulateInternalHomeworkTree(internalRoot, recentJobs.Where(job => ResolveBucket(job) == "课内").ToList());
+            PopulateHomeworkTreeByDate(externalRoot, recentJobs.Where(job => ResolveBucket(job) == "课外").ToList(), true);
 
+            HomeworkTree.Items.Add(recentRoot);
             HomeworkTree.Items.Add(internalRoot);
             HomeworkTree.Items.Add(externalRoot);
         }
@@ -130,42 +134,105 @@ namespace HomeworkApp.Views
                     AddSubjectLeaf(dateNode, subject, date, "课内", subjectJobs);
                 }
 
+                var extraSubjects = jobs
+                    .Where(job => job.CreateTime.Date == date)
+                    .Select(job => job.Subject)
+                    .Where(subject => !CoreSubjects.Contains(subject, StringComparer.CurrentCultureIgnoreCase))
+                    .Distinct(StringComparer.CurrentCultureIgnoreCase)
+                    .OrderBy(subject => subject, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+
+                foreach (var subject in extraSubjects)
+                {
+                    var subjectJobs = jobs
+                        .Where(job => job.CreateTime.Date == date && string.Equals(job.Subject, subject, StringComparison.CurrentCultureIgnoreCase))
+                        .ToList();
+                    AddSubjectLeaf(dateNode, subject, date, "课内", subjectJobs);
+                }
+
                 parent.Items.Add(dateNode);
+            }
+        }
+
+        private void PopulateRecentOpenedTree(TreeViewItem parent, List<JobSession> jobs)
+        {
+            if (jobs.Count == 0)
+            {
+                parent.Items.Add(CreateEmptyTreeNode("（最近没有打开记录）"));
+                return;
+            }
+
+            foreach (var job in jobs)
+            {
+                var context = new HomeworkNodeContext
+                {
+                    Bucket = ResolveBucket(job),
+                    Date = job.CreateTime.Date,
+                    Subject = job.Subject,
+                    Job = job
+                };
+
+                var node = new TreeViewItem
+                {
+                    Header = BuildRecentOpenedHeader(job),
+                    Tag = context,
+                    Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233))
+                };
+
+                node.Selected += SubjectNode_Selected;
+                node.ContextMenu = BuildSubjectContextMenu(context);
+                parent.Items.Add(node);
             }
         }
 
         private void PopulateHomeworkTreeByDate(TreeViewItem parent, List<JobSession> jobs, bool useCoreSubjectOrder)
         {
-            if (jobs.Count == 0)
-            {
-                parent.Items.Add(CreateEmptyTreeNode("（最近两周无作业）"));
-                return;
-            }
-
             var zhCn = new System.Globalization.CultureInfo("zh-CN");
-            int expandedDateCount = 0;
-            var dateGroups = jobs
-                .GroupBy(job => job.CreateTime.Date)
-                .OrderByDescending(group => group.Key);
 
-            foreach (var dateGroup in dateGroups)
+            for (int dayOffset = 0; dayOffset < 14; dayOffset++)
             {
-                var subjectGroups = dateGroup
-                    .GroupBy(job => job.Subject)
-                    .OrderBy(group => GetSubjectSortOrder(group.Key, useCoreSubjectOrder))
-                    .ThenBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
+                DateTime date = DateTime.Today.AddDays(-dayOffset).Date;
+                var dateNode = CreateDateNode(date.ToString("MM-dd dddd", zhCn), date, "课外", dayOffset < 2);
+                var dateJobs = jobs
+                    .Where(job => job.CreateTime.Date == date)
                     .ToList();
 
-                var dateNode = CreateDateNode(dateGroup.Key.ToString("MM-dd dddd", zhCn), dateGroup.Key, "课外", expandedDateCount < 2);
-
-                foreach (var subjectGroup in subjectGroups)
+                foreach (var subject in CoreSubjects)
                 {
-                    AddSubjectLeaf(dateNode, subjectGroup.Key, dateGroup.Key, "课外", subjectGroup.ToList());
+                    var subjectJobs = dateJobs
+                        .Where(job => string.Equals(job.Subject, subject, StringComparison.CurrentCultureIgnoreCase))
+                        .ToList();
+                    AddSubjectLeaf(dateNode, subject, date, "课外", subjectJobs);
+                }
+
+                var extraSubjects = dateJobs
+                    .Select(job => job.Subject)
+                    .Where(subject => !CoreSubjects.Contains(subject, StringComparer.CurrentCultureIgnoreCase))
+                    .Distinct(StringComparer.CurrentCultureIgnoreCase)
+                    .OrderBy(subject => GetSubjectSortOrder(subject, useCoreSubjectOrder))
+                    .ThenBy(subject => subject, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+
+                foreach (var subject in extraSubjects)
+                {
+                    var subjectJobs = dateJobs
+                        .Where(job => string.Equals(job.Subject, subject, StringComparison.CurrentCultureIgnoreCase))
+                        .ToList();
+                    AddSubjectLeaf(dateNode, subject, date, "课外", subjectJobs);
                 }
 
                 parent.Items.Add(dateNode);
-                expandedDateCount++;
             }
+        }
+
+        private static string ResolveBucket(JobSession job)
+        {
+            return JobManager.NormalizeBucket(job.Bucket, job.Subject);
+        }
+
+        private static string BuildRecentOpenedHeader(JobSession job)
+        {
+            return $"{ResolveBucket(job)} · {job.CreateTime:MM-dd} · {job.Subject} · {Math.Max(1, job.TotalPages)}页";
         }
 
         private TreeViewItem CreateDateNode(string header, DateTime date, string bucket, bool isExpanded)
@@ -728,7 +795,7 @@ namespace HomeworkApp.Views
             {
                 SaveCurrentPageInk();
                 JobManager.SaveJob(_job);
-                var job = JobManager.CreateJob(context.Subject, dialog.FileNames.ToList(), context.Date);
+                var job = JobManager.CreateJob(context.Subject, dialog.FileNames.ToList(), context.Date, context.Bucket);
                 NavigationService?.Navigate(new EditorPage(job));
             }
             catch (Exception ex)
