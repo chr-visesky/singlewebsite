@@ -27,7 +27,9 @@ namespace HomeworkApp.Services
         {
             Pen,
             Eraser,
-            Highlighter
+            Highlighter,
+            Select,
+            None
         }
 
         public ToolMode CurrentTool { get; private set; } = ToolMode.Pen;
@@ -72,9 +74,7 @@ namespace HomeworkApp.Services
             _inkCanvas.UseCustomCursor = true;
 
             // Hook into stylus events for real-time filtering
-            _inkCanvas.PreviewStylusDown += OnPreviewStylusDown;
-            _inkCanvas.PreviewStylusMove += OnPreviewStylusMove;
-            _inkCanvas.PreviewStylusUp += OnPreviewStylusUp;
+            AttachPenPreviewHandlers();
         }
 
         private void OnPreviewStylusDown(object sender, StylusDownEventArgs e)
@@ -152,31 +152,21 @@ namespace HomeworkApp.Services
         public void SetTool(ToolMode tool)
         {
             CurrentTool = tool;
+            DetachPenPreviewHandlers();
 
             switch (tool)
             {
                 case ToolMode.Pen:
                     _inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
-                    _inkCanvas.PreviewStylusDown += OnPreviewStylusDown;
-                    _inkCanvas.PreviewStylusMove += OnPreviewStylusMove;
-                    _inkCanvas.PreviewStylusUp += OnPreviewStylusUp;
+                    AttachPenPreviewHandlers();
                     break;
 
                 case ToolMode.Eraser:
-                    // Remove preview handlers for eraser mode
-                    _inkCanvas.PreviewStylusDown -= OnPreviewStylusDown;
-                    _inkCanvas.PreviewStylusMove -= OnPreviewStylusMove;
-                    _inkCanvas.PreviewStylusUp -= OnPreviewStylusUp;
                     _inkCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
                     break;
 
                 case ToolMode.Highlighter:
                     _inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
-                    // Remove preview handlers for highlighter (use default rendering)
-                    _inkCanvas.PreviewStylusDown -= OnPreviewStylusDown;
-                    _inkCanvas.PreviewStylusMove -= OnPreviewStylusMove;
-                    _inkCanvas.PreviewStylusUp -= OnPreviewStylusUp;
-
                     var highlighter = new DrawingAttributes
                     {
                         Color = Color.FromArgb(100, 255, 255, 0),
@@ -187,6 +177,14 @@ namespace HomeworkApp.Services
                         IsHighlighter = true
                     };
                     _inkCanvas.DefaultDrawingAttributes = highlighter;
+                    break;
+
+                case ToolMode.Select:
+                    _inkCanvas.EditingMode = InkCanvasEditingMode.Select;
+                    break;
+
+                case ToolMode.None:
+                    _inkCanvas.EditingMode = InkCanvasEditingMode.None;
                     break;
             }
         }
@@ -308,5 +306,20 @@ namespace HomeworkApp.Services
         }
 
         public Matrix GetCurrentTransform() => _currentTransform;
+
+        private void AttachPenPreviewHandlers()
+        {
+            DetachPenPreviewHandlers();
+            _inkCanvas.PreviewStylusDown += OnPreviewStylusDown;
+            _inkCanvas.PreviewStylusMove += OnPreviewStylusMove;
+            _inkCanvas.PreviewStylusUp += OnPreviewStylusUp;
+        }
+
+        private void DetachPenPreviewHandlers()
+        {
+            _inkCanvas.PreviewStylusDown -= OnPreviewStylusDown;
+            _inkCanvas.PreviewStylusMove -= OnPreviewStylusMove;
+            _inkCanvas.PreviewStylusUp -= OnPreviewStylusUp;
+        }
     }
 }

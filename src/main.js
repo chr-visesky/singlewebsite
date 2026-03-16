@@ -2932,22 +2932,22 @@ function describeScheduleStatus(schedule, mark, now = new Date()) {
     return {
       code: 'completed',
       label: '已完成',
-      detail: `已于 ${formatDisplayTime(mark.completedAt)} 进入。`
+      detail: `已于 ${formatDisplayTime(mark.completedAt)} 打卡。`
     };
   }
 
   if (formatLocalTime(now) >= schedule.time) {
     return {
       code: 'pending',
-      label: '待完成',
-      detail: '已到上课时间，进入对应入口后会记为完成。'
+      label: '打卡',
+      detail: '已到打卡时间。'
     };
   }
 
   return {
     code: 'upcoming',
-    label: '未开始',
-    detail: '还没到上课时间。'
+    label: '未到时间',
+    detail: '还没到打卡时间。'
   };
 }
 
@@ -2987,6 +2987,16 @@ function markScheduleCompletedForToday(options = {}, date = new Date()) {
   }
 
   const existing = getScheduleMark(schedule.id, formatLocalDateKey(date));
+  const status = describeScheduleStatus(schedule, existing, date);
+
+  if (status.code === 'upcoming') {
+    return {
+      schedule,
+      mark: existing || null,
+      blocked: true,
+      reason: 'not_started'
+    };
+  }
 
   if (existing && existing.completedAt) {
     return {
@@ -3025,6 +3035,7 @@ function buildStudyScheduleModel(date = new Date()) {
       status: status.code,
       statusLabel: status.label,
       statusDetail: status.detail,
+      canCheckIn: status.code === 'pending',
       target: target ? target.target : '',
       scheduleTargetId: schedule.targetId,
       libraryId: target ? target.libraryId : '',
@@ -6331,6 +6342,9 @@ function createMainWindow() {
 
   mainWindow.once('ready-to-show', () => {
     logNavigationDebug('main-window-ready-to-show');
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMaximized()) {
+      mainWindow.maximize();
+    }
     mainWindow.show();
     mainWindow.focus();
   });
@@ -6419,12 +6433,16 @@ function registerIpc() {
       todaySchedule: buildStudyScheduleModel()
     }));
   ipcMain.handle('shell:complete-study-schedule', async (_event, payload = {}) => {
-    markScheduleCompletedForToday(
+    const completion = markScheduleCompletedForToday(
       {
         scheduleId: normalizePrefix(payload.scheduleId)
       },
       new Date()
     );
+
+    if (completion && completion.blocked) {
+      throw new Error('还没到打卡时间。');
+    }
 
     return {
       success: true,

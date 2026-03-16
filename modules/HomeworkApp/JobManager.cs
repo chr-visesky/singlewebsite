@@ -92,6 +92,25 @@ namespace HomeworkApp
             return job;
         }
 
+        public static JobSession CreateBlankJob(string subject)
+        {
+            var job = new JobSession
+            {
+                Subject = subject,
+                SourceFiles = new List<string>(),
+                CreateTime = DateTime.Now,
+                UpdateTime = DateTime.Now,
+                DocumentType = "Blank",
+                TotalPages = 1
+            };
+
+            string jobDir = Path.Combine(JobsPath, job.JobId);
+            Directory.CreateDirectory(jobDir);
+            job.Save(jobDir);
+            MarkAsLastJob(job.JobId);
+            return job;
+        }
+
         /// <summary>
         /// Saves a job session
         /// </summary>
@@ -113,6 +132,24 @@ namespace HomeworkApp
 
             string lastJobId = File.ReadAllText(LastJobPath).Trim();
             return LoadJob(lastJobId);
+        }
+
+        public static JobSession GetPreferredStartupJob(string blankSubject = "作业")
+        {
+            var lastJob = GetLastJob();
+            if (lastJob != null)
+            {
+                return lastJob;
+            }
+
+            var latestJob = GetAllJobs().FirstOrDefault();
+            if (latestJob != null)
+            {
+                MarkAsLastJob(latestJob.JobId);
+                return latestJob;
+            }
+
+            return CreateBlankJob(blankSubject);
         }
 
         /// <summary>

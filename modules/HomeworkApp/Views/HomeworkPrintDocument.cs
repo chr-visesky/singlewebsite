@@ -22,15 +22,18 @@ namespace HomeworkApp.Views
             _documentService = documentService;
         }
 
-        public void Print(PrintQueue printQueue)
+        public void Print(PrintQueue printQueue, PrintTicket? printTicket = null)
         {
             var printDialog = new PrintDialog();
             printDialog.PrintQueue = printQueue;
+            printDialog.PrintTicket = printTicket ?? printQueue.UserPrintTicket ?? printQueue.DefaultPrintTicket;
+
+            var pageSize = ResolvePrintableArea(printQueue, printDialog.PrintTicket, printDialog);
 
             // Print all pages
             for (int i = 0; i < _job.TotalPages; i++)
             {
-                var page = GetPage(i, printDialog);
+                var page = GetPage(i, pageSize);
                 if (page != null)
                 {
                     printDialog.PrintVisual(page, $"Homework Page {i + 1}");
@@ -38,14 +41,36 @@ namespace HomeworkApp.Views
             }
         }
 
-        private Visual GetPage(int pageNumber, PrintDialog printDialog)
+        private static Size ResolvePrintableArea(PrintQueue printQueue, PrintTicket? printTicket, PrintDialog printDialog)
         {
             try
             {
-                var pageSize = new Size(
-                    printDialog.PrintableAreaWidth,
-                    printDialog.PrintableAreaHeight);
+                var capabilities = printQueue.GetPrintCapabilities(printTicket);
+                var imageableArea = capabilities.PageImageableArea;
 
+                if (imageableArea != null &&
+                    imageableArea.ExtentWidth > 0 &&
+                    imageableArea.ExtentHeight > 0)
+                {
+                    return new Size(imageableArea.ExtentWidth, imageableArea.ExtentHeight);
+                }
+            }
+            catch
+            {
+            }
+
+            if (printDialog.PrintableAreaWidth > 0 && printDialog.PrintableAreaHeight > 0)
+            {
+                return new Size(printDialog.PrintableAreaWidth, printDialog.PrintableAreaHeight);
+            }
+
+            return new Size(794, 1123);
+        }
+
+        private Visual GetPage(int pageNumber, Size pageSize)
+        {
+            try
+            {
                 var docPage = _documentService.GetPageAsync(pageNumber, pageSize.Width, pageSize.Height).Result;
 
                 // Create visual for printing

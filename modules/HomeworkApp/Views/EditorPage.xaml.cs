@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -11,6 +12,7 @@ using System.Windows.Input;
 using System.Windows.Ink;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using HomeworkApp.Models;
 using HomeworkApp.Services;
 using Microsoft.Win32;
@@ -33,6 +35,14 @@ namespace HomeworkApp.Views
         private bool _isPortrait = true;
         private bool _hasDocument = false;
         private int _pageLoadVersion;
+        private bool _isHandMode;
+        private ScrollViewer? _activePanScrollViewer;
+        private Point _panStartPoint;
+        private Point _panStartOffset;
+        private InkManager.ToolMode _activeToolMode = InkManager.ToolMode.Pen;
+        private static readonly string[] CoreSubjects = { "语文", "数学", "英语" };
+        private readonly DispatcherTimer _homeworkScrollIndicatorTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
+        private readonly DispatcherTimer _draftScrollIndicatorTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
 
         public EditorPage(JobSession job)
         {
@@ -53,84 +63,92 @@ namespace HomeworkApp.Views
             JobManager.MarkAsLastJob(_job.JobId);
             ApplyPageCanvasSize();
             UpdateColorSelectorVisual();
+            _homeworkScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
+            _draftScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(DraftScrollIndicator, _draftScrollIndicatorTimer);
             Unloaded += EditorPage_Unloaded;
+            SetAssistantPanelCollapsed(false);
 
             LoadDocument();
             SetupInkCanvas();
             SetupDraftInkCanvas();
-            UpdatePageInfo();
+            SetActiveTool(InkManager.ToolMode.Pen);
+            ApplyZoom();
         }
 
         private void SetupHomeworkTree()
         {
             HomeworkTree.Items.Clear();
-            var thisWeek = GetThisWeekJobs();
-            var lastWeek = GetLastWeekJobs();
+            var allJobs = JobManager.GetAllJobs();
 
             // 校内作业
             var schoolRoot = new TreeViewItem
             {
                 Header = "📚 校内作业",
-                IsExpanded = true
+                IsExpanded = true,
+                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
+                FontWeight = FontWeights.SemiBold
             };
-            AddSubjectNode(schoolRoot, "语文", thisWeek, lastWeek);
-            AddSubjectNode(schoolRoot, "数学", thisWeek, lastWeek);
-            AddSubjectNode(schoolRoot, "英语", thisWeek, lastWeek);
+            foreach (var subject in CoreSubjects)
+            {
+                AddSubjectNode(schoolRoot, subject, allJobs.Where(j => j.Subject == subject).ToList());
+            }
 
             // 校外作业
             var externalRoot = new TreeViewItem
             {
                 Header = "🏠 校外作业",
-                IsExpanded = true
+                IsExpanded = true,
+                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
+                FontWeight = FontWeights.SemiBold
             };
-            var externalJobs = GetExternalJobs(thisWeek, lastWeek);
+            var externalJobs = allJobs
+                .Where(j => !CoreSubjects.Contains(j.Subject))
+                .GroupBy(j => j.Subject)
+                .OrderBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase);
+
             foreach (var jobGroup in externalJobs)
             {
-                var subjectNode = new TreeViewItem
-                {
-                    Header = jobGroup.Key,
-                    Tag = jobGroup.Key
-                };
-                AddJobNodes(subjectNode, jobGroup.Value);
-                externalRoot.Items.Add(subjectNode);
+                AddSubjectNode(externalRoot, jobGroup.Key, jobGroup.ToList());
+            }
+
+            if (externalRoot.Items.Count == 0)
+            {
+                AddJobNodes(externalRoot, new List<JobSession>());
             }
 
             HomeworkTree.Items.Add(schoolRoot);
             HomeworkTree.Items.Add(externalRoot);
         }
 
-        private void AddSubjectNode(TreeViewItem parent, string subject, List<JobSession> thisWeek, List<JobSession> lastWeek)
+        private void AddSubjectNode(TreeViewItem parent, string subject, List<JobSession> jobs)
         {
             var subjectNode = new TreeViewItem
             {
                 Header = subject,
                 Tag = subject,
-                IsExpanded = true
+                IsExpanded = true,
+                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
+                FontWeight = FontWeights.SemiBold
             };
 
-            // 本周
-            var thisWeekCount = thisWeek.Count(j => j.Subject == subject);
-            var thisWeekNode = new TreeViewItem
-            {
-                Header = $"本周 ({thisWeekCount} 次)",
-                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233))
-            };
-            var thisWeekJobs = thisWeek.Where(j => j.Subject == subject).ToList();
-            AddJobNodes(thisWeekNode, thisWeekJobs);
-            subjectNode.Items.Add(thisWeekNode);
-
-            // 上周
-            var lastWeekCount = lastWeek.Count(j => j.Subject == subject);
-            var lastWeekNode = new TreeViewItem
-            {
-                Header = $"上周 ({lastWeekCount} 次)",
-                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233))
-            };
-            var lastWeekJobs = lastWeek.Where(j => j.Subject == subject).ToList();
-            AddJobNodes(lastWeekNode, lastWeekJobs);
-            subjectNode.Items.Add(lastWeekNode);
+            AddPeriodNode(subjectNode, "本周", jobs.Where(job => IsInThisWeek(job.UpdateTime)).ToList());
+            AddPeriodNode(subjectNode, "上周", jobs.Where(job => IsInLastWeek(job.UpdateTime)).ToList());
+            AddPeriodNode(subjectNode, "更早", jobs.Where(job => !IsInThisWeek(job.UpdateTime) && !IsInLastWeek(job.UpdateTime)).ToList());
 
             parent.Items.Add(subjectNode);
+        }
+
+        private void AddPeriodNode(TreeViewItem parent, string label, List<JobSession> jobs)
+        {
+            var node = new TreeViewItem
+            {
+                Header = $"{label} ({jobs.Count} 次)",
+                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
+                IsExpanded = label != "更早"
+            };
+
+            AddJobNodes(node, jobs);
+            parent.Items.Add(node);
         }
 
         private void AddJobNodes(TreeViewItem parent, List<JobSession> jobs)
@@ -162,20 +180,20 @@ namespace HomeworkApp.Views
             }
         }
 
-        private List<JobSession> GetThisWeekJobs()
+        private bool IsInThisWeek(DateTime date)
         {
             var monday = StartOfWeek(DateTime.Today);
             var sunday = monday.AddDays(6);
 
-            return JobManager.GetJobsByDateRange(monday, sunday.AddDays(1).AddTicks(-1));
+            return date >= monday && date <= sunday.AddDays(1).AddTicks(-1);
         }
 
-        private List<JobSession> GetLastWeekJobs()
+        private bool IsInLastWeek(DateTime date)
         {
             var lastMonday = StartOfWeek(DateTime.Today).AddDays(-7);
             var lastSunday = lastMonday.AddDays(6);
 
-            return JobManager.GetJobsByDateRange(lastMonday, lastSunday.AddDays(1).AddTicks(-1));
+            return date >= lastMonday && date <= lastSunday.AddDays(1).AddTicks(-1);
         }
 
         private static DateTime StartOfWeek(DateTime date)
@@ -183,14 +201,6 @@ namespace HomeworkApp.Views
             int weekday = (int)date.DayOfWeek;
             int offset = weekday == 0 ? -6 : DayOfWeek.Monday - date.DayOfWeek;
             return date.Date.AddDays(offset);
-        }
-
-        private Dictionary<string, List<JobSession>> GetExternalJobs(List<JobSession> thisWeek, List<JobSession> lastWeek)
-        {
-            var allJobs = thisWeek.Concat(lastWeek)
-                .Where(j => j.Subject != "语文" && j.Subject != "数学" && j.Subject != "英语")
-                .ToList();
-            return allJobs.GroupBy(j => j.Subject).ToDictionary(g => g.Key, g => g.ToList());
         }
 
         private int EffectivePageCount()
@@ -210,13 +220,13 @@ namespace HomeworkApp.Views
                 return;
             }
 
-            const double padding = 10;
-            double draftWidth = Math.Max(200, DraftHost.ActualWidth - padding * 2);
+            const double indicatorWidth = 1;
+            double draftWidth = Math.Max(200, DraftHost.ActualWidth - indicatorWidth);
             double draftHeight = Math.Max(
                 200,
-                HomeworkContainer?.ActualHeight > 0
-                    ? HomeworkContainer.ActualHeight * _currentScale
-                    : DraftHost.ActualHeight - padding * 2);
+                MainInkCanvas.Height > 0
+                    ? MainInkCanvas.Height
+                    : DraftHost.ActualHeight);
 
             DraftContainer.Width = draftWidth;
             DraftContainer.Height = draftHeight;
@@ -301,7 +311,7 @@ namespace HomeworkApp.Views
 
             // 草稿纸尺寸由 SizeChanged 事件动态处理
             // 初始化一个临时尺寸，等待 SizeChanged 事件更新
-            double draftWidth = Math.Max(200, DraftHost.ActualWidth > 0 ? DraftHost.ActualWidth - 20 : 500);
+            double draftWidth = Math.Max(200, DraftHost.ActualWidth > 0 ? DraftHost.ActualWidth - 1 : 500);
             double draftHeight = Math.Max(200, HomeworkContainer.ActualHeight > 0 ? HomeworkContainer.ActualHeight : 700);
             DraftInkCanvas.Width = draftWidth;
             DraftInkCanvas.Height = draftHeight;
@@ -349,10 +359,8 @@ namespace HomeworkApp.Views
                 LoadPageInk(pageIndex);
 
                 // Set current pen color and width
-                _inkManager.SetPenColor(_currentColor);
-                _inkManager.SetPenWidth(_currentPenWidth);
+                ApplyToolSelectionToManagers();
 
-                UpdatePageInfo();
             }
             else if (!_hasDocument)
             {
@@ -368,9 +376,7 @@ namespace HomeworkApp.Views
                     logicalHeight);
 
                 LoadPageInk(pageIndex);
-                _inkManager?.SetPenColor(_currentColor);
-                _inkManager?.SetPenWidth(_currentPenWidth);
-                UpdatePageInfo();
+                ApplyToolSelectionToManagers();
             }
             else
             {
@@ -386,10 +392,14 @@ namespace HomeworkApp.Views
                     logicalHeight);
 
                 LoadPageInk(pageIndex);
-                _inkManager.SetPenColor(_currentColor);
-                _inkManager.SetPenWidth(_currentPenWidth);
-                UpdatePageInfo();
+                ApplyToolSelectionToManagers();
             }
+
+            _ = Dispatcher.BeginInvoke(new Action(() =>
+            {
+                UpdateScrollIndicator(HomeworkScrollViewer, HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
+                UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
+            }), DispatcherPriority.Loaded);
         }
 
         private void SetupInkCanvas()
@@ -421,11 +431,14 @@ namespace HomeworkApp.Views
         private void HomeworkGrid_SizeChanged(object sender, SizeChangedEventArgs e)
         {
             UpdateDraftCanvasToViewport();
+            UpdateScrollIndicator(HomeworkScrollViewer, HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
+            UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
         }
 
         private void DraftGrid_SizeChanged(object sender, SizeChangedEventArgs e)
         {
             UpdateDraftCanvasToViewport();
+            UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
         }
 
         private void InkCanvas_StrokesChanged(object? sender, StrokeCollectionChangedEventArgs e)
@@ -513,17 +526,41 @@ namespace HomeworkApp.Views
         {
             Dispatcher.Invoke(() =>
             {
+                if (_disposed)
+                {
+                    return;
+                }
+
                 SaveCurrentPageInk();
                 JobManager.SaveJob(_job!);
             });
         }
 
-        private void UpdatePageInfo()
+        private void UpdateScrollIndicator(ScrollViewer viewer, Border indicator, DispatcherTimer timer)
         {
-            int pageCount = EffectivePageCount();
-            TxtPageInfo.Text = $"第 {_currentPageIndex + 1} / {pageCount} 页";
-            BtnPrevPage.IsEnabled = _currentPageIndex > 0;
-            BtnNextPage.IsEnabled = _currentPageIndex < pageCount - 1;
+            if (viewer.ExtentHeight <= viewer.ViewportHeight || viewer.ViewportHeight <= 0 || viewer.ActualHeight <= 0)
+            {
+                indicator.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            double trackHeight = viewer.ActualHeight;
+            double thumbHeight = Math.Max(18, trackHeight * (viewer.ViewportHeight / viewer.ExtentHeight));
+            double maxOffset = Math.Max(1, viewer.ExtentHeight - viewer.ViewportHeight);
+            double top = (viewer.VerticalOffset / maxOffset) * Math.Max(0, trackHeight - thumbHeight);
+
+            indicator.Height = thumbHeight;
+            indicator.Margin = new Thickness(0, top, 0, 0);
+            indicator.Visibility = Visibility.Visible;
+            indicator.Background = new SolidColorBrush(Color.FromRgb(0, 0, 0));
+            timer.Stop();
+            timer.Start();
+        }
+
+        private static void ResetIndicatorColor(Border indicator, DispatcherTimer timer)
+        {
+            indicator.Background = new SolidColorBrush(Color.FromRgb(110, 110, 110));
+            timer.Stop();
         }
 
         private void BtnBack_Click(object sender, RoutedEventArgs e)
@@ -533,39 +570,24 @@ namespace HomeworkApp.Views
             NavigationService?.GoBack();
         }
 
-        private async void BtnPrevPage_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentPageIndex > 0)
-            {
-                await LoadPageAsync(_currentPageIndex - 1);
-            }
-        }
-
-        private async void BtnNextPage_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentPageIndex < EffectivePageCount() - 1)
-            {
-                await LoadPageAsync(_currentPageIndex + 1);
-            }
-        }
-
         private void BtnPen_Click(object sender, RoutedEventArgs e)
         {
-            _inkManager?.SetTool(InkManager.ToolMode.Pen);
-            _inkManager?.SetPenColor(_currentColor);
-            _inkManager?.SetPenWidth(_currentPenWidth);
-
-            _draftInkManager?.SetTool(InkManager.ToolMode.Pen);
-            _draftInkManager?.SetPenColor(_currentColor);
-            _draftInkManager?.SetPenWidth(_currentPenWidth);
-
-            UpdateColorSelectorVisual();
+            SetActiveTool(InkManager.ToolMode.Pen);
         }
 
         private void BtnEraser_Click(object sender, RoutedEventArgs e)
         {
-            _inkManager?.SetTool(InkManager.ToolMode.Eraser);
-            _draftInkManager?.SetTool(InkManager.ToolMode.Eraser);
+            SetActiveTool(InkManager.ToolMode.Eraser);
+        }
+
+        private void BtnSelect_Click(object sender, RoutedEventArgs e)
+        {
+            SetActiveTool(InkManager.ToolMode.Select);
+        }
+
+        private void BtnHand_Click(object sender, RoutedEventArgs e)
+        {
+            SetActiveTool(InkManager.ToolMode.None, handMode: true);
         }
 
         private void Color_Click(object sender, MouseButtonEventArgs e)
@@ -626,15 +648,50 @@ namespace HomeworkApp.Views
             ApplyZoom();
         }
 
-        private void ApplyZoom()
+        private void ApplyZoom(ScrollViewer? anchorViewer = null, Point? anchorPoint = null)
         {
-            // 作业区使用 Viewbox 缩放
-            HomeworkViewbox.Stretch = Stretch.Uniform;
-            HomeworkContainer.RenderTransform = new ScaleTransform(_currentScale, _currentScale);
-            HomeworkContainer.RenderTransformOrigin = new Point(0, 0);
+            double horizontalRatio = 0;
+            double verticalRatio = 0;
+            bool hasAnchor = anchorViewer != null && anchorPoint.HasValue;
+
+            if (hasAnchor && anchorViewer != null)
+            {
+                var anchor = anchorPoint.GetValueOrDefault();
+
+                if (anchorViewer.ExtentWidth > 0)
+                {
+                    horizontalRatio = (anchorViewer.HorizontalOffset + anchor.X) / anchorViewer.ExtentWidth;
+                }
+
+                if (anchorViewer.ExtentHeight > 0)
+                {
+                    verticalRatio = (anchorViewer.VerticalOffset + anchor.Y) / anchorViewer.ExtentHeight;
+                }
+            }
+
+            HomeworkContainer.LayoutTransform = new ScaleTransform(_currentScale, _currentScale);
+            DraftContainer.LayoutTransform = new ScaleTransform(_currentScale, _currentScale);
             UpdateDraftCanvasToViewport();
 
             TxtZoom.Text = $"{(int)(_currentScale * 100)}%";
+
+            if (hasAnchor && anchorViewer != null && anchorPoint.HasValue)
+            {
+                anchorViewer.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    double targetHorizontal = Math.Max(0, horizontalRatio * anchorViewer.ExtentWidth - anchorPoint.Value.X);
+                    double targetVertical = Math.Max(0, verticalRatio * anchorViewer.ExtentHeight - anchorPoint.Value.Y);
+                    anchorViewer.ScrollToHorizontalOffset(targetHorizontal);
+                    anchorViewer.ScrollToVerticalOffset(targetVertical);
+                    UpdateScrollIndicator(HomeworkScrollViewer, HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
+                    UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
+                }), DispatcherPriority.Loaded);
+            }
+            else
+            {
+                UpdateScrollIndicator(HomeworkScrollViewer, HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
+                UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
+            }
         }
 
         private void ScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -644,29 +701,37 @@ namespace HomeworkApp.Views
                 e.Handled = true;
                 if (e.Delta > 0)
                 {
-                    ZoomIn_Click(sender, e);
+                    _currentScale = Math.Min(_currentScale * 1.2, 5.0);
                 }
                 else
                 {
-                    ZoomOut_Click(sender, e);
+                    _currentScale = Math.Max(_currentScale / 1.2, 0.2);
+                }
+
+                if (sender is ScrollViewer scrollViewer)
+                {
+                    ApplyZoom(scrollViewer, e.GetPosition(scrollViewer));
+                }
+                else
+                {
+                    ApplyZoom();
                 }
             }
         }
 
         private void DraftScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
-            {
-                e.Handled = true;
-                if (e.Delta > 0)
-                {
-                    ZoomIn_Click(sender, e);
-                }
-                else
-                {
-                    ZoomOut_Click(sender, e);
-                }
-            }
+            ScrollViewer_PreviewMouseWheel(sender, e);
+        }
+
+        private void HomeworkScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            UpdateScrollIndicator(HomeworkScrollViewer, HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
+        }
+
+        private void DraftScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
         }
 
         private async void BtnPageRatio_Click(object sender, RoutedEventArgs e)
@@ -734,35 +799,40 @@ namespace HomeworkApp.Views
 
         private void BtnExpandLeft_Click(object sender, RoutedEventArgs e)
         {
-            _isLeftPanelCollapsed = !_isLeftPanelCollapsed;
-
-            if (_isLeftPanelCollapsed)
-            {
-                LeftColumn.Width = new GridLength(0);
-                LeftPanel.Visibility = Visibility.Collapsed;
-                BtnExpandLeft.Content = "◀";
-                BtnExpandLeft.ToolTip = "展开作业助手";
-            }
-            else
-            {
-                LeftColumn.Width = new GridLength(200);
-                LeftPanel.Visibility = Visibility.Visible;
-                BtnExpandLeft.Content = "▶";
-                BtnExpandLeft.ToolTip = "收缩作业助手";
-            }
+            SetAssistantPanelCollapsed(!_isLeftPanelCollapsed);
         }
 
         private void BtnMenu_Click(object sender, RoutedEventArgs e)
         {
-            // Show context menu with additional options
             var menu = new ContextMenu();
-            menu.Items.Add(new MenuItem { Header = "草稿纸", Tag = "draft" });
+            int pageCount = EffectivePageCount();
+
+            if (pageCount > 1)
+            {
+                menu.Items.Add(new MenuItem
+                {
+                    Header = $"当前页：{_currentPageIndex + 1} / {pageCount}",
+                    IsEnabled = false
+                });
+                menu.Items.Add(new MenuItem
+                {
+                    Header = "上一页",
+                    Tag = "prev-page",
+                    IsEnabled = _currentPageIndex > 0
+                });
+                menu.Items.Add(new MenuItem
+                {
+                    Header = "下一页",
+                    Tag = "next-page",
+                    IsEnabled = _currentPageIndex < pageCount - 1
+                });
+                menu.Items.Add(new Separator());
+            }
+
             menu.Items.Add(new MenuItem { Header = "历史作业", Tag = "history" });
             menu.Items.Add(new MenuItem { Header = "设置", Tag = "settings" });
             menu.Items.Add(new Separator());
             menu.Items.Add(new MenuItem { Header = "导入作业", Tag = "import" });
-            menu.Items.Add(new MenuItem { Header = "导出作业", Tag = "export" });
-            menu.Items.Add(new Separator());
             menu.Items.Add(new MenuItem { Header = "删除作业", Tag = "delete" });
 
             foreach (var item in menu.Items)
@@ -777,14 +847,23 @@ namespace HomeworkApp.Views
             menu.IsOpen = true;
         }
 
-        private void MenuItem_Click(object? sender, RoutedEventArgs e)
+        private async void MenuItem_Click(object? sender, RoutedEventArgs e)
         {
             if (sender is MenuItem menuItem && menuItem.Tag is string action)
             {
                 switch (action)
                 {
-                    case "draft":
-                        MessageBox.Show("草稿纸功能已启用，显示在右侧区域。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    case "prev-page":
+                        if (_currentPageIndex > 0)
+                        {
+                            await LoadPageAsync(_currentPageIndex - 1);
+                        }
+                        break;
+                    case "next-page":
+                        if (_currentPageIndex < EffectivePageCount() - 1)
+                        {
+                            await LoadPageAsync(_currentPageIndex + 1);
+                        }
                         break;
                     case "history":
                         NavigationService?.Navigate(new HistoryPage());
@@ -795,15 +874,12 @@ namespace HomeworkApp.Views
                     case "import":
                         NavigationService?.Navigate(new ImportPage(_job.Subject));
                         break;
-                    case "export":
-                        MessageBox.Show("导出功能开发中...", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
-                        break;
                     case "delete":
                         var result = MessageBox.Show($"确定要删除作业《{ _job.Subject}》吗？", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                         if (result == MessageBoxResult.Yes)
                         {
                             JobManager.DeleteJob(_job.JobId);
-                            NavigationService?.Navigate(new HomePage());
+                            NavigationService?.Navigate(new EditorPage(JobManager.GetPreferredStartupJob()));
                         }
                         break;
                 }
@@ -812,25 +888,18 @@ namespace HomeworkApp.Views
 
         private async void BtnPrint_Click(object sender, RoutedEventArgs e)
         {
-            // Save current state first
             SaveCurrentPageInk();
             JobManager.SaveJob(_job!);
-
-            // Show print confirmation
-            var result = MessageBox.Show(
-                $"将要打印 {_job.TotalPages} 页作业，确定继续？",
-                "打印确认",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-
-            if (result != MessageBoxResult.Yes)
-                return;
 
             try
             {
                 await PrintJobAsync();
                 _job.IsPrinted = true;
                 JobManager.SaveJob(_job!);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
             catch (Exception ex)
             {
@@ -840,19 +909,121 @@ namespace HomeworkApp.Views
 
         private async Task PrintJobAsync()
         {
-            var printDialog = new PrintDialog();
-            if (printDialog.ShowDialog() != true)
-                return;
-
-            var printQueue = printDialog.PrintQueue;
-
-            // Create print document
+            var (printQueue, printTicket) = ResolvePrintDestination();
             var document = new HomeworkPrintDocument(_job, _documentService);
+            document.Print(printQueue, printTicket);
+            MessageBox.Show($"已发送到打印机：{printQueue.Name}", "打印完成", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
 
-            // Print
-            document.Print(printQueue);
+        private (PrintQueue queue, PrintTicket? ticket) ResolvePrintDestination()
+        {
+            var settings = AppSettingsStore.Load();
+            var server = new LocalPrintServer();
 
-            MessageBox.Show("已发送到打印机", "打印完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (!string.IsNullOrWhiteSpace(settings.DefaultPrinterName))
+            {
+                try
+                {
+                    var queue = server.GetPrintQueues()
+                        .FirstOrDefault(item => string.Equals(item.Name, settings.DefaultPrinterName, StringComparison.CurrentCultureIgnoreCase));
+
+                    if (queue != null)
+                    {
+                        return (queue, BuildPrintTicket(queue, settings.PaperSize));
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var printDialog = new PrintDialog();
+            if (printDialog.ShowDialog() != true || printDialog.PrintQueue == null)
+            {
+                throw new OperationCanceledException("已取消打印。");
+            }
+
+            settings.DefaultPrinterName = printDialog.PrintQueue.Name;
+            if (TryMapPaperSize(printDialog.PrintTicket?.PageMediaSize?.PageMediaSizeName, out var dialogPaperSize))
+            {
+                settings.PaperSize = dialogPaperSize;
+            }
+
+            AppSettingsStore.Save(settings);
+            return (printDialog.PrintQueue, BuildPrintTicket(printDialog.PrintQueue, settings.PaperSize));
+        }
+
+        private static PrintTicket BuildPrintTicket(PrintQueue queue, string? paperSize)
+        {
+            var ticket = queue.UserPrintTicket ?? queue.DefaultPrintTicket ?? new PrintTicket();
+            var pageMediaSize = paperSize switch
+            {
+                "A3" => new PageMediaSize(PageMediaSizeName.ISOA3),
+                "Letter" => new PageMediaSize(PageMediaSizeName.NorthAmericaLetter),
+                "B5" => new PageMediaSize(MmToDip(176), MmToDip(250)),
+                _ => new PageMediaSize(PageMediaSizeName.ISOA4)
+            };
+
+            ticket.PageMediaSize = pageMediaSize;
+            return ticket;
+        }
+
+        private static bool TryMapPaperSize(PageMediaSizeName? mediaSizeName, out string paperSize)
+        {
+            switch (mediaSizeName)
+            {
+                case PageMediaSizeName.ISOA3:
+                    paperSize = "A3";
+                    return true;
+                case PageMediaSizeName.NorthAmericaLetter:
+                    paperSize = "Letter";
+                    return true;
+                case PageMediaSizeName.ISOA4:
+                    paperSize = "A4";
+                    return true;
+                default:
+                    paperSize = string.Empty;
+                    return false;
+            }
+        }
+
+        private static double MmToDip(double millimeter)
+        {
+            return millimeter / 25.4 * 96.0;
+        }
+
+        private void ScrollViewer_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (!_isHandMode || sender is not ScrollViewer scrollViewer)
+            {
+                return;
+            }
+
+            _activePanScrollViewer = scrollViewer;
+            _panStartPoint = e.GetPosition(scrollViewer);
+            _panStartOffset = new Point(scrollViewer.HorizontalOffset, scrollViewer.VerticalOffset);
+            scrollViewer.CaptureMouse();
+            e.Handled = true;
+        }
+
+        private void ScrollViewer_PreviewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_isHandMode || _activePanScrollViewer == null || !_activePanScrollViewer.IsMouseCaptured)
+            {
+                return;
+            }
+
+            var currentPoint = e.GetPosition(_activePanScrollViewer);
+            var delta = currentPoint - _panStartPoint;
+
+            _activePanScrollViewer.ScrollToHorizontalOffset(Math.Max(0, _panStartOffset.X - delta.X));
+            _activePanScrollViewer.ScrollToVerticalOffset(Math.Max(0, _panStartOffset.Y - delta.Y));
+            e.Handled = true;
+        }
+
+        private void ScrollViewer_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            EndPan();
         }
 
         private void EditorPage_Unloaded(object sender, RoutedEventArgs e)
@@ -865,11 +1036,74 @@ namespace HomeworkApp.Views
             if (!_disposed)
             {
                 Unloaded -= EditorPage_Unloaded;
+                EndPan();
                 MainInkCanvas.Strokes.StrokesChanged -= InkCanvas_StrokesChanged;
                 DraftInkCanvas.Strokes.StrokesChanged -= DraftInkCanvas_StrokesChanged;
                 _saveDebouncer?.Dispose();
+                _homeworkScrollIndicatorTimer.Stop();
+                _draftScrollIndicatorTimer.Stop();
                 _documentService?.Dispose();
                 _disposed = true;
+            }
+        }
+
+        private void SetAssistantPanelCollapsed(bool collapsed)
+        {
+            _isLeftPanelCollapsed = collapsed;
+
+            if (collapsed)
+            {
+                LeftColumn.Width = new GridLength(0);
+                LeftPanel.Visibility = Visibility.Collapsed;
+                BtnExpandLeft.Content = "◀";
+                BtnExpandLeft.ToolTip = "展开作业助手";
+                BtnExpandLeft.Margin = new Thickness(-5, 0, 0, 0);
+            }
+            else
+            {
+                LeftColumn.Width = new GridLength(200);
+                LeftPanel.Visibility = Visibility.Visible;
+                BtnExpandLeft.Content = "▶";
+                BtnExpandLeft.ToolTip = "收起作业助手";
+                BtnExpandLeft.Margin = new Thickness(-5, 0, 0, 0);
+            }
+        }
+
+        private void SetActiveTool(InkManager.ToolMode tool, bool handMode = false)
+        {
+            _activeToolMode = tool;
+            _isHandMode = handMode;
+            ApplyToolSelectionToManagers();
+
+            var cursor = handMode ? Cursors.Hand : Cursors.Arrow;
+            HomeworkScrollViewer.Cursor = cursor;
+            DraftScrollViewer.Cursor = cursor;
+            MainInkCanvas.Cursor = cursor;
+            DraftInkCanvas.Cursor = cursor;
+        }
+
+        private void EndPan()
+        {
+            if (_activePanScrollViewer != null && _activePanScrollViewer.IsMouseCaptured)
+            {
+                _activePanScrollViewer.ReleaseMouseCapture();
+            }
+
+            _activePanScrollViewer = null;
+        }
+
+        private void ApplyToolSelectionToManagers()
+        {
+            _inkManager?.SetTool(_activeToolMode);
+            _draftInkManager?.SetTool(_activeToolMode);
+
+            if (_activeToolMode == InkManager.ToolMode.Pen)
+            {
+                _inkManager?.SetPenColor(_currentColor);
+                _inkManager?.SetPenWidth(_currentPenWidth);
+                _draftInkManager?.SetPenColor(_currentColor);
+                _draftInkManager?.SetPenWidth(_currentPenWidth);
+                UpdateColorSelectorVisual();
             }
         }
     }

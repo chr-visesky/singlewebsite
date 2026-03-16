@@ -202,6 +202,41 @@ body {
   cursor: default;
 }
 
+.study-check {
+  flex: 0 0 auto;
+  align-self: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  min-width: 20px;
+  color: #111111;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.study-check--upcoming {
+  color: #7f8791;
+  cursor: default;
+}
+
+.study-check--pending {
+  color: #ffd166;
+  text-shadow: 0 0 10px rgba(255, 209, 102, 0.24);
+}
+
+.study-check--completed {
+  color: #4df0a6;
+  text-shadow: 0 0 10px rgba(77, 240, 166, 0.24);
+  cursor: default;
+}
+
+.study-check:disabled {
+  opacity: 1;
+}
+
 .schedule-panel {
   display: grid;
   gap: 18px;

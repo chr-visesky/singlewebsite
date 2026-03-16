@@ -4,6 +4,7 @@
         Title="StudyGate 作业模块"
         Height="700" Width="1000"
         MinHeight="640" MinWidth="960"
+        WindowState="Maximized"
         WindowStartupLocation="CenterScreen">
 
     <Window.Background>

@@ -48,6 +48,19 @@ namespace HomeworkApp.Views
             SelectFiles();
         }
 
+        private void BtnBlankHomework_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var job = JobManager.CreateBlankJob(_subject);
+                NavigationService?.Navigate(new EditorPage(job));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "创建失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void SelectFiles()
         {
             var openFileDialog = new OpenFileDialog

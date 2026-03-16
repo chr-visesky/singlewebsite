@@ -5,10 +5,90 @@
       Background="Transparent">
 
     <Page.Resources>
-        <!-- Thin Horizontal Scrollbar Style -->
+        <Style x:Key="ThinScrollBarStyle" TargetType="ScrollBar">
+            <Setter Property="Width" Value="1"/>
+            <Setter Property="Height" Value="1"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track"
+                                   Focusable="False"
+                                   IsDirectionReversed="False">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton IsTabStop="False"
+                                                  Opacity="0"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbBorder"
+                                                        CornerRadius="0"
+                                                        Background="#6E6E6E"
+                                                        BorderThickness="0"
+                                                        MinWidth="1"
+                                                        MinHeight="1"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="#000000"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="ThumbBorder" Property="Background" Value="#000000"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton IsTabStop="False"
+                                                  Opacity="0"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Orientation" Value="Horizontal">
+                                <Setter Property="Height" Value="1"/>
+                                <Setter Property="Width" Value="Auto"/>
+                            </Trigger>
+                            <Trigger Property="Orientation" Value="Vertical">
+                                <Setter Property="Width" Value="1"/>
+                                <Setter Property="Height" Value="Auto"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Opacity" Value="1"/>
+        </Style>
+
+        <DropShadowEffect x:Key="PaperShadowEffect"
+                          BlurRadius="0"
+                          ShadowDepth="0"
+                          Opacity="0"
+                          Color="#000000"/>
+
+        <Style x:Key="PaperSurfaceStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DFDDD8"/>
+            <Setter Property="BorderThickness" Value="0.5"/>
+            <Setter Property="Effect" Value="{StaticResource PaperShadowEffect}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
     </Page.Resources>
 
-    <Grid Margin="12">
+    <Grid Margin="6" Background="#E6E3DD">
         <!-- Main Content: Homework, Draft, Right Panel -->
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" MinWidth="400"/>
@@ -19,67 +99,99 @@
         <!-- Left: Homework Area (A4 fixed size) -->
         <Grid x:Name="HomeworkHost" Grid.Column="0" Background="Transparent">
             <ScrollViewer x:Name="HomeworkScrollViewer"
-                          HorizontalScrollBarVisibility="Disabled"
-                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Hidden"
+                          CanContentScroll="False"
+                          PreviewMouseLeftButtonDown="ScrollViewer_PreviewMouseLeftButtonDown"
+                          PreviewMouseLeftButtonUp="ScrollViewer_PreviewMouseLeftButtonUp"
+                          PreviewMouseMove="ScrollViewer_PreviewMouseMove"
                           PreviewMouseWheel="ScrollViewer_PreviewMouseWheel"
+                          ScrollChanged="HomeworkScrollViewer_ScrollChanged"
                           SizeChanged="HomeworkGrid_SizeChanged">
-                <Viewbox x:Name="HomeworkViewbox" Stretch="Uniform" StretchDirection="Both">
-                    <Grid x:Name="HomeworkContainer" HorizontalAlignment="Center" VerticalAlignment="Top">
-                        <!-- A4 Paper Background -->
-                        <Border x:Name="A4Background" Width="794" Height="1123"
-                                Background="White" BorderBrush="#CCCCCC" BorderThickness="1"/>
-                        <!-- Document Image -->
-                        <Image x:Name="DocumentImage" Stretch="Uniform"
-                               RenderOptions.BitmapScalingMode="HighQuality"
-                               Visibility="Collapsed" ClipToBounds="True"
-                               Width="794" Height="1123"/>
-                        <!-- Ink Canvas for handwriting -->
-                        <InkCanvas x:Name="MainInkCanvas" Background="Transparent"
-                                   EditingMode="Ink" UseCustomCursor="True"/>
-                    </Grid>
-                </Viewbox>
+                <ScrollViewer.Resources>
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
+                </ScrollViewer.Resources>
+                <Grid x:Name="HomeworkContainer" HorizontalAlignment="Left" VerticalAlignment="Top" RenderTransformOrigin="0,0">
+                    <!-- A4 Paper Background -->
+                    <Border x:Name="A4Background" Width="794" Height="1123"
+                            Style="{StaticResource PaperSurfaceStyle}"/>
+                    <!-- Document Image -->
+                    <Image x:Name="DocumentImage" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Visibility="Collapsed" ClipToBounds="True"
+                           Width="794" Height="1123"/>
+                    <!-- Ink Canvas for handwriting -->
+                    <InkCanvas x:Name="MainInkCanvas" Background="Transparent"
+                               EditingMode="Ink" UseCustomCursor="True"/>
+                </Grid>
             </ScrollViewer>
+            <Border x:Name="HomeworkScrollIndicator"
+                    Width="1"
+                    Background="#6E6E6E"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Visibility="Collapsed"/>
         </Grid>
 
         <!-- Right: Draft Area (fills remaining space, height matches homework) -->
-        <Grid x:Name="DraftHost" Grid.Column="1" Margin="12,0,0,0" Background="Transparent" SizeChanged="DraftGrid_SizeChanged">
+        <Grid x:Name="DraftHost" Grid.Column="1" Margin="1,0,0,0" Background="Transparent" SizeChanged="DraftGrid_SizeChanged">
             <ScrollViewer x:Name="DraftScrollViewer"
-                          HorizontalScrollBarVisibility="Disabled"
-                          VerticalScrollBarVisibility="Auto"
-                          PreviewMouseWheel="DraftScrollViewer_PreviewMouseWheel">
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Hidden"
+                          CanContentScroll="False"
+                          PreviewMouseLeftButtonDown="ScrollViewer_PreviewMouseLeftButtonDown"
+                          PreviewMouseLeftButtonUp="ScrollViewer_PreviewMouseLeftButtonUp"
+                          PreviewMouseMove="ScrollViewer_PreviewMouseMove"
+                          PreviewMouseWheel="DraftScrollViewer_PreviewMouseWheel"
+                          ScrollChanged="DraftScrollViewer_ScrollChanged">
+                <ScrollViewer.Resources>
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
+                </ScrollViewer.Resources>
                 <Grid x:Name="DraftContainer" HorizontalAlignment="Left" VerticalAlignment="Top">
                     <!-- Draft Paper Background -->
                     <Border x:Name="DraftA4Background" Width="794" Height="1123"
-                            Background="White" BorderBrush="#CCCCCC" BorderThickness="1"/>
+                            Style="{StaticResource PaperSurfaceStyle}"/>
                     <!-- Ink Canvas for handwriting -->
                     <InkCanvas x:Name="DraftInkCanvas" Background="Transparent"
                                EditingMode="Ink" UseCustomCursor="True"/>
                 </Grid>
             </ScrollViewer>
+            <Border x:Name="DraftScrollIndicator"
+                    Width="1"
+                    Background="#6E6E6E"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Visibility="Collapsed"/>
         </Grid>
 
         <!-- Floating Tool Button - Bottom Right -->
         <Border Grid.ColumnSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Right"
-                Margin="0,0,15,15" Background="Transparent">
-            <Border CornerRadius="30" Padding="8" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                Margin="0,0,10,10" Background="Transparent">
+            <Border CornerRadius="24" Padding="6" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                 <Button x:Name="BtnTools" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
-                        Width="50" Height="50" FontSize="22" Padding="0"
+                        Width="40" Height="40" FontSize="18" Padding="0"
                         Click="BtnTools_Click" ToolTip="工具"/>
             </Border>
         </Border>
 
         <!-- Collapsible Tool Panel -->
         <Border x:Name="ToolPanel" Grid.ColumnSpan="2" VerticalAlignment="Center"
-                HorizontalAlignment="Right" Margin="0,0,15,80" Visibility="Collapsed"
+                HorizontalAlignment="Right" Margin="0,0,10,72" Visibility="Collapsed"
                 Background="Transparent">
-            <Border CornerRadius="12" Padding="8" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+            <Border CornerRadius="10" Padding="6" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                 <StackPanel>
                     <!-- Pen/Eraser -->
                     <Button x:Name="BtnPen" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
-                            Width="40" Height="40" FontSize="18" Padding="0" Margin="0,0,0,4"
+                            Width="32" Height="32" FontSize="14" Padding="0" Margin="0,0,0,4"
                             Click="BtnPen_Click" ToolTip="笔"/>
+                    <Button x:Name="BtnSelect" Content="⬚" Style="{StaticResource SecondaryButtonStyle}"
+                            Width="32" Height="32" FontSize="12" Padding="0" Margin="0,0,0,4"
+                            Click="BtnSelect_Click" ToolTip="选中字迹"/>
+                    <Button x:Name="BtnHand" Content="✋" Style="{StaticResource SecondaryButtonStyle}"
+                            Width="32" Height="32" FontSize="12" Padding="0" Margin="0,0,0,4"
+                            Click="BtnHand_Click" ToolTip="拖动画布"/>
                     <Button x:Name="BtnEraser" Content="⌫" Style="{StaticResource SecondaryButtonStyle}"
-                            Width="40" Height="40" FontSize="18" Padding="0" Margin="0,0,0,8"
+                            Width="32" Height="32" FontSize="14" Padding="0" Margin="0,0,0,8"
                             Click="BtnEraser_Click" ToolTip="橡皮"/>
 
                     <!-- Colors -->
@@ -132,11 +244,11 @@
 
                     <!-- Zoom -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <Button Content="-" Width="28" Height="28"
-                                Style="{StaticResource SecondaryButtonStyle}" FontSize="14"
+                        <Button Content="-" Width="24" Height="24"
+                                Style="{StaticResource SecondaryButtonStyle}" FontSize="12"
                                 Padding="0" Click="ZoomOut_Click"/>
-                        <Button Content="+" Width="28" Height="28"
-                                Style="{StaticResource SecondaryButtonStyle}" FontSize="14"
+                        <Button Content="+" Width="24" Height="24"
+                                Style="{StaticResource SecondaryButtonStyle}" FontSize="12"
                                 Padding="0" Margin="4,0,0,0" Click="ZoomIn_Click"/>
                     </StackPanel>
                     <TextBlock x:Name="TxtZoom" Text="100%" FontSize="10"
@@ -145,33 +257,45 @@
 
                     <!-- Clear -->
                     <Button x:Name="BtnClearPage" Content="🗑" Style="{StaticResource SecondaryButtonStyle}"
-                            Width="40" Height="40" FontSize="16" Padding="0"
+                            Width="32" Height="32" FontSize="12" Padding="0"
                             Click="BtnClearPage_Click" ToolTip="清空本页"/>
                     <Button x:Name="BtnClearDraft" Content="🗑" Style="{StaticResource SecondaryButtonStyle}"
-                            Width="40" Height="40" FontSize="16" Padding="0" Margin="0,4,0,8"
+                            Width="32" Height="32" FontSize="12" Padding="0" Margin="0,4,0,8"
                             Click="BtnClearDraft_Click" ToolTip="清空草稿"/>
 
                     <!-- Page Ratio -->
                     <Button x:Name="BtnPageRatio" Content="A4 竖" Style="{StaticResource SecondaryButtonStyle}"
-                            FontSize="10" Padding="8,4" Margin="0,8,0,0" Click="BtnPageRatio_Click"/>
+                            FontSize="9" Padding="6,3" Margin="0,8,0,0" Click="BtnPageRatio_Click"/>
 
                     <!-- Print -->
                     <Button x:Name="BtnPrint" Content="🖨 打印" Style="{StaticResource PrimaryButtonStyle}"
-                            FontSize="10" Padding="10,4" Margin="0,4,0,0" Click="BtnPrint_Click"/>
+                            FontSize="9" Padding="8,3" Margin="0,4,0,0" Click="BtnPrint_Click"/>
                 </StackPanel>
             </Border>
         </Border>
 
-        <!-- Expand/Collapse button - positioned at top right, toggles right panel -->
-        <Button x:Name="BtnExpandLeft" Grid.Column="1" Content="▶"
-                FontSize="16" Padding="4,2"
-                Click="BtnExpandLeft_Click" ToolTip="展开/收缩右侧"
-                Visibility="Visible" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,5,0"
-                Panel.ZIndex="1000" Background="Transparent" Foreground="{StaticResource MutedText}"
-                BorderThickness="0" Cursor="Hand"/>
+        <Button x:Name="BtnExpandLeft"
+                Grid.Column="2"
+                Content="▶"
+                Click="BtnExpandLeft_Click"
+                Visibility="Visible"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Margin="-5,0,0,0"
+                Width="10"
+                Height="44"
+                Panel.ZIndex="1000"
+                Background="{StaticResource PanelBackground}"
+                Foreground="{StaticResource MutedText}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                FontSize="14"
+                Padding="0"
+                Cursor="Hand"
+                ToolTip="展开或收起作业助手"/>
 
         <!-- Right: Homework Assistant Tree (collapsible) -->
-        <Border x:Name="LeftPanel" Grid.Column="2" Margin="12,0,0,0" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="16">
+        <Border x:Name="LeftPanel" Grid.Column="2" Margin="0,0,0,0" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -192,23 +316,16 @@
                         </StackPanel>
                     </Grid>
 
-                    <!-- Page Navigation -->
-                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button x:Name="BtnPrevPage" Content="◀" Style="{StaticResource SecondaryButtonStyle}"
-                                Click="BtnPrevPage_Click" Padding="6,4" FontSize="11"/>
-                        <TextBlock x:Name="TxtPageInfo" Text="1/5" FontSize="11" Foreground="{StaticResource MutedText}"
-                                   VerticalAlignment="Center" MinWidth="50" TextAlignment="Center" Margin="4,0"/>
-                        <Button x:Name="BtnNextPage" Content="▶" Style="{StaticResource SecondaryButtonStyle}"
-                                Click="BtnNextPage_Click" Padding="6,4" FontSize="11"/>
-                    </StackPanel>
-
                     <!-- Menu Button -->
-                    <Button x:Name="BtnMenu" Content="☰ 菜单" Style="{StaticResource SecondaryButtonStyle}"
+                    <Button x:Name="BtnMenu" Content="☰ 菜单" Style="{StaticResource AssistantRectButtonStyle}"
                             FontSize="11" Padding="8,4" Margin="0,6,0,0" Click="BtnMenu_Click"/>
                 </StackPanel>
 
                 <!-- Tree View -->
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
+                    </ScrollViewer.Resources>
                     <TreeView x:Name="HomeworkTree" Background="Transparent" BorderThickness="0"
                               Foreground="{StaticResource PrimaryText}" FontSize="13">
                         <TreeView.ItemContainerStyle>
@@ -219,7 +336,7 @@
                                     <Setter.Value>
                                         <ControlTemplate TargetType="TreeViewItem">
                                             <StackPanel>
-                                                <Border Name="Bd" Padding="4,2" CornerRadius="4">
+                                                <Border Name="Bd" Padding="4,2" CornerRadius="0">
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="20"/>
@@ -262,10 +379,10 @@
                                             </StackPanel>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#1A2A35"/>
+                                                    <Setter TargetName="Bd" Property="Background" Value="#0F000000"/>
                                                 </Trigger>
                                                 <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#20303B"/>
+                                                    <Setter TargetName="Bd" Property="Background" Value="#14000000"/>
                                                 </Trigger>
                                                 <Trigger Property="IsEnabled" Value="False">
                                                     <Setter Property="Foreground" Value="{StaticResource MutedText}"/>

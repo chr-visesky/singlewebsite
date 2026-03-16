@@ -89,6 +89,41 @@
                 </Setter>
             </Style>
 
+            <Style x:Key="AssistantRectButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="#111820"/>
+                <Setter Property="Foreground" Value="#F8F2E9"/>
+                <Setter Property="Padding" Value="8,4"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="BorderBrush" Value="#2A2A2A"/>
+                <Setter Property="FontSize" Value="11"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}"
+                                    CornerRadius="0"
+                                    Padding="{TemplateBinding Padding}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#1A2A35"/>
+                                    <Setter Property="BorderBrush" Value="#3A3A3A"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Background" Value="#101A20"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.45"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- Card Style (dark panel with subtle gradient) -->
             <Style x:Key="CardStyle" TargetType="Border">
                 <Setter Property="Background" Value="#1A1310"/>

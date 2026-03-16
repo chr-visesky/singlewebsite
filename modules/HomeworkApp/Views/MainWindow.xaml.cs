@@ -7,7 +7,7 @@ namespace HomeworkApp.Views
         public MainWindow()
         {
             InitializeComponent();
-            MainFrame.Navigate(new HomePage());
+            MainFrame.Navigate(new EditorPage(JobManager.GetPreferredStartupJob()));
         }
     }
 }

@@ -97,25 +97,20 @@ function renderTodaySchedule(todaySchedule) {
 
     const action = document.createElement('button');
     action.type = 'button';
-    action.className = 'study-pill';
-    action.disabled = item.status === 'completed';
-    action.textContent = item.status === 'completed' ? '已完成' : item.entryLabel;
+    action.className = `study-check study-check--${item.status}`;
+    action.disabled = item.status !== 'pending';
+    action.textContent = '✓';
+    action.setAttribute(
+      'aria-label',
+      item.status === 'completed' ? '已完成' : item.status === 'pending' ? '打卡' : '未到时间'
+    );
+    action.title = item.status === 'completed' ? '已完成' : item.status === 'pending' ? '打卡' : '未到时间';
     action.addEventListener('click', async () => {
-      if (item.canLaunch) {
-        await launchStudyTarget({
-          target: item.target,
-          scheduleId: item.id,
-          scheduleTargetId: item.scheduleTargetId,
-          libraryId: item.libraryId,
-          libraryTitle: item.libraryTitle
-        });
-        return;
-      }
-
       await completeSchedule(item.id);
     });
 
     article.append(main, action);
+
     scheduleList.append(article);
   });
 }
