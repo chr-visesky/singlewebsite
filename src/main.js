@@ -9,6 +9,14 @@ const os = require('os');
 const path = require('path');
 const { Readable } = require('stream');
 const { fileURLToPath } = require('url');
+const {
+  listNativeModules,
+  resolveNativeModule,
+  resolveNativeModuleTitle,
+  nativeModuleTarget,
+  nativeModuleTargetOptions,
+  launchNativeModule
+} = require('./native-modules');
 
 const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
@@ -273,6 +281,8 @@ let classroomDefinitions = [];
 let classroomIndex = new Map();
 let libraryDefinitions = [];
 let libraryIndex = new Map();
+const nativeModuleDefinitions = listNativeModules();
+const nativeModuleIndex = new Map(nativeModuleDefinitions.map((moduleDefinition) => [moduleDefinition.id, moduleDefinition]));
 let sessionPersistTimer = null;
 let sessionPersistPromise = Promise.resolve();
 let internalServer = null;
@@ -652,6 +662,7 @@ function normalizeStudySchedule(rawSchedule, classrooms, libraries, options = {}
   const classroomIds = new Set(classrooms.map((classroom) => classroom.id));
   const defaultClassroomId = classrooms[0] ? classrooms[0].id : '';
   const libraryIds = new Set(libraries.map((library) => library.id));
+  const nativeModuleIds = new Set(nativeModuleDefinitions.map((moduleDefinition) => moduleDefinition.id));
   const seenIds = new Set();
   const schedule = [];
 
@@ -666,7 +677,7 @@ function normalizeStudySchedule(rawSchedule, classrooms, libraries, options = {}
     const candidateTargetId = normalizeScheduleTargetId(item.target || item.targetId);
     const targetId = candidateTargetId === 'english-course'
       ? defaultClassroomId
-      : classroomIds.has(candidateTargetId) || libraryIds.has(candidateTargetId)
+      : classroomIds.has(candidateTargetId) || libraryIds.has(candidateTargetId) || nativeModuleIds.has(candidateTargetId)
         ? candidateTargetId
         : '';
     const title =
@@ -968,7 +979,11 @@ function resolveLibraryTitle(libraries, libraryId) {
 }
 
 function resolveStudyTargetTitle(classrooms, libraries, targetId) {
-  return resolveClassroomTitle(classrooms, targetId) || resolveLibraryTitle(libraries, targetId);
+  return (
+    resolveClassroomTitle(classrooms, targetId) ||
+    resolveNativeModuleTitle(targetId) ||
+    resolveLibraryTitle(libraries, targetId)
+  );
 }
 
 function normalizeLibraries(rawLibraries, options = {}) {
@@ -1642,6 +1657,34 @@ function studentPlanTarget() {
   return 'internal:student-plan';
 }
 
+function resolveNativeModuleDefinition(moduleId) {
+  return nativeModuleIndex.get(normalizePrefix(moduleId)) || resolveNativeModule(moduleId);
+}
+
+function launchNativeModuleEntry(moduleId) {
+  const moduleDefinition = resolveNativeModuleDefinition(moduleId);
+
+  if (!moduleDefinition) {
+    return false;
+  }
+
+  const result = launchNativeModule(moduleId, {
+    executableDir: path.dirname(process.execPath),
+    projectRoot: path.resolve(__dirname, '..')
+  });
+
+  if (!result.ok) {
+    dialog.showErrorBox(moduleDefinition.title, result.error || `${moduleDefinition.title} 启动失败。`);
+    return false;
+  }
+
+  logNavigationDebug('launch-native-module', {
+    moduleId,
+    executablePath: result.executablePath
+  });
+  return true;
+}
+
 function loadHomePage(reason = 'manual') {
   logNavigationDebug('load-home-page', {
     reason
@@ -1698,6 +1741,10 @@ function navigateMainWindow(target) {
   if (normalizedTarget === studentPlanTarget()) {
     loadStudentPlanPage();
     return true;
+  }
+
+  if (normalizedTarget.startsWith('internal:native-module:')) {
+    return launchNativeModuleEntry(normalizedTarget.slice('internal:native-module:'.length));
   }
 
   if (normalizedTarget.startsWith('internal:library:')) {
@@ -2712,6 +2759,19 @@ function resolveStudyTargetById(targetId) {
     };
   }
 
+  const nativeModule = resolveNativeModuleDefinition(targetId);
+
+  if (nativeModule) {
+    return {
+      target: nativeModuleTarget(nativeModule.id),
+      classroomId: '',
+      classroomTitle: '',
+      libraryId: '',
+      libraryTitle: '',
+      entryLabel: nativeModule.entryLabel || '打开模块'
+    };
+  }
+
   const library = resolveLibrary(targetId);
 
   if (!library) {
@@ -3096,6 +3156,15 @@ function buildHomeModel() {
         target: libraryTarget(library.id),
         scheduleTargetId: library.id,
         libraryId: library.id
+      })),
+      ...nativeModuleDefinitions.map((moduleDefinition) => ({
+        id: moduleDefinition.id,
+        title: moduleDefinition.title,
+        tone: moduleDefinition.tone,
+        badge: moduleDefinition.badge || '作业模块',
+        target: nativeModuleTarget(moduleDefinition.id),
+        scheduleTargetId: moduleDefinition.id,
+        libraryId: ''
       }))
     ]
   };
@@ -5419,6 +5488,7 @@ function mobileTargetOptions() {
       id: classroom.id,
       label: classroom.title
     })),
+    ...nativeModuleTargetOptions(),
     ...libraryDefinitions.map((library) => ({
       id: library.id,
       label: library.title

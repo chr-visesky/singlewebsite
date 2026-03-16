@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>HomeworkApp</RootNamespace>
+    <AssemblyName>HomeworkApp</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- JSON serialization -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="PDFtoImage" Version="5.2.0" />
+  </ItemGroup>
+
+</Project>

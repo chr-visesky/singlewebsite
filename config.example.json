@@ -72,6 +72,14 @@
       "message": "到说课英语时间了，先进入课堂。"
     },
     {
+      "id": "homework-example",
+      "title": "作业整理",
+      "target": "homework-module",
+      "time": "19:30",
+      "weekdays": [1, 2, 3, 4, 5],
+      "message": "到作业整理时间了。"
+    },
+    {
       "id": "reading-example",
       "title": "晚间看书",
       "target": "",

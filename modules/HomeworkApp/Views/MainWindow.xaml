@@ -1,0 +1,23 @@
+<Window x:Class="HomeworkApp.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="StudyGate 作业模块"
+        Height="700" Width="1000"
+        MinHeight="640" MinWidth="960"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Background>
+        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#1B1309" Offset="0"/>
+            <GradientStop Color="#0D1016" Offset="0.55"/>
+            <GradientStop Color="#0A1615" Offset="1"/>
+        </LinearGradientBrush>
+    </Window.Background>
+
+    <Grid>
+        <!-- Main Content Area - Full Width -->
+        <Grid Margin="0">
+            <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden"/>
+        </Grid>
+    </Grid>
+</Window>

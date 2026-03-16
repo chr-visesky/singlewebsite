@@ -8,3 +8,5 @@ out/
 videos/*
 !videos/README.txt
 server-data/
+modules/HomeworkApp/bin/
+modules/HomeworkApp/obj/
