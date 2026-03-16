@@ -30,7 +30,7 @@ namespace HomeworkApp.Views
         private bool _disposed;
         private readonly Border[] _colorBorders;
         private Color _currentColor = Colors.Black;
-        private double _currentPenWidth = 3.0;
+        private double _currentPenWidth = 1.0;
         private double _currentScale = 1.0;
         private bool _isPortrait = true;
         private bool _hasDocument = false;
@@ -71,6 +71,7 @@ namespace HomeworkApp.Views
             JobManager.MarkAsLastJob(_job.JobId);
             ApplyPageCanvasSize();
             UpdateColorSelectorVisual();
+            UpdateWidthSelectorVisual();
             _homeworkScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
             _draftScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(DraftScrollIndicator, _draftScrollIndicatorTimer);
             Unloaded += EditorPage_Unloaded;
@@ -978,6 +979,7 @@ namespace HomeworkApp.Views
             _currentPenWidth = 1;
             _inkManager?.SetPenWidth(1);
             _draftInkManager?.SetPenWidth(1);
+            UpdateWidthSelectorVisual();
         }
 
         private void Width2_Click(object sender, MouseButtonEventArgs e)
@@ -985,6 +987,7 @@ namespace HomeworkApp.Views
             _currentPenWidth = 3;
             _inkManager?.SetPenWidth(3);
             _draftInkManager?.SetPenWidth(3);
+            UpdateWidthSelectorVisual();
         }
 
         private void Width3_Click(object sender, MouseButtonEventArgs e)
@@ -992,11 +995,35 @@ namespace HomeworkApp.Views
             _currentPenWidth = 6;
             _inkManager?.SetPenWidth(6);
             _draftInkManager?.SetPenWidth(6);
+            UpdateWidthSelectorVisual();
         }
 
         private void UpdateWidthSelectorVisual()
         {
-            // Simplified for new UI
+            if (WidthBarThin == null || WidthBarMedium == null || WidthBarBold == null)
+            {
+                return;
+            }
+
+            ResetWidthBar(WidthBarThin);
+            ResetWidthBar(WidthBarMedium);
+            ResetWidthBar(WidthBarBold);
+
+            var selected = _currentPenWidth switch
+            {
+                <= 1.5 => WidthBarThin,
+                <= 4.0 => WidthBarMedium,
+                _ => WidthBarBold
+            };
+
+            selected.Background = new SolidColorBrush(Color.FromRgb(116, 229, 203));
+        }
+
+        private static void ResetWidthBar(Border border)
+        {
+            border.Background = new SolidColorBrush(Color.FromRgb(122, 122, 122));
+            border.BorderBrush = Brushes.Transparent;
+            border.BorderThickness = new Thickness(0);
         }
 
         private void ZoomIn_Click(object sender, RoutedEventArgs e)
@@ -1086,6 +1113,20 @@ namespace HomeworkApp.Views
         private void DraftScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
             ScrollViewer_PreviewMouseWheel(sender, e);
+        }
+
+        private void HomeworkTreeScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+            {
+                return;
+            }
+
+            if (sender is ScrollViewer scrollViewer)
+            {
+                e.Handled = true;
+                scrollViewer.ScrollToVerticalOffset(scrollViewer.VerticalOffset - (e.Delta / 3.0));
+            }
         }
 
         private void HomeworkScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)

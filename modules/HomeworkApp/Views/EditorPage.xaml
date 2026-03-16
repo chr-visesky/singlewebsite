@@ -244,15 +244,15 @@
                     </StackPanel>
 
                     <!-- Pen Width -->
-                    <Border Width="32" Height="4" Background="#69D8C2" CornerRadius="2"
+                    <Border x:Name="WidthBarThin" Width="32" Height="1" Background="#000000" CornerRadius="0"
                             Cursor="Hand" MouseLeftButtonDown="Width1_Click"
-                            Margin="0,0,0,3" ToolTip="细"/>
-                    <Border Width="32" Height="7" Background="#D6C7B3" CornerRadius="3"
+                            Margin="0,0,0,5" ToolTip="1px"/>
+                    <Border x:Name="WidthBarMedium" Width="32" Height="3" Background="#000000" CornerRadius="0"
                             Cursor="Hand" MouseLeftButtonDown="Width2_Click"
-                            Margin="0,0,0,3" ToolTip="中"/>
-                    <Border Width="32" Height="11" Background="#F8F2E9" CornerRadius="5"
+                            Margin="0,0,0,5" ToolTip="3px"/>
+                    <Border x:Name="WidthBarBold" Width="32" Height="6" Background="#000000" CornerRadius="0"
                             Cursor="Hand" MouseLeftButtonDown="Width3_Click"
-                            Margin="0,0,0,8" ToolTip="粗"/>
+                            Margin="0,0,0,8" ToolTip="6px"/>
 
                     <!-- Zoom -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -346,7 +346,10 @@
                 </StackPanel>
 
                 <!-- Tree View -->
-                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="HomeworkTreeScrollViewer"
+                              Grid.Row="2"
+                              VerticalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="HomeworkTreeScrollViewer_PreviewMouseWheel">
                     <ScrollViewer.Resources>
                         <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
                     </ScrollViewer.Resources>
@@ -404,6 +407,9 @@
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="HasItems" Value="False">
                                                     <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
+                                                </Trigger>
+                                                <Trigger Property="IsExpanded" Value="False">
+                                                    <Setter TargetName="ItemsPresenter" Property="Visibility" Value="Collapsed"/>
                                                 </Trigger>
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter TargetName="Bd" Property="Background" Value="#0F000000"/>
