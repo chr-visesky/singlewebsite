@@ -88,11 +88,12 @@
         </Style>
     </Page.Resources>
 
-    <Grid Margin="6" Background="#E6E3DD">
+    <Grid x:Name="EditorLayoutRoot" Margin="6" Background="#E6E3DD">
         <!-- Main Content: Homework, Draft, Right Panel -->
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" MinWidth="400"/>
             <ColumnDefinition Width="*"/>
+            <ColumnDefinition x:Name="ThumbnailColumn" Width="0"/>
             <ColumnDefinition x:Name="LeftColumn" Width="200"/>
         </Grid.ColumnDefinitions>
 
@@ -164,22 +165,33 @@
                     Visibility="Collapsed"/>
         </Grid>
 
-        <!-- Floating Tool Button - Bottom Right -->
-        <Border Grid.ColumnSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Right"
-                Margin="0,0,10,10" Background="Transparent">
-            <Border CornerRadius="24" Padding="6" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
-                <Button x:Name="BtnTools" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
-                        Width="40" Height="40" FontSize="18" Padding="0"
-                        Click="BtnTools_Click" ToolTip="工具"/>
-            </Border>
+        <Border x:Name="ThumbnailHost"
+                Grid.Column="2"
+                Width="72"
+                Margin="1,0,1,0"
+                Background="#66E6E3DD"
+                Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="False">
+                <ScrollViewer.Resources>
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
+                </ScrollViewer.Resources>
+                <StackPanel x:Name="ThumbnailPanel" Margin="6,6,6,6"/>
+            </ScrollViewer>
         </Border>
 
-        <!-- Collapsible Tool Panel -->
-        <Border x:Name="ToolPanel" Grid.ColumnSpan="2" VerticalAlignment="Center"
-                HorizontalAlignment="Right" Margin="0,0,10,72" Visibility="Collapsed"
-                Background="Transparent">
-            <Border CornerRadius="10" Padding="6" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
-                <StackPanel>
+        <StackPanel Grid.Column="1"
+                    VerticalAlignment="Bottom"
+                    HorizontalAlignment="Right"
+                    Margin="0,0,10,10"
+                    Background="Transparent">
+            <!-- Collapsible Tool Panel -->
+            <Border x:Name="ToolPanel"
+                    Visibility="Collapsed"
+                    Background="Transparent">
+                <Border CornerRadius="10,10,0,0" Padding="6" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                    <StackPanel>
                     <!-- Pen/Eraser -->
                     <Button x:Name="BtnPen" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
                             Width="32" Height="32" FontSize="14" Padding="0" Margin="0,0,0,4"
@@ -270,12 +282,24 @@
                     <!-- Print -->
                     <Button x:Name="BtnPrint" Content="🖨 打印" Style="{StaticResource PrimaryButtonStyle}"
                             FontSize="9" Padding="8,3" Margin="0,4,0,0" Click="BtnPrint_Click"/>
-                </StackPanel>
+                    </StackPanel>
+                </Border>
             </Border>
-        </Border>
+
+            <!-- Floating Tool Button - Bottom Right -->
+            <Border Background="{StaticResource PanelBackground}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    Padding="6"
+                    Margin="0,-1,0,0">
+                <Button x:Name="BtnTools" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
+                        Width="40" Height="40" FontSize="18" Padding="0"
+                        Click="BtnTools_Click" ToolTip="工具"/>
+            </Border>
+        </StackPanel>
 
         <Button x:Name="BtnExpandLeft"
-                Grid.Column="2"
+                Grid.Column="3"
                 Content="▶"
                 Click="BtnExpandLeft_Click"
                 Visibility="Visible"
@@ -295,7 +319,7 @@
                 ToolTip="展开或收起作业助手"/>
 
         <!-- Right: Homework Assistant Tree (collapsible) -->
-        <Border x:Name="LeftPanel" Grid.Column="2" Margin="0,0,0,0" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="0">
+        <Border x:Name="LeftPanel" Grid.Column="3" Margin="0,0,0,0" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -378,6 +402,9 @@
                                                 <ItemsPresenter Name="ItemsPresenter" Margin="10,0,0,0"/>
                                             </StackPanel>
                                             <ControlTemplate.Triggers>
+                                                <Trigger Property="HasItems" Value="False">
+                                                    <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
+                                                </Trigger>
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter TargetName="Bd" Property="Background" Value="#0F000000"/>
                                                 </Trigger>

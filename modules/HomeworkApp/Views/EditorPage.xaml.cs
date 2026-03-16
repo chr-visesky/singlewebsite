@@ -39,8 +39,16 @@ namespace HomeworkApp.Views
         private ScrollViewer? _activePanScrollViewer;
         private Point _panStartPoint;
         private Point _panStartOffset;
+        private int _thumbnailLoadVersion;
         private InkManager.ToolMode _activeToolMode = InkManager.ToolMode.Pen;
         private static readonly string[] CoreSubjects = { "语文", "数学", "英语" };
+        private sealed class HomeworkNodeContext
+        {
+            public string Bucket { get; init; } = string.Empty;
+            public DateTime Date { get; init; }
+            public string? Subject { get; init; }
+            public JobSession? Job { get; set; }
+        }
         private readonly DispatcherTimer _homeworkScrollIndicatorTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
         private readonly DispatcherTimer _draftScrollIndicatorTimer = new() { Interval = TimeSpan.FromMilliseconds(450) };
 
@@ -79,128 +87,183 @@ namespace HomeworkApp.Views
         {
             HomeworkTree.Items.Clear();
             var allJobs = JobManager.GetAllJobs();
+            var recentCutoff = DateTime.Today.AddDays(-13);
+            var recentJobs = allJobs
+                .Where(job => job.CreateTime.Date >= recentCutoff)
+                .ToList();
 
-            // 校内作业
-            var schoolRoot = new TreeViewItem
-            {
-                Header = "📚 校内作业",
-                IsExpanded = true,
-                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
-                FontWeight = FontWeights.SemiBold
-            };
-            foreach (var subject in CoreSubjects)
-            {
-                AddSubjectNode(schoolRoot, subject, allJobs.Where(j => j.Subject == subject).ToList());
-            }
+            var internalRoot = CreateHomeworkRootNode("课内");
+            var externalRoot = CreateHomeworkRootNode("课外");
 
-            // 校外作业
-            var externalRoot = new TreeViewItem
-            {
-                Header = "🏠 校外作业",
-                IsExpanded = true,
-                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
-                FontWeight = FontWeights.SemiBold
-            };
-            var externalJobs = allJobs
-                .Where(j => !CoreSubjects.Contains(j.Subject))
-                .GroupBy(j => j.Subject)
-                .OrderBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase);
+            PopulateInternalHomeworkTree(internalRoot, recentJobs.Where(job => CoreSubjects.Contains(job.Subject)).ToList());
+            PopulateHomeworkTreeByDate(externalRoot, recentJobs.Where(job => !CoreSubjects.Contains(job.Subject)).ToList(), false);
 
-            foreach (var jobGroup in externalJobs)
-            {
-                AddSubjectNode(externalRoot, jobGroup.Key, jobGroup.ToList());
-            }
-
-            if (externalRoot.Items.Count == 0)
-            {
-                AddJobNodes(externalRoot, new List<JobSession>());
-            }
-
-            HomeworkTree.Items.Add(schoolRoot);
+            HomeworkTree.Items.Add(internalRoot);
             HomeworkTree.Items.Add(externalRoot);
         }
 
-        private void AddSubjectNode(TreeViewItem parent, string subject, List<JobSession> jobs)
+        private TreeViewItem CreateHomeworkRootNode(string label)
         {
-            var subjectNode = new TreeViewItem
+            return new TreeViewItem
             {
-                Header = subject,
-                Tag = subject,
+                Header = label,
                 IsExpanded = true,
                 Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
                 FontWeight = FontWeights.SemiBold
             };
+        }
 
-            AddPeriodNode(subjectNode, "本周", jobs.Where(job => IsInThisWeek(job.UpdateTime)).ToList());
-            AddPeriodNode(subjectNode, "上周", jobs.Where(job => IsInLastWeek(job.UpdateTime)).ToList());
-            AddPeriodNode(subjectNode, "更早", jobs.Where(job => !IsInThisWeek(job.UpdateTime) && !IsInLastWeek(job.UpdateTime)).ToList());
+        private void PopulateInternalHomeworkTree(TreeViewItem parent, List<JobSession> jobs)
+        {
+            var zhCn = new System.Globalization.CultureInfo("zh-CN");
+
+            for (int dayOffset = 0; dayOffset < 14; dayOffset++)
+            {
+                DateTime date = DateTime.Today.AddDays(-dayOffset).Date;
+                var dateNode = CreateDateNode(date.ToString("MM-dd dddd", zhCn), date, "课内", dayOffset < 2);
+
+                foreach (var subject in CoreSubjects)
+                {
+                    var subjectJobs = jobs
+                        .Where(job => job.CreateTime.Date == date && string.Equals(job.Subject, subject, StringComparison.CurrentCultureIgnoreCase))
+                        .ToList();
+                    AddSubjectLeaf(dateNode, subject, date, "课内", subjectJobs);
+                }
+
+                parent.Items.Add(dateNode);
+            }
+        }
+
+        private void PopulateHomeworkTreeByDate(TreeViewItem parent, List<JobSession> jobs, bool useCoreSubjectOrder)
+        {
+            if (jobs.Count == 0)
+            {
+                parent.Items.Add(CreateEmptyTreeNode("（最近两周无作业）"));
+                return;
+            }
+
+            var zhCn = new System.Globalization.CultureInfo("zh-CN");
+            int expandedDateCount = 0;
+            var dateGroups = jobs
+                .GroupBy(job => job.CreateTime.Date)
+                .OrderByDescending(group => group.Key);
+
+            foreach (var dateGroup in dateGroups)
+            {
+                var subjectGroups = dateGroup
+                    .GroupBy(job => job.Subject)
+                    .OrderBy(group => GetSubjectSortOrder(group.Key, useCoreSubjectOrder))
+                    .ThenBy(group => group.Key, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+
+                var dateNode = CreateDateNode(dateGroup.Key.ToString("MM-dd dddd", zhCn), dateGroup.Key, "课外", expandedDateCount < 2);
+
+                foreach (var subjectGroup in subjectGroups)
+                {
+                    AddSubjectLeaf(dateNode, subjectGroup.Key, dateGroup.Key, "课外", subjectGroup.ToList());
+                }
+
+                parent.Items.Add(dateNode);
+                expandedDateCount++;
+            }
+        }
+
+        private TreeViewItem CreateDateNode(string header, DateTime date, string bucket, bool isExpanded)
+        {
+            return new TreeViewItem
+            {
+                Header = header,
+                IsExpanded = isExpanded,
+                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
+                FontWeight = FontWeights.SemiBold,
+                Tag = new HomeworkNodeContext
+                {
+                    Bucket = bucket,
+                    Date = date
+                }
+            };
+        }
+
+        private void AddSubjectLeaf(TreeViewItem parent, string subject, DateTime date, string bucket, List<JobSession> jobs)
+        {
+            var latestJob = jobs
+                .OrderByDescending(job => job.UpdateTime)
+                .FirstOrDefault();
+
+            int totalPages = jobs.Sum(job => Math.Max(1, job.TotalPages));
+            string header = jobs.Count switch
+            {
+                0 => subject,
+                1 => $"{subject} · {totalPages}页",
+                _ => $"{subject} · {jobs.Count}份 · {totalPages}页"
+            };
+
+            var context = new HomeworkNodeContext
+            {
+                Bucket = bucket,
+                Date = date,
+                Subject = subject,
+                Job = latestJob
+            };
+
+            var subjectNode = new TreeViewItem
+            {
+                Header = header,
+                Tag = context,
+                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233))
+            };
+
+            if (latestJob != null)
+            {
+                subjectNode.Selected += SubjectNode_Selected;
+            }
+
+            subjectNode.ContextMenu = BuildSubjectContextMenu(context);
 
             parent.Items.Add(subjectNode);
         }
 
-        private void AddPeriodNode(TreeViewItem parent, string label, List<JobSession> jobs)
+        private ContextMenu BuildSubjectContextMenu(HomeworkNodeContext context)
         {
-            var node = new TreeViewItem
+            var menu = new ContextMenu();
+            var imagesItem = new MenuItem
             {
-                Header = $"{label} ({jobs.Count} 次)",
-                Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233)),
-                IsExpanded = label != "更早"
+                Header = "导入图片",
+                Tag = Tuple.Create("images", context)
             };
+            imagesItem.Click += SubjectImportMenuItem_Click;
+            menu.Items.Add(imagesItem);
 
-            AddJobNodes(node, jobs);
-            parent.Items.Add(node);
+            var pdfItem = new MenuItem
+            {
+                Header = "导入 PDF",
+                Tag = Tuple.Create("pdf", context)
+            };
+            pdfItem.Click += SubjectImportMenuItem_Click;
+            menu.Items.Add(pdfItem);
+
+            return menu;
         }
 
-        private void AddJobNodes(TreeViewItem parent, List<JobSession> jobs)
+        private TreeViewItem CreateEmptyTreeNode(string text)
         {
-            if (jobs.Count == 0)
+            return new TreeViewItem
             {
-                parent.Items.Add(new TreeViewItem
-                {
-                    Header = "（无作业）",
-                    IsEnabled = false,
-                    Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180))
-                });
-                return;
+                Header = text,
+                IsEnabled = false,
+                Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180))
+            };
+        }
+
+        private int GetSubjectSortOrder(string subject, bool useCoreSubjectOrder)
+        {
+            if (!useCoreSubjectOrder)
+            {
+                return int.MaxValue;
             }
 
-            foreach (var job in jobs.OrderByDescending(j => j.UpdateTime))
-            {
-                var jobNode = new TreeViewItem
-                {
-                    Header = $"{job.UpdateTime:MM-dd HH:mm} ({job.TotalPages}页)",
-                    Tag = job,
-                    Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233))
-                };
-                jobNode.MouseLeftButtonDown += (s, e) =>
-                {
-                    LoadSelectedJob(job);
-                };
-                parent.Items.Add(jobNode);
-            }
-        }
-
-        private bool IsInThisWeek(DateTime date)
-        {
-            var monday = StartOfWeek(DateTime.Today);
-            var sunday = monday.AddDays(6);
-
-            return date >= monday && date <= sunday.AddDays(1).AddTicks(-1);
-        }
-
-        private bool IsInLastWeek(DateTime date)
-        {
-            var lastMonday = StartOfWeek(DateTime.Today).AddDays(-7);
-            var lastSunday = lastMonday.AddDays(6);
-
-            return date >= lastMonday && date <= lastSunday.AddDays(1).AddTicks(-1);
-        }
-
-        private static DateTime StartOfWeek(DateTime date)
-        {
-            int weekday = (int)date.DayOfWeek;
-            int offset = weekday == 0 ? -6 : DayOfWeek.Monday - date.DayOfWeek;
-            return date.Date.AddDays(offset);
+            int index = Array.IndexOf(CoreSubjects, subject);
+            return index >= 0 ? index : int.MaxValue;
         }
 
         private int EffectivePageCount()
@@ -284,6 +347,7 @@ namespace HomeworkApp.Views
 
                 // Load current page
                 await LoadPageAsync(_currentPageIndex);
+                await RefreshThumbnailStripAsync();
             }
             catch (Exception ex)
             {
@@ -399,6 +463,7 @@ namespace HomeworkApp.Views
             {
                 UpdateScrollIndicator(HomeworkScrollViewer, HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
                 UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
+                UpdateThumbnailSelection();
             }), DispatcherPriority.Loaded);
         }
 
@@ -439,6 +504,237 @@ namespace HomeworkApp.Views
         {
             UpdateDraftCanvasToViewport();
             UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
+        }
+
+        private async Task RefreshThumbnailStripAsync()
+        {
+            int pageCount = EffectivePageCount();
+            bool shouldShow = pageCount > 1;
+
+            ThumbnailColumn.Width = shouldShow ? new GridLength(72) : new GridLength(0);
+            ThumbnailHost.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
+            ApplyZoom();
+
+            if (!shouldShow)
+            {
+                ThumbnailPanel.Children.Clear();
+                return;
+            }
+
+            int loadVersion = Interlocked.Increment(ref _thumbnailLoadVersion);
+            ThumbnailPanel.Children.Clear();
+
+            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+            {
+                var item = await CreateThumbnailItemAsync(pageIndex, loadVersion);
+                if (_disposed || loadVersion != _thumbnailLoadVersion)
+                {
+                    return;
+                }
+
+                ThumbnailPanel.Children.Add(item);
+            }
+
+            UpdateThumbnailSelection();
+        }
+
+        private async Task<Border> CreateThumbnailItemAsync(int pageIndex, int loadVersion)
+        {
+            var itemBorder = new Border
+            {
+                Width = 58,
+                Margin = new Thickness(0, 0, 0, 8),
+                Padding = new Thickness(2),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(196, 190, 180)),
+                Background = new SolidColorBrush(Color.FromArgb(72, 255, 255, 255)),
+                Cursor = Cursors.Hand,
+                Tag = pageIndex
+            };
+
+            var pageSurface = new Border
+            {
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(223, 221, 216)),
+                BorderThickness = new Thickness(0.5),
+                Width = 54,
+                Height = 76
+            };
+
+            var pageGrid = new Grid();
+            var thumbnailImage = new Image
+            {
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Margin = new Thickness(2)
+            };
+
+            if (_hasDocument)
+            {
+                var thumbnail = await _documentService.GetThumbnailAsync(pageIndex, 120);
+                if (!_disposed && loadVersion == _thumbnailLoadVersion)
+                {
+                    thumbnailImage.Source = thumbnail;
+                }
+            }
+
+            pageGrid.Children.Add(thumbnailImage);
+            if (EffectivePageCount() > 1)
+            {
+                var deleteButton = new Button
+                {
+                    Content = "×",
+                    Width = 14,
+                    Height = 14,
+                    FontSize = 10,
+                    Padding = new Thickness(0),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 2, 2, 0),
+                    Background = new SolidColorBrush(Color.FromArgb(180, 255, 255, 255)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                    BorderThickness = new Thickness(0.5),
+                    Cursor = Cursors.Hand,
+                    Tag = pageIndex
+                };
+                deleteButton.Click += ThumbnailDeleteButton_Click;
+                pageGrid.Children.Add(deleteButton);
+            }
+            pageGrid.Children.Add(new Border
+            {
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Background = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255)),
+                Padding = new Thickness(0, 2, 0, 2),
+                Child = new TextBlock
+                {
+                    Text = (pageIndex + 1).ToString(),
+                    FontSize = 10,
+                    Foreground = Brushes.Black,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    TextAlignment = TextAlignment.Center
+                }
+            });
+
+            pageSurface.Child = pageGrid;
+            itemBorder.Child = pageSurface;
+            itemBorder.MouseLeftButtonDown += ThumbnailItem_MouseLeftButtonDown;
+            return itemBorder;
+        }
+
+        private void UpdateThumbnailSelection()
+        {
+            foreach (var child in ThumbnailPanel.Children.OfType<Border>())
+            {
+                bool isCurrent = child.Tag is int pageIndex && pageIndex == _currentPageIndex;
+                child.BorderBrush = isCurrent
+                    ? new SolidColorBrush(Color.FromRgb(12, 12, 12))
+                    : new SolidColorBrush(Color.FromRgb(196, 190, 180));
+                child.BorderThickness = isCurrent ? new Thickness(2) : new Thickness(1);
+                child.Background = isCurrent
+                    ? new SolidColorBrush(Color.FromRgb(239, 236, 231))
+                    : Brushes.Transparent;
+            }
+        }
+
+        private async void ThumbnailItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is Border border && border.Tag is int pageIndex && pageIndex != _currentPageIndex)
+            {
+                e.Handled = true;
+                await LoadPageAsync(pageIndex);
+            }
+        }
+
+        private void SubjectNode_Selected(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TreeViewItem treeItem ||
+                treeItem.Tag is not HomeworkNodeContext context ||
+                context.Job == null ||
+                string.Equals(context.Job.JobId, _job.JobId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            e.Handled = true;
+            LoadSelectedJob(context.Job);
+        }
+
+        private async void ThumbnailDeleteButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not int pageIndex || EffectivePageCount() <= 1)
+            {
+                return;
+            }
+
+            var result = MessageBox.Show(
+                $"确定要删除第 {pageIndex + 1} 页吗？",
+                "删除页",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            SaveCurrentPageInk();
+            JobManager.DeletePage(_job, pageIndex);
+            _currentPageIndex = _job.CurrentPage;
+            SetupHomeworkTree();
+            LoadDocument();
+            await Task.CompletedTask;
+        }
+
+        private void SubjectImportMenuItem_Click(object? sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem menuItem || menuItem.Tag is not Tuple<string, HomeworkNodeContext> action)
+            {
+                return;
+            }
+
+            if (action.Item1 == "images")
+            {
+                ImportFilesForSubject(action.Item2, false);
+            }
+            else if (action.Item1 == "pdf")
+            {
+                ImportFilesForSubject(action.Item2, true);
+            }
+        }
+
+        private void ImportFilesForSubject(HomeworkNodeContext context, bool pdfOnly)
+        {
+            if (string.IsNullOrWhiteSpace(context.Subject))
+            {
+                return;
+            }
+
+            var dialog = new OpenFileDialog
+            {
+                Multiselect = true,
+                Title = pdfOnly ? "选择 PDF 作业" : "选择图片作业",
+                Filter = pdfOnly
+                    ? "PDF 文件 (*.pdf)|*.pdf"
+                    : "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif)|*.jpg;*.jpeg;*.png;*.bmp;*.gif"
+            };
+
+            if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                SaveCurrentPageInk();
+                JobManager.SaveJob(_job);
+                var job = JobManager.CreateJob(context.Subject, dialog.FileNames.ToList(), context.Date);
+                NavigationService?.Navigate(new EditorPage(job));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "导入失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void InkCanvas_StrokesChanged(object? sender, StrokeCollectionChangedEventArgs e)
@@ -638,18 +934,19 @@ namespace HomeworkApp.Views
 
         private void ZoomIn_Click(object sender, RoutedEventArgs e)
         {
-            _currentScale = Math.Min(_currentScale * 1.2, 5.0);
+            _currentScale = Math.Min(_currentScale * 1.2, GetMaximumScale());
             ApplyZoom();
         }
 
         private void ZoomOut_Click(object sender, RoutedEventArgs e)
         {
-            _currentScale = Math.Max(_currentScale / 1.2, 0.2);
+            _currentScale = Math.Max(_currentScale / 1.2, 1.0);
             ApplyZoom();
         }
 
         private void ApplyZoom(ScrollViewer? anchorViewer = null, Point? anchorPoint = null)
         {
+            _currentScale = Math.Max(1.0, Math.Min(_currentScale, GetMaximumScale()));
             double horizontalRatio = 0;
             double verticalRatio = 0;
             bool hasAnchor = anchorViewer != null && anchorPoint.HasValue;
@@ -701,11 +998,11 @@ namespace HomeworkApp.Views
                 e.Handled = true;
                 if (e.Delta > 0)
                 {
-                    _currentScale = Math.Min(_currentScale * 1.2, 5.0);
+                    _currentScale = Math.Min(_currentScale * 1.2, GetMaximumScale());
                 }
                 else
                 {
-                    _currentScale = Math.Max(_currentScale / 1.2, 0.2);
+                    _currentScale = Math.Max(_currentScale / 1.2, 1.0);
                 }
 
                 if (sender is ScrollViewer scrollViewer)
@@ -732,6 +1029,27 @@ namespace HomeworkApp.Views
         private void DraftScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
         {
             UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
+        }
+
+        private double GetMaximumScale()
+        {
+            if (EditorLayoutRoot == null)
+            {
+                return 5.0;
+            }
+
+            double baseWidth = A4Background.Width > 0 ? A4Background.Width : 794;
+            double availableWidth = EditorLayoutRoot.ActualWidth
+                - ThumbnailColumn.ActualWidth
+                - (_isLeftPanelCollapsed ? 0 : LeftColumn.ActualWidth)
+                - 8;
+
+            if (availableWidth <= 0 || baseWidth <= 0)
+            {
+                return 1.0;
+            }
+
+            return Math.Max(1.0, availableWidth / baseWidth);
         }
 
         private async void BtnPageRatio_Click(object sender, RoutedEventArgs e)
@@ -805,35 +1123,8 @@ namespace HomeworkApp.Views
         private void BtnMenu_Click(object sender, RoutedEventArgs e)
         {
             var menu = new ContextMenu();
-            int pageCount = EffectivePageCount();
-
-            if (pageCount > 1)
-            {
-                menu.Items.Add(new MenuItem
-                {
-                    Header = $"当前页：{_currentPageIndex + 1} / {pageCount}",
-                    IsEnabled = false
-                });
-                menu.Items.Add(new MenuItem
-                {
-                    Header = "上一页",
-                    Tag = "prev-page",
-                    IsEnabled = _currentPageIndex > 0
-                });
-                menu.Items.Add(new MenuItem
-                {
-                    Header = "下一页",
-                    Tag = "next-page",
-                    IsEnabled = _currentPageIndex < pageCount - 1
-                });
-                menu.Items.Add(new Separator());
-            }
-
             menu.Items.Add(new MenuItem { Header = "历史作业", Tag = "history" });
             menu.Items.Add(new MenuItem { Header = "设置", Tag = "settings" });
-            menu.Items.Add(new Separator());
-            menu.Items.Add(new MenuItem { Header = "导入作业", Tag = "import" });
-            menu.Items.Add(new MenuItem { Header = "删除作业", Tag = "delete" });
 
             foreach (var item in menu.Items)
             {
@@ -853,34 +1144,11 @@ namespace HomeworkApp.Views
             {
                 switch (action)
                 {
-                    case "prev-page":
-                        if (_currentPageIndex > 0)
-                        {
-                            await LoadPageAsync(_currentPageIndex - 1);
-                        }
-                        break;
-                    case "next-page":
-                        if (_currentPageIndex < EffectivePageCount() - 1)
-                        {
-                            await LoadPageAsync(_currentPageIndex + 1);
-                        }
-                        break;
                     case "history":
                         NavigationService?.Navigate(new HistoryPage());
                         break;
                     case "settings":
                         NavigationService?.Navigate(new SettingsPage());
-                        break;
-                    case "import":
-                        NavigationService?.Navigate(new ImportPage(_job.Subject));
-                        break;
-                    case "delete":
-                        var result = MessageBox.Show($"确定要删除作业《{ _job.Subject}》吗？", "确认删除", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-                        if (result == MessageBoxResult.Yes)
-                        {
-                            JobManager.DeleteJob(_job.JobId);
-                            NavigationService?.Navigate(new EditorPage(JobManager.GetPreferredStartupJob()));
-                        }
                         break;
                 }
             }
@@ -1067,6 +1335,8 @@ namespace HomeworkApp.Views
                 BtnExpandLeft.ToolTip = "收起作业助手";
                 BtnExpandLeft.Margin = new Thickness(-5, 0, 0, 0);
             }
+
+            ApplyZoom();
         }
 
         private void SetActiveTool(InkManager.ToolMode tool, bool handMode = false)

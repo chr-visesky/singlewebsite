@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using HomeworkApp.Models;
@@ -14,7 +16,10 @@ namespace HomeworkApp.Views
 
         private void LoadJobs()
         {
-            var jobs = JobManager.GetAllJobs();
+            var cutoff = DateTime.Today.AddDays(-13);
+            var jobs = JobManager.GetAllJobs()
+                .Where(job => job.CreateTime.Date < cutoff)
+                .ToList();
             LstJobs.ItemsSource = jobs;
             EmptyState.Visibility = jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }

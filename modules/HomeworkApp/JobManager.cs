@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Windows.Ink;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using HomeworkApp.Models;
+using HomeworkApp.Services;
 using PDFtoImage;
 
 namespace HomeworkApp
@@ -33,67 +37,40 @@ namespace HomeworkApp
         /// </summary>
         public static JobSession CreateJob(string subject, List<string> sourceFiles)
         {
+            return CreateJob(subject, sourceFiles, DateTime.Today);
+        }
+
+        public static JobSession CreateJob(string subject, List<string> sourceFiles, DateTime targetDate)
+        {
             if (sourceFiles == null || sourceFiles.Count == 0)
             {
                 throw new InvalidOperationException("没有可导入的作业文件。");
             }
 
             ValidateSourceFiles(sourceFiles);
-            bool isPdfJob = sourceFiles.Count == 1 && IsPdfFile(sourceFiles[0]);
-
-            var job = new JobSession
+            var existingJob = FindJobBySubjectAndDate(subject, targetDate);
+            if (existingJob == null)
             {
-                Subject = subject,
-                SourceFiles = new List<string>(sourceFiles),
-                CreateTime = DateTime.Now,
-                UpdateTime = DateTime.Now,
-                DocumentType = isPdfJob ? "Pdf" : "Image"
-            };
-
-            // Create job directory
-            string jobDir = Path.Combine(JobsPath, job.JobId);
-            Directory.CreateDirectory(jobDir);
-
-            // Copy source files
-            string sourceDir = Path.Combine(jobDir, "source");
-            Directory.CreateDirectory(sourceDir);
-
-            var newSourceFiles = new List<string>();
-            foreach (var file in sourceFiles)
-            {
-                string destFile = Path.Combine(sourceDir, Path.GetFileName(file));
-                try
-                {
-                    File.Copy(file, destFile, true);
-                    newSourceFiles.Add(destFile);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Error copying file: {ex.Message}");
-                }
+                return CreateNewImportedJob(subject, sourceFiles, targetDate);
             }
 
-            job.SourceFiles = newSourceFiles;
-            job.TotalPages = isPdfJob
-                ? Conversion.GetPageCount(File.ReadAllBytes(newSourceFiles[0]))
-                : newSourceFiles.Count; // Will be updated by document service
-
-            if (job.SourceFiles.Count == 0)
+            if (IsUntouchedBlankJob(existingJob))
             {
-                throw new IOException("作业文件复制失败，请确认文件仍然存在且可读取。");
+                return ReplaceUntouchedBlankJob(existingJob, sourceFiles, targetDate);
             }
 
-            // Save job
-            job.Save(jobDir);
-
-            // Set as last job
-            MarkAsLastJob(job.JobId);
-
-            return job;
+            return AppendSourcesToExistingJob(existingJob, sourceFiles);
         }
 
         public static JobSession CreateBlankJob(string subject)
         {
+            var existingJob = FindJobBySubjectAndDate(subject, DateTime.Today);
+            if (existingJob != null)
+            {
+                MarkAsLastJob(existingJob.JobId);
+                return existingJob;
+            }
+
             var job = new JobSession
             {
                 Subject = subject,
@@ -166,20 +143,10 @@ namespace HomeworkApp
         /// </summary>
         public static List<JobSession> GetAllJobs()
         {
-            var jobs = new List<JobSession>();
-
-            if (!Directory.Exists(JobsPath))
+            var jobs = LoadAllJobsRaw();
+            if (ConsolidateSameDaySubjectJobs(jobs))
             {
-                return jobs;
-            }
-
-            foreach (var dir in Directory.GetDirectories(JobsPath))
-            {
-                var job = JobSession.Load(dir);
-                if (job != null)
-                {
-                    jobs.Add(job);
-                }
+                jobs = LoadAllJobsRaw();
             }
 
             return jobs.OrderByDescending(j => j.UpdateTime).ToList();
@@ -246,6 +213,494 @@ namespace HomeworkApp
             File.WriteAllText(LastJobPath, jobId);
         }
 
+        public static void DeletePage(JobSession job, int pageIndex)
+        {
+            EnsureJobUsesImageSources(job);
+
+            if (job.SourceFiles.Count <= 1)
+            {
+                throw new InvalidOperationException("至少保留 1 页作业。");
+            }
+
+            if (pageIndex < 0 || pageIndex >= job.SourceFiles.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(pageIndex));
+            }
+
+            string sourceFile = job.SourceFiles[pageIndex];
+            if (File.Exists(sourceFile))
+            {
+                File.Delete(sourceFile);
+            }
+
+            job.SourceFiles.RemoveAt(pageIndex);
+            ReindexInkFilesAfterPageDeletion(job, pageIndex);
+            job.DocumentType = "Image";
+            job.TotalPages = job.SourceFiles.Count;
+            if (job.CurrentPage > pageIndex)
+            {
+                job.CurrentPage--;
+            }
+            job.CurrentPage = Math.Min(job.CurrentPage, Math.Max(0, job.TotalPages - 1));
+            job.UpdateTime = DateTime.Now;
+            job.Save(job.JobDirectory);
+            MarkAsLastJob(job.JobId);
+        }
+
+        private static List<JobSession> LoadAllJobsRaw()
+        {
+            var jobs = new List<JobSession>();
+
+            if (!Directory.Exists(JobsPath))
+            {
+                return jobs;
+            }
+
+            foreach (var dir in Directory.GetDirectories(JobsPath))
+            {
+                var job = JobSession.Load(dir);
+                if (job != null)
+                {
+                    jobs.Add(job);
+                }
+            }
+
+            return jobs;
+        }
+
+        private static JobSession? FindJobBySubjectAndDate(string subject, DateTime date)
+        {
+            return GetAllJobs()
+                .Where(job => string.Equals(job.Subject, subject, StringComparison.CurrentCultureIgnoreCase))
+                .Where(job => job.CreateTime.Date == date.Date)
+                .OrderByDescending(job => job.UpdateTime)
+                .FirstOrDefault();
+        }
+
+        private static JobSession CreateNewImportedJob(string subject, List<string> sourceFiles, DateTime targetDate)
+        {
+            bool isPdfJob = sourceFiles.Count == 1 && IsPdfFile(sourceFiles[0]);
+
+            var job = new JobSession
+            {
+                Subject = subject,
+                SourceFiles = new List<string>(),
+                CreateTime = ComposeCreateTime(targetDate),
+                UpdateTime = DateTime.Now,
+                DocumentType = isPdfJob ? "Pdf" : "Image"
+            };
+
+            string jobDir = Path.Combine(JobsPath, job.JobId);
+            Directory.CreateDirectory(jobDir);
+            Directory.CreateDirectory(job.SourceDirectory);
+
+            var importedFiles = ImportSourceFiles(job.SourceDirectory, sourceFiles, preservePdf: isPdfJob);
+            if (importedFiles.Count == 0)
+            {
+                throw new IOException("作业文件复制失败，请确认文件仍然存在且可读取。");
+            }
+
+            job.SourceFiles = importedFiles;
+            job.TotalPages = isPdfJob
+                ? Conversion.GetPageCount(File.ReadAllBytes(importedFiles[0]))
+                : importedFiles.Count;
+            job.CurrentPage = 0;
+            job.Save(jobDir);
+            MarkAsLastJob(job.JobId);
+            return job;
+        }
+
+        private static JobSession ReplaceUntouchedBlankJob(JobSession job, List<string> sourceFiles, DateTime targetDate)
+        {
+            ClearDirectory(job.SourceDirectory);
+            ClearDirectory(job.CacheDirectory);
+
+            bool isPdfJob = sourceFiles.Count == 1 && IsPdfFile(sourceFiles[0]);
+            var importedFiles = ImportSourceFiles(job.SourceDirectory, sourceFiles, preservePdf: isPdfJob);
+            if (importedFiles.Count == 0)
+            {
+                throw new IOException("作业文件复制失败，请确认文件仍然存在且可读取。");
+            }
+
+            job.SourceFiles = importedFiles;
+            job.DocumentType = isPdfJob ? "Pdf" : "Image";
+            job.CreateTime = ComposeCreateTime(targetDate);
+            job.TotalPages = isPdfJob
+                ? Conversion.GetPageCount(File.ReadAllBytes(importedFiles[0]))
+                : importedFiles.Count;
+            job.CurrentPage = 0;
+            job.UpdateTime = DateTime.Now;
+            job.Save(job.JobDirectory);
+            MarkAsLastJob(job.JobId);
+            return job;
+        }
+
+        private static JobSession AppendSourcesToExistingJob(JobSession job, List<string> sourceFiles)
+        {
+            EnsureJobUsesImageSources(job);
+
+            int firstNewPageIndex = Math.Max(0, job.SourceFiles.Count);
+            var appendedFiles = ImportSourceFiles(job.SourceDirectory, sourceFiles, preservePdf: false);
+            if (appendedFiles.Count == 0)
+            {
+                throw new IOException("作业文件复制失败，请确认文件仍然存在且可读取。");
+            }
+
+            job.SourceFiles.AddRange(appendedFiles);
+            job.DocumentType = "Image";
+            job.TotalPages = job.SourceFiles.Count;
+            job.CurrentPage = firstNewPageIndex;
+            job.UpdateTime = DateTime.Now;
+            job.Save(job.JobDirectory);
+            MarkAsLastJob(job.JobId);
+            return job;
+        }
+
+        private static bool ConsolidateSameDaySubjectJobs(List<JobSession> jobs)
+        {
+            bool changed = false;
+            string lastJobId = GetLastJobId();
+
+            var duplicateGroups = jobs
+                .GroupBy(job => new { Subject = job.Subject, Date = job.CreateTime.Date })
+                .Where(group => group.Count() > 1)
+                .ToList();
+
+            foreach (var group in duplicateGroups)
+            {
+                var orderedJobs = group
+                    .OrderBy(job => job.CreateTime)
+                    .ThenBy(job => job.UpdateTime)
+                    .ToList();
+
+                var target = SelectConsolidationTarget(orderedJobs);
+                var sourceJobs = orderedJobs.Where(job => job.JobId != target.JobId).ToList();
+
+                foreach (var sourceJob in sourceJobs)
+                {
+                    bool sourceWasLastJob = string.Equals(lastJobId, sourceJob.JobId, StringComparison.OrdinalIgnoreCase);
+                    MergeExistingJobIntoTarget(target, sourceJob, sourceWasLastJob);
+                    DeleteJobDirectoryOnly(sourceJob.JobId);
+                    changed = true;
+
+                    if (sourceWasLastJob)
+                    {
+                        lastJobId = target.JobId;
+                    }
+                }
+
+                target.CreateTime = orderedJobs.Min(job => job.CreateTime);
+                target.UpdateTime = orderedJobs.Max(job => job.UpdateTime);
+                target.Save(target.JobDirectory);
+            }
+
+            if (changed && !string.IsNullOrWhiteSpace(lastJobId))
+            {
+                MarkAsLastJob(lastJobId);
+            }
+
+            return changed;
+        }
+
+        private static JobSession SelectConsolidationTarget(List<JobSession> jobs)
+        {
+            return jobs.FirstOrDefault(job => !IsUntouchedBlankJob(job)) ?? jobs[0];
+        }
+
+        private static void MergeExistingJobIntoTarget(JobSession target, JobSession source, bool sourceWasLastJob)
+        {
+            if (IsUntouchedBlankJob(source))
+            {
+                return;
+            }
+
+            EnsureJobUsesImageSources(target);
+            EnsureJobUsesImageSources(source);
+
+            int pageOffset = Math.Max(0, target.SourceFiles.Count);
+            var copiedSourceFiles = CopyExistingSourceFiles(target.SourceDirectory, source.SourceFiles);
+            target.SourceFiles.AddRange(copiedSourceFiles);
+            target.DocumentType = "Image";
+            target.TotalPages = target.SourceFiles.Count;
+
+            CopyInkFiles(source, target, pageOffset);
+            CopyDraftInkIfNeeded(source, target);
+
+            if (sourceWasLastJob)
+            {
+                target.CurrentPage = pageOffset + Math.Max(0, source.CurrentPage);
+            }
+        }
+
+        private static void EnsureJobUsesImageSources(JobSession job)
+        {
+            if (job.SourceFiles.Count > 0 && job.SourceFiles.All(IsImageFile))
+            {
+                job.DocumentType = "Image";
+                job.TotalPages = job.SourceFiles.Count;
+                job.Save(job.JobDirectory);
+                return;
+            }
+
+            if (IsTrulyBlankJob(job))
+            {
+                Directory.CreateDirectory(job.SourceDirectory);
+                string blankImagePath = CreateBlankPageImage(job.SourceDirectory);
+                job.SourceFiles = new List<string> { blankImagePath };
+                job.DocumentType = "Image";
+                job.TotalPages = 1;
+                job.CurrentPage = Math.Min(job.CurrentPage, 0);
+                job.Save(job.JobDirectory);
+                return;
+            }
+
+            if (job.SourceFiles.Count == 1 && IsPdfFile(job.SourceFiles[0]))
+            {
+                Directory.CreateDirectory(job.SourceDirectory);
+                var convertedFiles = RenderPdfToImageFiles(job.SourceFiles[0], job.SourceDirectory);
+                if (convertedFiles.Count == 0)
+                {
+                    throw new IOException("PDF 作业转换失败，无法合并到同一天同学科作业中。");
+                }
+
+                job.SourceFiles = convertedFiles;
+                job.DocumentType = "Image";
+                job.TotalPages = convertedFiles.Count;
+                job.CurrentPage = Math.Min(job.CurrentPage, Math.Max(0, job.TotalPages - 1));
+                job.Save(job.JobDirectory);
+                return;
+            }
+
+            throw new InvalidOperationException("当前作业格式无法合并，请重新导入。");
+        }
+
+        private static List<string> ImportSourceFiles(string targetDirectory, List<string> sourceFiles, bool preservePdf)
+        {
+            Directory.CreateDirectory(targetDirectory);
+
+            if (preservePdf && sourceFiles.Count == 1 && IsPdfFile(sourceFiles[0]))
+            {
+                string destFile = Path.Combine(targetDirectory, CreateUniqueFileName(".pdf"));
+                File.Copy(sourceFiles[0], destFile, true);
+                return new List<string> { destFile };
+            }
+
+            var importedFiles = new List<string>();
+            foreach (var file in sourceFiles)
+            {
+                if (IsPdfFile(file))
+                {
+                    importedFiles.AddRange(RenderPdfToImageFiles(file, targetDirectory));
+                }
+                else
+                {
+                    string extension = Path.GetExtension(file);
+                    string destFile = Path.Combine(targetDirectory, CreateUniqueFileName(extension));
+                    File.Copy(file, destFile, true);
+                    importedFiles.Add(destFile);
+                }
+            }
+
+            return importedFiles;
+        }
+
+        private static List<string> RenderPdfToImageFiles(string pdfPath, string targetDirectory)
+        {
+            Directory.CreateDirectory(targetDirectory);
+
+            byte[] pdfBytes = File.ReadAllBytes(pdfPath);
+            int pageCount = Conversion.GetPageCount(pdfBytes);
+            var renderedFiles = new List<string>(pageCount);
+
+            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+            {
+                string destFile = Path.Combine(targetDirectory, CreateUniqueFileName(".png"));
+                using var output = File.Create(destFile);
+                Conversion.SavePng(output, pdfBytes, pageIndex);
+                renderedFiles.Add(destFile);
+            }
+
+            return renderedFiles;
+        }
+
+        private static List<string> CopyExistingSourceFiles(string targetDirectory, List<string> sourceFiles)
+        {
+            Directory.CreateDirectory(targetDirectory);
+            var copiedFiles = new List<string>(sourceFiles.Count);
+
+            foreach (var sourceFile in sourceFiles)
+            {
+                string extension = Path.GetExtension(sourceFile);
+                string destFile = Path.Combine(targetDirectory, CreateUniqueFileName(extension));
+                File.Copy(sourceFile, destFile, true);
+                copiedFiles.Add(destFile);
+            }
+
+            return copiedFiles;
+        }
+
+        private static void CopyInkFiles(JobSession source, JobSession target, int pageOffset)
+        {
+            for (int pageIndex = 0; pageIndex < Math.Max(1, source.TotalPages); pageIndex++)
+            {
+                string sourceInkPath = source.GetInkFilePath(pageIndex);
+                if (!File.Exists(sourceInkPath))
+                {
+                    continue;
+                }
+
+                string targetInkPath = target.GetInkFilePath(pageOffset + pageIndex);
+                Directory.CreateDirectory(Path.GetDirectoryName(targetInkPath)!);
+                File.Copy(sourceInkPath, targetInkPath, true);
+                target.InkFilePaths[pageOffset + pageIndex] = targetInkPath;
+            }
+        }
+
+        private static void CopyDraftInkIfNeeded(JobSession source, JobSession target)
+        {
+            if (File.Exists(target.DraftInkPath) || !File.Exists(source.DraftInkPath))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(target.DraftInkPath)!);
+            File.Copy(source.DraftInkPath, target.DraftInkPath, true);
+        }
+
+        private static bool IsTrulyBlankJob(JobSession job)
+        {
+            return string.Equals(job.DocumentType, "Blank", StringComparison.OrdinalIgnoreCase)
+                || job.SourceFiles.Count == 0;
+        }
+
+        private static bool IsUntouchedBlankJob(JobSession job)
+        {
+            if (!IsTrulyBlankJob(job))
+            {
+                return false;
+            }
+
+            if (File.Exists(job.DraftInkPath))
+            {
+                return false;
+            }
+
+            if (Directory.Exists(job.InkDirectory) && Directory.EnumerateFiles(job.InkDirectory, "*.ink", SearchOption.TopDirectoryOnly).Any())
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static string CreateBlankPageImage(string targetDirectory)
+        {
+            Directory.CreateDirectory(targetDirectory);
+            string filePath = Path.Combine(targetDirectory, CreateUniqueFileName(".png"));
+            const int width = 794;
+            const int height = 1123;
+            const int stride = width * 4;
+            var pixels = new byte[height * stride];
+
+            for (int index = 0; index < pixels.Length; index += 4)
+            {
+                pixels[index] = 255;
+                pixels[index + 1] = 255;
+                pixels[index + 2] = 255;
+                pixels[index + 3] = 255;
+            }
+
+            var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var stream = File.Create(filePath);
+            encoder.Save(stream);
+            return filePath;
+        }
+
+        private static string CreateUniqueFileName(string extension)
+        {
+            return $"{Guid.NewGuid():N}{extension.ToLowerInvariant()}";
+        }
+
+        private static DateTime ComposeCreateTime(DateTime targetDate)
+        {
+            var now = DateTime.Now;
+            return targetDate.Date.Add(new TimeSpan(now.Hour, now.Minute, now.Second));
+        }
+
+        private static void ClearDirectory(string path)
+        {
+            if (!Directory.Exists(path))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.GetFiles(path))
+            {
+                File.Delete(file);
+            }
+        }
+
+        private static void DeleteJobDirectoryOnly(string jobId)
+        {
+            string jobDir = Path.Combine(JobsPath, jobId);
+            if (!Directory.Exists(jobDir))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(jobDir, true);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error deleting job during merge: {ex.Message}");
+            }
+        }
+
+        private static string GetLastJobId()
+        {
+            return File.Exists(LastJobPath) ? File.ReadAllText(LastJobPath).Trim() : string.Empty;
+        }
+
+        private static void ReindexInkFilesAfterPageDeletion(JobSession job, int removedPageIndex)
+        {
+            var strokeSnapshots = new Dictionary<int, StrokeCollection?>();
+            int oldPageCount = Math.Max(job.TotalPages, removedPageIndex + 1);
+
+            for (int oldIndex = 0; oldIndex < oldPageCount; oldIndex++)
+            {
+                if (oldIndex == removedPageIndex)
+                {
+                    continue;
+                }
+
+                string oldPath = job.GetInkFilePath(oldIndex);
+                var strokes = InkService.LoadInk(oldPath);
+                if (strokes != null)
+                {
+                    int newIndex = oldIndex > removedPageIndex ? oldIndex - 1 : oldIndex;
+                    strokeSnapshots[newIndex] = strokes;
+                }
+            }
+
+            ClearDirectory(job.InkDirectory);
+            job.InkFilePaths.Clear();
+
+            foreach (var entry in strokeSnapshots.OrderBy(entry => entry.Key))
+            {
+                if (entry.Value == null)
+                {
+                    continue;
+                }
+
+                string newInkPath = job.GetInkFilePath(entry.Key);
+                InkService.SaveInk(entry.Value, newInkPath);
+            }
+        }
+
         private static void ValidateSourceFiles(List<string> sourceFiles)
         {
             bool hasPdf = sourceFiles.Any(IsPdfFile);
@@ -260,11 +715,6 @@ namespace HomeworkApp
             if (hasPdf && hasImage)
             {
                 throw new InvalidOperationException("PDF 作业和图片作业不能混合导入，请分开创建。");
-            }
-
-            if (sourceFiles.Count(IsPdfFile) > 1)
-            {
-                throw new InvalidOperationException("一次只能导入一个 PDF 作业文件。");
             }
         }
 
