@@ -1430,6 +1430,7 @@ namespace HomeworkApp.Views
         {
             SaveCurrentPageInk();
             JobManager.SaveJob(_job!);
+            BtnPrint.IsEnabled = false;
 
             try
             {
@@ -1445,14 +1446,19 @@ namespace HomeworkApp.Views
             {
                 MessageBox.Show($"打印失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            finally
+            {
+                BtnPrint.IsEnabled = true;
+            }
         }
 
-        private async Task PrintJobAsync()
+        private Task PrintJobAsync()
         {
             var (printQueue, printTicket) = ResolvePrintDestination();
             var document = new HomeworkPrintDocument(_job, _documentService);
             document.Print(printQueue, printTicket);
             MessageBox.Show($"已发送到打印机：{printQueue.Name}", "打印完成", MessageBoxButton.OK, MessageBoxImage.Information);
+            return Task.CompletedTask;
         }
 
         private (PrintQueue queue, PrintTicket? ticket) ResolvePrintDestination()

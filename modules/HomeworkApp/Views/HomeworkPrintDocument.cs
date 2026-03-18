@@ -71,7 +71,11 @@ namespace HomeworkApp.Views
         {
             try
             {
-                var docPage = _documentService.GetPageAsync(pageNumber, pageSize.Width, pageSize.Height).Result;
+                var docPage = _documentService
+                    .GetPageAsync(pageNumber, pageSize.Width, pageSize.Height)
+                    .ConfigureAwait(false)
+                    .GetAwaiter()
+                    .GetResult();
 
                 // Create visual for printing
                 var mainVisual = new ContainerVisual();

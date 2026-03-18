@@ -72,7 +72,7 @@ namespace HomeworkApp.Services
             }
 
             // Render the page
-            var page = await _provider.RenderPageAsync(pageIndex, width, height);
+            var page = await _provider.RenderPageAsync(pageIndex, width, height).ConfigureAwait(false);
             if (page != null)
             {
                 _cache[pageIndex] = page;
@@ -92,7 +92,7 @@ namespace HomeworkApp.Services
                 return null;
             }
 
-            return await _provider.GetPageThumbnailAsync(pageIndex, size);
+            return await _provider.GetPageThumbnailAsync(pageIndex, size).ConfigureAwait(false);
         }
 
         private void PruneCache()

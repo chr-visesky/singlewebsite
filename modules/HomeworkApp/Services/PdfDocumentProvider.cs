@@ -95,7 +95,7 @@ namespace HomeworkApp.Services
                     System.Diagnostics.Debug.WriteLine(ex.StackTrace);
                     return null;
                 }
-            });
+            }).ConfigureAwait(false);
         }
 
         public async Task<ImageSource?> GetPageThumbnailAsync(int pageIndex, int size)
