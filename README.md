@@ -1,212 +1,277 @@
-# 单网址学习壳程序
+# StudyGate
 
-这是一个基于 Electron 的 Windows 桌面程序。它不是 Edge 浏览器窗口，启动后会先进入本地首页：
+`StudyGate` 是一个给孩子用的 Windows 学习入口。
 
-- `在线课堂模块`：进入你配置过的课堂网址
-- `作业模块`：打开内置的 Windows 作业子程序，支持单个 PDF 或多张图片作业
-- `大语文`：读取百度网盘固定目录里的视频
-- `陆老师讲义`：读取百度网盘固定目录里的视频
+它不是普通浏览器，也不是完整桌面。启动后只有家长预先配置好的学习模块，孩子只能从这些模块进入在线课堂、百度网盘视频、作业模块或本机学习工具。
 
-程序默认封锁：
+## 当前效果
 
-- 地址栏和标签页
-- 新窗口和弹窗
-- 右键菜单
-- 常见跳转快捷键
-- 下载
-- 未列入白名单的页面与资源请求
+- 首页固定显示学习模块卡片
+- 支持在线课堂模块
+- 支持百度网盘固定目录视频模块
+- 支持本机学习工具模块
+- 内置作业模块，支持图片、PDF、空白作业
+- 支持课表、提醒、打卡
+- 支持手机端管理课表、模块和退出密码
+- 支持开机自启动、单实例、最小化后继续提醒
+- 支持退出密码
 
-## 1. 配置
+## 首页包含什么
 
-先把根目录下的 `config.example.json` 复制成 `config.json`，再编辑 `config.json`。`npm run build` 时会把它嵌进程序包，打包后的 `dist` 目录里不会再裸放一个可直接改的 `config.json`。
+首页卡片由配置和手机端管理页共同决定。
 
-### 网课站
+常见模块有：
 
-- `onlineClassrooms`：在线课堂模块列表。每项至少包含 `title` 和 `entryUrl`
-- `startUrl`：旧字段，仍然兼容；没配 `onlineClassrooms` 时会自动生成一个默认课堂模块
-- `allowedTopLevelUrlPrefixes`：允许主页面跳转到的 URL 前缀
-- `allowedResourceHostnames` / `allowedResourceHostnameSuffixes`：允许网课站加载脚本、图片、接口、流媒体等资源的域名
-- `allowedResourceUrlPrefixes`：如果只想放行某些资源前缀，可以补这里
-- `resourceAccessMode`：资源放行模式。`whitelist` 表示继续按资源白名单拦截；`top-level-only` 表示顶层页面按你配置过的域名/后缀放行，脚本、图片、接口、课堂 iframe 等资源也不再逐个域名拦截
+- `作业模块`
+- `在线课堂`
+- `百度网盘视频`
+- `学习工具`
 
-示例：
+其中：
+
+- `作业模块` 固定排在左上角第一个
+- `在线课堂` 用来打开指定网课网站
+- `百度网盘视频` 只显示你指定目录里的视频
+- `学习工具` 用来打开本机指定程序
+
+## 作业模块
+
+作业模块是内置的 Windows 子程序，默认直接进入编辑界面，不再先过中间页。
+
+当前规则：
+
+- 左到右布局：`作业助手 -> 缩略图 -> 作业纸 -> 草稿纸`
+- 同一天、同一学科，只保留一份作业
+- 再次导入图片或 PDF，会追加到这份作业里
+- 空学科节点点击后会自动创建一份空白作业
+- 支持把图片或 PDF 直接拖进编辑页，追加成新页
+- 缩略图里可以新增空白页、删除单页
+
+作业树规则：
+
+- 主树顺序：`课内 / 课外 -> 日期 -> 学科`
+- 每个日期下默认先有 `语文 / 数学 / 英语`
+- 最近两周显示在主树
+- 更早的作业放进历史
+- 额外有一组 `最近打开`，解决打开老作业时树上看不见的问题
+
+## 课表、提醒、打卡
+
+程序支持“家长计划”和“学生计划”。
+
+当前行为：
+
+- 计划到点前不能打卡
+- 到点后可以打卡
+- 打卡后标记完成
+- 首页只显示一个对钩按钮
+- 未到时间是灰色
+- 可打卡是亮色
+- 已完成是亮绿色
+
+提醒行为：
+
+- 默认提前 `5` 分钟和 `1` 分钟提醒
+- 到点检查按整分钟执行
+- 提醒会发系统通知
+- 提醒会播放闹铃和语音
+- 语音按本地音频片段顺序播放，不依赖云端 TTS
+
+## 在线课堂
+
+在线课堂模块是通用模块，不是写死一个网址。
+
+家长可以配置多个课堂入口，每个入口至少需要：
+
+- 名称
+- 网址
+
+程序会：
+
+- 拦截不允许的顶层跳转
+- 屏蔽地址栏、标签页、右键菜单、下载
+- 允许课堂站点使用摄像头、麦克风和音频输出
+
+如果网课站本身有多个同生态域名，建议把它们加入允许范围。
+
+## 百度网盘视频
+
+百度网盘模块不是完整网盘界面，只展示你指定目录里的视频。
+
+每个模块只需要配置：
+
+- 名称
+- 网盘目录
+
+第一次在电脑上进入百度网盘模块时，需要授权一次百度账号。授权状态会保存在本机，后续自动续用。
+
+## 学习工具
+
+学习工具模块用来打开本机指定程序。
+
+适合这类场景：
+
+- 词典
+- 练字软件
+- 口算软件
+- 单词软件
+
+每个模块只需要配置：
+
+- 名称
+- 本机程序路径
+
+支持：
+
+- `.exe`
+- `.cmd`
+- `.bat`
+- `.lnk`
+- 简单命令名
+
+## 手机端管理
+
+手机端主要用来做这些事：
+
+- 管理课表
+- 管理在线课堂模块
+- 管理百度网盘视频模块
+- 管理学习工具模块
+- 设置退出密码
+- 审批桌面端学生计划写入
+
+当前推荐方案是：
+
+- 微信小程序 + CloudBase
+
+相关目录：
+
+- `cloudbase/functions/scheduleAdmin`
+- `cloudbase/functions/schedulePublic`
+- `cloudbase/miniprogram`
+
+部署细节看：
+
+- `cloudbase/README.md`
+- `cloudbase/DEPLOY.md`
+
+## 配置文件
+
+先把：
+
+- `config.example.json`
+
+复制成：
+
+- `config.json`
+
+再按你的实际情况修改。
+
+最常用的配置项有：
+
+- `onlineClassrooms`
+- `contentLibraries`
+- `learningTools`
+- `studySchedule`
+- `remoteSchedule`
+- `baiduNetdisk`
+
+一个最小示例：
 
 ```json
 {
+  "appTitle": "学习入口",
   "onlineClassrooms": [
     {
       "id": "english-course",
       "title": "说课英语",
       "entryUrl": "https://www.talk915.com/student/login/"
-    },
-    {
-      "id": "math-live",
-      "title": "数学直播",
-      "entryUrl": "https://example.com/classroom"
     }
-  ]
-}
-```
-
-### 百度网盘
-
-程序现在只支持“固定目录播放器”模式，不会给孩子一个完整网盘界面。
-
-申请入口已经迁到百度网盘开放平台新站：
-
-- `https://pan.baidu.com/union`
-
-需要填写：
-
-```json
-{
-  "baiduNetdisk": {
-    "clientId": "你的百度开放平台 clientId",
-    "clientSecret": "你的百度开放平台 clientSecret",
-    "scope": "netdisk"
-  },
+  ],
   "contentLibraries": [
     {
       "id": "great-chinese",
       "title": "大语文",
       "folderPath": "/大语文"
-    },
-    {
-      "id": "teacher-library",
-      "title": "陆老师讲义",
-      "folderPath": "/陆老师讲义"
     }
-  ]
-}
-```
-
-说明：
-
-- `clientId` / `clientSecret`：来自百度网盘开放平台应用的 `AppKey` / `SecretKey`
-- `scope`：保持 `netdisk`
-- `contentLibraries`：首页里要显示的固定网盘目录
-- `folderPath`：百度网盘里的目录路径，例如 `/大语文`
-
-当前程序走的是百度设备码授权，不再要求你额外登记浏览器 OAuth 回调地址。
-
-第一次进入 `大语文` 或 `陆老师讲义` 时，点“连接百度网盘”，程序内会弹出二维码页；扫一次后会把授权状态保存在本机数据目录，后面自动续用。
-
-### 课表和提醒
-
-默认情况下，程序会优先读取本机数据目录里的 `study-schedule.json`。这个文件可以直接在手机上改，不需要回电脑手改 `config.json`。
-
-`config.json` 里的 `studySchedule` 只是初始课表模板，第一次启动或没有手机端保存记录时会用它。
-
-如果你不想依赖同一局域网，也可以直接启用 `remoteSchedule`，让程序从服务器拉课表。
-
-格式示例：
-
-```json
-{
+  ],
+  "learningTools": [
+    {
+      "id": "dictionary-tool",
+      "title": "词典",
+      "appPath": "C:\\Windows\\System32\\notepad.exe"
+    }
+  ],
   "studySchedule": [
     {
-      "id": "english-mon",
+      "id": "english-example",
       "title": "说课英语",
       "target": "english-course",
       "time": "18:30",
       "weekdays": [1, 3, 5],
       "message": "到说课英语时间了。"
-    },
-    {
-      "id": "reading-daily",
-      "title": "晚间看书",
-      "target": "",
-      "time": "20:00",
-      "weekdays": [1, 2, 3, 4, 5],
-      "message": "到看书时间了。"
     }
   ]
 }
 ```
 
-说明：
+### 在线课堂相关
 
-- `time`：24 小时制，格式 `HH:mm`
-- `weekdays`：`1-7` 分别表示 `周一` 到 `周日`
-- `target`：可以填 `onlineClassrooms` 里的课堂 ID，也可以填 `contentLibraries` 里的库 ID；留空表示“只提醒，不跳转”，适合 `看书`、`做作业`
-- 内置作业模块固定可用的 `target` 是 `homework-module`
-- 允许的网站登录页会自动记住并回填账号密码，凭据使用本机安全存储加密，不明文写盘
-- `title` / `message`：电脑到点语音播报和弹层里显示的内容
-- `reminders.leadMinutes`：提前提醒分钟数，默认是 `[5, 1]`
-- 每天的完成状态会保存在本机数据目录里的 `study-tools-state.json`
-- 手机端改课表后，会保存到本机数据目录里的 `study-schedule.json`
+- `onlineClassrooms`：在线课堂卡片
+- `allowedTopLevelUrlPrefixes`：允许的顶层页面范围
+- `allowedResourceHostnames`
+- `allowedResourceHostnameSuffixes`
+- `allowedResourceUrlPrefixes`
+- `resourceAccessMode`
 
-如果你想显式写进配置，也可以加：
+`resourceAccessMode` 常用值：
 
-```json
-{
-  "reminders": {
-    "leadMinutes": [5, 1]
-  }
-}
-```
+- `whitelist`：资源也按白名单拦
+- `top-level-only`：重点只控顶层页面，资源放宽
 
-桌面提醒会按真实计划名称做本机语音播报，例如“距离说课英语还剩 5 分钟。”，默认连播 3 次，不依赖云端 TTS。
+### 百度网盘相关
 
-### 服务器拉课表
+需要在百度网盘开放平台申请：
 
-如果你想让电脑直接从服务器拿课表，在 `config.json` 里填：
+- `clientId`
+- `clientSecret`
+
+平台入口：
+
+- <https://pan.baidu.com/union>
+
+### 远程课表相关
+
+如果你用 CloudBase 或自己的服务端，桌面端读取：
 
 ```json
 {
   "remoteSchedule": {
-    "url": "https://你的服务器/schedule.json",
-    "authToken": "可选的访问 token",
+    "url": "https://your-domain/api/schedule",
+    "authToken": "read-token",
     "refreshMinutes": 3
   }
 }
 ```
 
-说明：
+## 本机保存的数据
 
-- `url`：返回课表 JSON 的接口地址
-- `authToken`：只读 token。程序读取课表时会自动带 `Authorization: Bearer <token>`
-- `studentWriteToken`：可选。配了就直接允许桌面端保存学生计划；不配时，桌面端会自动发起写入申请，家长在手机端批准后才能保存
-- `refreshMinutes`：轮询间隔，单位分钟
-- 接口返回可以是数组，也可以是 `{ "items": [...] }`
-- 课表项格式和 `studySchedule` 完全一样
-- 程序启动时会先拉一次，之后按 `refreshMinutes` 自动刷新
-- 拉取成功后会把最近一次服务器课表缓存到本机数据目录里的 `study-schedule-cache.json`
-- 服务器暂时不可用时，会继续用上一次成功同步到本机的课表
+打包后程序运行数据会写到：
 
-### 微信小程序 + CloudBase
+- `%AppData%\\StudyGate\\`
 
-仓库里已经带了一套 `微信小程序 + CloudBase` 骨架，在 `cloudbase/` 目录：
+常见文件有：
 
-- `cloudbase/functions/scheduleAdmin`：小程序管理云函数
-- `cloudbase/functions/schedulePublic`：桌面程序拉课表和保存学生计划的 HTTP 接口
-- `cloudbase/miniprogram`：家长管理端小程序
+- `study-schedule.json`
+- `study-schedule-cache.json`
+- `study-tools-state.json`
+- `session-state.json`
+- `origin-storage-state.json`
+- `baidu-netdisk-state.json`
+- `navigation-debug.log`
+- `reminder-debug.log`
 
-详细部署看：
-
-- `cloudbase/README.md`
-- `cloudbase/DEPLOY.md`
-
-这套方案的目标是：
-
-- 小程序只给家长自己管理课表
-- CloudBase 负责存课表
-- 桌面程序继续按 `remoteSchedule` 从云端拉
-
-### 手机改课表
-
-程序首页右侧会显示局域网配置地址。
-
-使用方式：
-
-- 让手机和电脑连接同一个 Wi-Fi
-- 在手机浏览器里打开首页显示的网址
-- 直接新增、编辑、删除课表项
-- 保存后，电脑会按新课表发声提醒
-
-如果已经启用了 `remoteSchedule`，首页也会显示最近一次服务器同步状态；这时局域网页面可以保留做本地兜底，但真正生效的课表优先来自服务器。
-
-## 2. 运行
+## 开发和打包
 
 安装依赖：
 
@@ -220,76 +285,39 @@ npm install
 npm start
 ```
 
-### 课表服务器
-
-如果你要把课表放到服务器上，直接运行：
-
-```powershell
-npm run server
-```
-
-第一次启动后会自动创建：
-
-- `server-data/server-config.json`
-- `server-data/schedule.json`
-
-服务端会在控制台直接打印：
-
-- 手机管理地址
-- `remoteSchedule.url`
-- `remoteSchedule.authToken`
-
-你只需要把打印出来的 `url` 和 `authToken` 填到桌面程序的 [config.json](q:/singlewebsite/config.json) 里。
-
-手机使用方式：
-
-- 打开控制台打印的 `.../admin?token=...`
-- 直接在页面里加、改、删课表
-- 桌面程序会按它自己的远程同步间隔自动拉取
-
-如果这个服务器要放到公网，建议前面再套一层你自己的 HTTPS 反向代理。
-
-## 3. 打包
-
-打包为可执行目录：
+打包：
 
 ```powershell
 npm run build
 ```
 
-输出结果会有两份：
+输出目录：
 
 - `dist/StudyGate-win32-x64/`
 - `dist/StudyGate-win32-x64.zip`
 
-这是便携版，不需要额外安装器。把整个目录拷到孩子电脑上，直接运行 `StudyGate.exe` 就行。
+这是便携版，直接解压后运行：
 
-打包后程序会把运行状态写到 `%AppData%/StudyGate/`，例如：
+- `StudyGate.exe`
 
-- `study-schedule.json`
-- `study-tools-state.json`
-- `session-state.json`
-- `origin-storage-state.json`
-- `baidu-netdisk-state.json`
+## 现在这版的限制
 
-## 4. 已实现限制
+- 不是完整浏览器
+- 没有地址栏、标签页、扩展、开发者工具
+- 不提供完整百度网盘界面
+- 右键菜单和常见跳转快捷键被限制
+- 不允许自由下载
 
-- 启动先进入本地首页，而不是直接给孩子一个浏览器页面
-- 只允许白名单里的主页面导航
-- 在 `resourceAccessMode = "whitelist"` 时，非白名单资源请求会被取消
-- 在 `resourceAccessMode = "top-level-only"` 时，只严控主页面跳转，资源请求不再逐个域名拦截
-- 阻止 `window.open`
-- 禁用 `Ctrl+L`、`Ctrl+T`、`F12`、`Alt+F4` 等常见快捷键
-- 屏蔽下载
-- 白名单站点可使用摄像头、麦克风和音箱输出设备
-- `Ctrl+Alt+Shift+Q` 可直接退出程序
-- 百度网盘入口只显示你指定的目录，不暴露完整网盘界面
-- 支持按课表发声提醒、弹层提醒和当日完成状态
-- 默认会在开课前 `5` 分钟和 `1` 分钟各提醒一次
-- 语音提醒会优先使用程序自带的离线 `Piper medium` 中文语音生成音频；如果本地离线 TTS 不可用，才回退到本机 Chromium/Windows 的 `speechSynthesis`
-- 支持用手机通过局域网页面修改课表
-- 支持按固定接口从服务器自动拉取课表
+## 出问题先看哪里
 
-## 5. 调试
+如果遇到问题，先看这些日志：
 
-如果网课页面打不开或样式缺失，先查看同目录自动生成的 `blocked-requests.log`，把里面确实属于网课平台的域名补进白名单。
+- `blocked-requests.log`
+- `navigation-debug.log`
+- `reminder-debug.log`
+
+最常见的问题是：
+
+- 网课站跳转范围没放够
+- 百度网盘授权状态失效
+- 远程课表地址或 token 配错
