@@ -76,10 +76,10 @@ namespace HomeworkApp
             return CreateBlankJob(subject, null);
         }
 
-        public static JobSession CreateBlankJob(string subject, string? bucket)
+        public static JobSession CreateBlankJob(string subject, DateTime targetDate, string? bucket)
         {
             string normalizedBucket = NormalizeBucket(bucket, subject);
-            var existingJob = FindJobBySubjectAndDate(subject, DateTime.Today, normalizedBucket);
+            var existingJob = FindJobBySubjectAndDate(subject, targetDate, normalizedBucket);
             if (existingJob != null)
             {
                 MarkAsLastJob(existingJob.JobId);
@@ -91,7 +91,7 @@ namespace HomeworkApp
                 Subject = subject,
                 Bucket = normalizedBucket,
                 SourceFiles = new List<string>(),
-                CreateTime = DateTime.Now,
+                CreateTime = ComposeCreateTime(targetDate),
                 UpdateTime = DateTime.Now,
                 DocumentType = "Blank",
                 TotalPages = 1
@@ -102,6 +102,11 @@ namespace HomeworkApp
             job.Save(jobDir);
             MarkAsLastJob(job.JobId);
             return job;
+        }
+
+        public static JobSession CreateBlankJob(string subject, string? bucket)
+        {
+            return CreateBlankJob(subject, DateTime.Today, bucket);
         }
 
         /// <summary>
@@ -315,6 +320,21 @@ namespace HomeworkApp
             job.UpdateTime = DateTime.Now;
             job.Save(job.JobDirectory);
             MarkAsLastJob(job.JobId);
+        }
+
+        public static JobSession AddBlankPage(JobSession job)
+        {
+            EnsureJobUsesImageSources(job);
+
+            string blankImagePath = CreateBlankPageImage(job.SourceDirectory);
+            job.SourceFiles.Add(blankImagePath);
+            job.DocumentType = "Image";
+            job.TotalPages = job.SourceFiles.Count;
+            job.CurrentPage = Math.Max(0, job.TotalPages - 1);
+            job.UpdateTime = DateTime.Now;
+            job.Save(job.JobDirectory);
+            MarkAsLastJob(job.JobId);
+            return job;
         }
 
         private static List<JobSession> LoadAllJobsRaw()

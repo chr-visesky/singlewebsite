@@ -3274,50 +3274,64 @@ function buildStudyCalendarModel(selectedDate = new Date()) {
 }
 
 function buildHomeModel() {
+  const cards = [
+    ...nativeModuleDefinitions.map((moduleDefinition) => ({
+      id: moduleDefinition.id,
+      title: moduleDefinition.title,
+      tone: moduleDefinition.tone,
+      badge: moduleDefinition.badge || '作业模块',
+      target: nativeModuleTarget(moduleDefinition.id),
+      scheduleTargetId: moduleDefinition.id,
+      libraryId: ''
+    })),
+    ...classroomDefinitions.map((classroom) => ({
+      id: classroom.id,
+      title: classroom.title,
+      tone: classroom.tone,
+      badge: '在线课堂',
+      target: classroom.entryUrl,
+      scheduleTargetId: classroom.id,
+      classroomId: classroom.id,
+      libraryId: '',
+      supportsStateReset: isCourseEcosystemOrigin(classroom.entryUrl)
+    })),
+    ...libraryDefinitions.map((library) => ({
+      id: library.id,
+      title: library.title,
+      tone: library.tone,
+      badge: '百度网盘',
+      target: libraryTarget(library.id),
+      scheduleTargetId: library.id,
+      libraryId: library.id
+    })),
+    ...learningToolDefinitions.map((learningTool) => ({
+      id: learningTool.id,
+      title: learningTool.title,
+      tone: learningTool.tone,
+      badge: '学习工具',
+      target: learningToolEntryTarget(learningTool.id),
+      scheduleTargetId: learningTool.id,
+      libraryId: ''
+    }))
+  ];
+
+  cards.sort((left, right) => {
+    if (left.id === 'homework-module') {
+      return -1;
+    }
+
+    if (right.id === 'homework-module') {
+      return 1;
+    }
+
+    return 0;
+  });
+
   return {
     appTitle: appConfig.appTitle,
     todaySchedule: buildStudyScheduleModel(),
     calendarSchedule: buildStudyCalendarModel(),
-    cards: [
-      ...classroomDefinitions.map((classroom) => ({
-        id: classroom.id,
-        title: classroom.title,
-        tone: classroom.tone,
-        badge: '在线课堂',
-        target: classroom.entryUrl,
-        scheduleTargetId: classroom.id,
-        classroomId: classroom.id,
-        libraryId: '',
-        supportsStateReset: isCourseEcosystemOrigin(classroom.entryUrl)
-      })),
-      ...libraryDefinitions.map((library) => ({
-        id: library.id,
-        title: library.title,
-        tone: library.tone,
-        badge: '百度网盘',
-        target: libraryTarget(library.id),
-        scheduleTargetId: library.id,
-        libraryId: library.id
-      })),
-      ...learningToolDefinitions.map((learningTool) => ({
-        id: learningTool.id,
-        title: learningTool.title,
-        tone: learningTool.tone,
-        badge: '学习工具',
-        target: learningToolEntryTarget(learningTool.id),
-        scheduleTargetId: learningTool.id,
-        libraryId: ''
-      })),
-      ...nativeModuleDefinitions.map((moduleDefinition) => ({
-        id: moduleDefinition.id,
-        title: moduleDefinition.title,
-        tone: moduleDefinition.tone,
-        badge: moduleDefinition.badge || '作业模块',
-        target: nativeModuleTarget(moduleDefinition.id),
-        scheduleTargetId: moduleDefinition.id,
-        libraryId: ''
-      }))
-    ]
+    cards
   };
 }
 

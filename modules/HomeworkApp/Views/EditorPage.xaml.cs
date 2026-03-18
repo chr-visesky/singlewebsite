@@ -40,6 +40,7 @@ namespace HomeworkApp.Views
         private Point _panStartPoint;
         private Point _panStartOffset;
         private int _thumbnailLoadVersion;
+        private bool _thumbnailMutationInProgress;
         private InkManager.ToolMode _activeToolMode = InkManager.ToolMode.Pen;
         private static readonly string[] CoreSubjects = { "语文", "数学", "英语" };
         private sealed class HomeworkNodeContext
@@ -75,7 +76,7 @@ namespace HomeworkApp.Views
             _homeworkScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
             _draftScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(DraftScrollIndicator, _draftScrollIndicatorTimer);
             Unloaded += EditorPage_Unloaded;
-            SetAssistantPanelCollapsed(false);
+            SetAssistantPanelCollapsed();
 
             LoadDocument();
             SetupInkCanvas();
@@ -281,11 +282,7 @@ namespace HomeworkApp.Views
                 Foreground = new SolidColorBrush(Color.FromRgb(248, 242, 233))
             };
 
-            if (latestJob != null)
-            {
-                subjectNode.Selected += SubjectNode_Selected;
-            }
-
+            subjectNode.Selected += SubjectNode_Selected;
             subjectNode.ContextMenu = BuildSubjectContextMenu(context);
 
             parent.Items.Add(subjectNode);
@@ -383,7 +380,7 @@ namespace HomeworkApp.Views
             NavigationService?.Navigate(new EditorPage(job));
         }
 
-        private async void LoadDocument()
+        private async void LoadDocument(bool skipSaveCurrentPage = false)
         {
             try
             {
@@ -414,7 +411,7 @@ namespace HomeworkApp.Views
                 _currentPageIndex = Math.Max(0, Math.Min(_currentPageIndex, EffectivePageCount() - 1));
 
                 // Load current page
-                await LoadPageAsync(_currentPageIndex);
+                await LoadPageAsync(_currentPageIndex, skipSaveCurrentPage);
                 await RefreshThumbnailStripAsync();
             }
             catch (Exception ex)
@@ -424,15 +421,17 @@ namespace HomeworkApp.Views
             }
         }
 
-        private async Task LoadPageAsync(int pageIndex)
+        private async Task LoadPageAsync(int pageIndex, bool skipSaveCurrentPage = false)
         {
             if (pageIndex < 0 || pageIndex >= EffectivePageCount())
                 return;
 
             int loadVersion = Interlocked.Increment(ref _pageLoadVersion);
 
-            // Save current page ink before switching
-            SaveCurrentPageInk();
+            if (!skipSaveCurrentPage)
+            {
+                SaveCurrentPageInk();
+            }
 
             _currentPageIndex = pageIndex;
             _job!.CurrentPage = pageIndex;
@@ -577,10 +576,10 @@ namespace HomeworkApp.Views
         private async Task RefreshThumbnailStripAsync()
         {
             int pageCount = EffectivePageCount();
-            bool shouldShow = pageCount > 1;
+            bool shouldShow = pageCount > 0;
 
-            ThumbnailColumn.Width = shouldShow ? new GridLength(72) : new GridLength(0);
-            ThumbnailHost.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
+            ThumbnailColumn.Width = new GridLength(72);
+            ThumbnailHost.Visibility = Visibility.Visible;
             ApplyZoom();
 
             if (!shouldShow)
@@ -603,7 +602,39 @@ namespace HomeworkApp.Views
                 ThumbnailPanel.Children.Add(item);
             }
 
+            ThumbnailPanel.Children.Add(CreateAddThumbnailItem());
+
             UpdateThumbnailSelection();
+        }
+
+        private Border CreateAddThumbnailItem()
+        {
+            var itemBorder = new Border
+            {
+                Width = 58,
+                Height = 82,
+                Margin = new Thickness(0, 0, 0, 8),
+                Padding = new Thickness(0),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(196, 190, 180)),
+                Background = new SolidColorBrush(Color.FromArgb(72, 255, 255, 255)),
+                Cursor = Cursors.Hand,
+                Tag = "add-page"
+            };
+
+            var label = new TextBlock
+            {
+                Text = "+",
+                FontSize = 22,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(72, 72, 72)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            itemBorder.Child = label;
+            itemBorder.MouseLeftButtonDown += AddThumbnailItem_MouseLeftButtonDown;
+            return itemBorder;
         }
 
         private async Task<Border> CreateThumbnailItemAsync(int pageIndex, int loadVersion)
@@ -667,6 +698,7 @@ namespace HomeworkApp.Views
                     Tag = pageIndex
                 };
                 deleteButton.Click += ThumbnailDeleteButton_Click;
+                deleteButton.PreviewMouseLeftButtonDown += ThumbnailDeleteButton_PreviewMouseLeftButtonDown;
                 pageGrid.Children.Add(deleteButton);
             }
             pageGrid.Children.Add(new Border
@@ -707,6 +739,12 @@ namespace HomeworkApp.Views
 
         private async void ThumbnailItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (_thumbnailMutationInProgress)
+            {
+                e.Handled = true;
+                return;
+            }
+
             if (sender is Border border && border.Tag is int pageIndex && pageIndex != _currentPageIndex)
             {
                 e.Handled = true;
@@ -718,14 +756,64 @@ namespace HomeworkApp.Views
         {
             if (sender is not TreeViewItem treeItem ||
                 treeItem.Tag is not HomeworkNodeContext context ||
-                context.Job == null ||
-                string.Equals(context.Job.JobId, _job.JobId, StringComparison.OrdinalIgnoreCase))
+                string.IsNullOrWhiteSpace(context.Subject))
             {
                 return;
             }
 
             e.Handled = true;
+
+            if (context.Job == null)
+            {
+                try
+                {
+                    SaveCurrentPageInk();
+                    JobManager.SaveJob(_job);
+                    var blankJob = JobManager.CreateBlankJob(context.Subject, context.Date, context.Bucket);
+                    LoadSelectedJob(blankJob);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"创建空白作业失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+
+                return;
+            }
+
+            if (string.Equals(context.Job.JobId, _job.JobId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             LoadSelectedJob(context.Job);
+        }
+
+        private async void AddThumbnailItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            e.Handled = true;
+
+            try
+            {
+                _thumbnailMutationInProgress = true;
+                SaveCurrentPageInk();
+                var job = JobManager.AddBlankPage(_job);
+                _currentPageIndex = job.CurrentPage;
+                LoadDocument(skipSaveCurrentPage: true);
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"添加空白页失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _thumbnailMutationInProgress = false;
+            }
+        }
+
+        private void ThumbnailDeleteButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            e.Handled = true;
         }
 
         private async void ThumbnailDeleteButton_Click(object sender, RoutedEventArgs e)
@@ -746,12 +834,24 @@ namespace HomeworkApp.Views
                 return;
             }
 
-            SaveCurrentPageInk();
-            JobManager.DeletePage(_job, pageIndex);
-            _currentPageIndex = _job.CurrentPage;
-            SetupHomeworkTree();
-            LoadDocument();
-            await Task.CompletedTask;
+            try
+            {
+                _thumbnailMutationInProgress = true;
+                SaveCurrentPageInk();
+                JobManager.DeletePage(_job, pageIndex);
+                _currentPageIndex = _job.CurrentPage;
+                SetupHomeworkTree();
+                LoadDocument(skipSaveCurrentPage: true);
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"删除页失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _thumbnailMutationInProgress = false;
+            }
         }
 
         private void SubjectImportMenuItem_Click(object? sender, RoutedEventArgs e)
@@ -805,6 +905,72 @@ namespace HomeworkApp.Views
             }
         }
 
+        private void Page_DragOver(object sender, DragEventArgs e)
+        {
+            if (TryGetSupportedDroppedFiles(e, out _))
+            {
+                e.Effects = DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+
+            e.Handled = true;
+        }
+
+        private void Page_Drop(object sender, DragEventArgs e)
+        {
+            if (!TryGetSupportedDroppedFiles(e, out var files))
+            {
+                return;
+            }
+
+            try
+            {
+                SaveCurrentPageInk();
+                JobManager.SaveJob(_job);
+                var job = JobManager.CreateJob(_job.Subject, files, _job.CreateTime.Date, _job.Bucket);
+                LoadSelectedJob(job);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"导入作业失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static bool TryGetSupportedDroppedFiles(DragEventArgs e, out List<string> files)
+        {
+            files = new List<string>();
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                return false;
+            }
+
+            if (e.Data.GetData(DataFormats.FileDrop) is not string[] droppedFiles || droppedFiles.Length == 0)
+            {
+                return false;
+            }
+
+            files = droppedFiles
+                .Where(File.Exists)
+                .Where(IsSupportedImportFile)
+                .ToList();
+
+            return files.Count > 0;
+        }
+
+        private static bool IsSupportedImportFile(string path)
+        {
+            string extension = Path.GetExtension(path);
+            return extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void InkCanvas_StrokesChanged(object? sender, StrokeCollectionChangedEventArgs e)
         {
             if (e.Added.Count > 0 || e.Removed.Count > 0)
@@ -830,7 +996,7 @@ namespace HomeworkApp.Views
 
             if (_inkManager != null)
             {
-                _inkManager.SetStrokes(strokes);
+                _inkManager.SetStrokes(strokes ?? new StrokeCollection());
             }
         }
 
@@ -841,7 +1007,7 @@ namespace HomeworkApp.Views
 
             if (_draftInkManager != null)
             {
-                _draftInkManager.SetStrokes(strokes);
+                _draftInkManager.SetStrokes(strokes ?? new StrokeCollection());
             }
         }
 
@@ -1149,7 +1315,7 @@ namespace HomeworkApp.Views
             double baseWidth = A4Background.Width > 0 ? A4Background.Width : 794;
             double availableWidth = EditorLayoutRoot.ActualWidth
                 - ThumbnailColumn.ActualWidth
-                - (_isLeftPanelCollapsed ? 0 : LeftColumn.ActualWidth)
+                - LeftColumn.ActualWidth
                 - 8;
 
             if (availableWidth <= 0 || baseWidth <= 0)
@@ -1168,7 +1334,7 @@ namespace HomeworkApp.Views
             // Toggle orientation
             _isPortrait = !_isPortrait;
             BtnPageRatio.Content = _isPortrait ? "A4 竖" : "A4 横";
-            await LoadPageAsync(_currentPageIndex);
+            await LoadPageAsync(_currentPageIndex, skipSaveCurrentPage: true);
             ApplyZoom();
         }
 
@@ -1221,11 +1387,9 @@ namespace HomeworkApp.Views
                 : Visibility.Visible;
         }
 
-        private bool _isLeftPanelCollapsed = false;
-
         private void BtnExpandLeft_Click(object sender, RoutedEventArgs e)
         {
-            SetAssistantPanelCollapsed(!_isLeftPanelCollapsed);
+            SetAssistantPanelCollapsed();
         }
 
         private void BtnMenu_Click(object sender, RoutedEventArgs e)
@@ -1423,26 +1587,11 @@ namespace HomeworkApp.Views
             }
         }
 
-        private void SetAssistantPanelCollapsed(bool collapsed)
+        private void SetAssistantPanelCollapsed()
         {
-            _isLeftPanelCollapsed = collapsed;
-
-            if (collapsed)
-            {
-                LeftColumn.Width = new GridLength(0);
-                LeftPanel.Visibility = Visibility.Collapsed;
-                BtnExpandLeft.Content = "◀";
-                BtnExpandLeft.ToolTip = "展开作业助手";
-                BtnExpandLeft.Margin = new Thickness(-5, 0, 0, 0);
-            }
-            else
-            {
-                LeftColumn.Width = new GridLength(200);
-                LeftPanel.Visibility = Visibility.Visible;
-                BtnExpandLeft.Content = "▶";
-                BtnExpandLeft.ToolTip = "收起作业助手";
-                BtnExpandLeft.Margin = new Thickness(-5, 0, 0, 0);
-            }
+            LeftColumn.Width = new GridLength(200);
+            LeftPanel.Visibility = Visibility.Visible;
+            BtnExpandLeft.Visibility = Visibility.Collapsed;
 
             ApplyZoom();
         }

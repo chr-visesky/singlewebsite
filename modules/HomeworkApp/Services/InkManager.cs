@@ -2,14 +2,12 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
-using System.Windows.Input;
 using System.Windows.Media;
 
 namespace HomeworkApp.Services
 {
     /// <summary>
-    /// Manages ink canvas operations with real-time stylus input processing
-    /// Uses One Euro Filter for jitter reduction while preserving Chinese character strokes
+    /// Manages ink canvas operations using native InkCanvas input with FitToCurve enabled
     /// </summary>
     public class InkManager
     {
@@ -17,9 +15,6 @@ namespace HomeworkApp.Services
         private double _logicalWidth;
         private double _logicalHeight;
         private Matrix _currentTransform = Matrix.Identity;
-
-        private readonly OneEuroFilter _filter;
-        private StylusPointCollection? _currentStrokePoints;
         private Color _currentColor = Colors.Black;
         private double _currentWidth = 3.0;
 
@@ -40,9 +35,6 @@ namespace HomeworkApp.Services
             _logicalWidth = logicalWidth;
             _logicalHeight = logicalHeight;
 
-            // Initialize One Euro Filter for real-time smoothing
-            _filter = new OneEuroFilter(freq: 100.0, minCutoff: 0.3, beta: 0.003, dCutoff: 0.1);
-
             // Calculate transform matrix from logical to screen coordinates
             _currentTransform = new Matrix(
                 screenWidth / logicalWidth,
@@ -57,108 +49,20 @@ namespace HomeworkApp.Services
 
         private void SetupInkCanvas()
         {
-            // Configure default pen
-            var pen = new DrawingAttributes
-            {
-                Color = Colors.Black,
-                Width = 3,
-                Height = 3,
-                FitToCurve = true,
-                IgnorePressure = false,
-                StylusTip = StylusTip.Ellipse,
-                StylusTipTransform = Matrix.Identity
-            };
-
-            _inkCanvas.DefaultDrawingAttributes = pen;
+            _inkCanvas.DefaultDrawingAttributes = CreatePenDrawingAttributes();
             _inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
             _inkCanvas.UseCustomCursor = true;
-
-            // Hook into stylus events for real-time filtering
-            AttachPenPreviewHandlers();
-        }
-
-        private void OnPreviewStylusDown(object sender, StylusDownEventArgs e)
-        {
-            if (CurrentTool != ToolMode.Pen) return;
-
-            // Start new stroke - reset filter
-            _filter.Reset();
-            _currentStrokePoints = new StylusPointCollection();
-
-            var points = e.GetStylusPoints(_inkCanvas);
-            if (points.Count > 0)
-            {
-                var firstPoint = points[0];
-                var timestamp = DateTime.Now.Ticks / 10000000.0;
-
-                var (filteredX, filteredY) = _filter.Filter(firstPoint.X, firstPoint.Y, timestamp);
-
-                _currentStrokePoints?.Add(new StylusPoint(
-                    (float)filteredX,
-                    (float)filteredY,
-                    firstPoint.PressureFactor));
-            }
-        }
-
-        private void OnPreviewStylusMove(object sender, StylusEventArgs e)
-        {
-            if (CurrentTool != ToolMode.Pen || _currentStrokePoints == null) return;
-
-            var points = e.GetStylusPoints(_inkCanvas);
-            if (points.Count == 0) return;
-
-            var lastPoint = points[points.Count - 1];
-            var timestamp = DateTime.Now.Ticks / 10000000.0;
-
-            var (filteredX, filteredY) = _filter.Filter(lastPoint.X, lastPoint.Y, timestamp);
-
-            _currentStrokePoints.Add(new StylusPoint(
-                (float)filteredX,
-                (float)filteredY,
-                lastPoint.PressureFactor));
-        }
-
-        private void OnPreviewStylusUp(object sender, StylusEventArgs e)
-        {
-            if (CurrentTool != ToolMode.Pen || _currentStrokePoints == null || _currentStrokePoints.Count < 2)
-            {
-                _currentStrokePoints = null;
-                return;
-            }
-
-            // Create final stroke with filtered points
-            var drawingAttributes = new DrawingAttributes
-            {
-                Color = _currentColor,
-                Width = _currentWidth,
-                Height = _currentWidth,
-                FitToCurve = true,
-                IgnorePressure = false,
-                StylusTip = StylusTip.Ellipse,
-                StylusTipTransform = Matrix.Identity
-            };
-
-            var stroke = new Stroke(_currentStrokePoints)
-            {
-                DrawingAttributes = drawingAttributes
-            };
-
-            // Add to ink canvas (bypass normal event to avoid double-processing)
-            _inkCanvas.Strokes.Add(stroke);
-
-            _currentStrokePoints = null;
         }
 
         public void SetTool(ToolMode tool)
         {
             CurrentTool = tool;
-            DetachPenPreviewHandlers();
 
             switch (tool)
             {
                 case ToolMode.Pen:
                     _inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
-                    AttachPenPreviewHandlers();
+                    _inkCanvas.DefaultDrawingAttributes = CreatePenDrawingAttributes();
                     break;
 
                 case ToolMode.Eraser:
@@ -167,16 +71,7 @@ namespace HomeworkApp.Services
 
                 case ToolMode.Highlighter:
                     _inkCanvas.EditingMode = InkCanvasEditingMode.Ink;
-                    var highlighter = new DrawingAttributes
-                    {
-                        Color = Color.FromArgb(100, 255, 255, 0),
-                        Width = 20,
-                        Height = 20,
-                        FitToCurve = true,
-                        IgnorePressure = false,
-                        IsHighlighter = true
-                    };
-                    _inkCanvas.DefaultDrawingAttributes = highlighter;
+                    _inkCanvas.DefaultDrawingAttributes = CreateHighlighterDrawingAttributes();
                     break;
 
                 case ToolMode.Select:
@@ -191,24 +86,23 @@ namespace HomeworkApp.Services
 
         public void SetPenColor(Color color)
         {
+            _currentColor = color;
+
             if (CurrentTool == ToolMode.Pen)
             {
-                _currentColor = color;
-                var attrs = _inkCanvas.DefaultDrawingAttributes.Clone();
-                attrs.Color = color;
-                _inkCanvas.DefaultDrawingAttributes = attrs;
+                _inkCanvas.DefaultDrawingAttributes = CreatePenDrawingAttributes();
             }
         }
 
         public void SetPenWidth(double width)
         {
+            _currentWidth = width;
+
             if (CurrentTool == ToolMode.Pen || CurrentTool == ToolMode.Highlighter)
             {
-                _currentWidth = width;
-                var attrs = _inkCanvas.DefaultDrawingAttributes.Clone();
-                attrs.Width = width;
-                attrs.Height = width;
-                _inkCanvas.DefaultDrawingAttributes = attrs;
+                _inkCanvas.DefaultDrawingAttributes = CurrentTool == ToolMode.Highlighter
+                    ? CreateHighlighterDrawingAttributes()
+                    : CreatePenDrawingAttributes();
             }
         }
 
@@ -307,19 +201,34 @@ namespace HomeworkApp.Services
 
         public Matrix GetCurrentTransform() => _currentTransform;
 
-        private void AttachPenPreviewHandlers()
+        private DrawingAttributes CreatePenDrawingAttributes()
         {
-            DetachPenPreviewHandlers();
-            _inkCanvas.PreviewStylusDown += OnPreviewStylusDown;
-            _inkCanvas.PreviewStylusMove += OnPreviewStylusMove;
-            _inkCanvas.PreviewStylusUp += OnPreviewStylusUp;
+            return new DrawingAttributes
+            {
+                Color = _currentColor,
+                Width = _currentWidth,
+                Height = _currentWidth,
+                FitToCurve = true,
+                IgnorePressure = false,
+                StylusTip = StylusTip.Ellipse,
+                StylusTipTransform = Matrix.Identity,
+                IsHighlighter = false
+            };
         }
 
-        private void DetachPenPreviewHandlers()
+        private DrawingAttributes CreateHighlighterDrawingAttributes()
         {
-            _inkCanvas.PreviewStylusDown -= OnPreviewStylusDown;
-            _inkCanvas.PreviewStylusMove -= OnPreviewStylusMove;
-            _inkCanvas.PreviewStylusUp -= OnPreviewStylusUp;
+            return new DrawingAttributes
+            {
+                Color = Color.FromArgb(100, 255, 255, 0),
+                Width = _currentWidth,
+                Height = _currentWidth,
+                FitToCurve = true,
+                IgnorePressure = false,
+                StylusTip = StylusTip.Ellipse,
+                StylusTipTransform = Matrix.Identity,
+                IsHighlighter = true
+            };
         }
     }
 }

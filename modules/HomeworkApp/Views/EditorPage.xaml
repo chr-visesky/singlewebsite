@@ -2,7 +2,10 @@
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:infc="clr-namespace:System.Windows.Ink;assembly=PresentationCore"
-      Background="Transparent">
+      Background="Transparent"
+      AllowDrop="True"
+      DragOver="Page_DragOver"
+      Drop="Page_Drop">
 
     <Page.Resources>
         <Style x:Key="ThinScrollBarStyle" TargetType="ScrollBar">
@@ -89,16 +92,165 @@
     </Page.Resources>
 
     <Grid x:Name="EditorLayoutRoot" Margin="6" Background="#E6E3DD">
-        <!-- Main Content: Homework, Draft, Right Panel -->
+        <!-- Main Content: Assistant, Thumbnails, Homework, Draft -->
         <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="LeftColumn" Width="200"/>
+            <ColumnDefinition x:Name="ThumbnailColumn" Width="72"/>
             <ColumnDefinition Width="Auto" MinWidth="400"/>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition x:Name="ThumbnailColumn" Width="0"/>
-            <ColumnDefinition x:Name="LeftColumn" Width="200"/>
         </Grid.ColumnDefinitions>
 
-        <!-- Left: Homework Area (A4 fixed size) -->
-        <Grid x:Name="HomeworkHost" Grid.Column="0" Background="Transparent">
+        <!-- Assistant -->
+        <Border x:Name="LeftPanel" Grid.Column="0" Margin="0,0,0,0" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <StackPanel Grid.Row="0" Margin="12,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="作业助手" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryText}"/>
+                            <TextBlock x:Name="TxtToday" FontSize="11" Foreground="{StaticResource MutedText}" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Menu Button -->
+                    <Button x:Name="BtnMenu" Content="☰ 菜单" Style="{StaticResource AssistantRectButtonStyle}"
+                            FontSize="11" Padding="8,4" Margin="0,6,0,0" Click="BtnMenu_Click"/>
+                </StackPanel>
+
+                <!-- Tree View -->
+                <ScrollViewer x:Name="HomeworkTreeScrollViewer"
+                              Grid.Row="2"
+                              VerticalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="HomeworkTreeScrollViewer_PreviewMouseWheel">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
+                    </ScrollViewer.Resources>
+                    <TreeView x:Name="HomeworkTree" Background="Transparent" BorderThickness="0"
+                              Foreground="{StaticResource PrimaryText}" FontSize="13">
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="TreeViewItem">
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryText}"/>
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="TreeViewItem">
+                                            <StackPanel>
+                                                <Border Name="Bd" Padding="4,2" CornerRadius="0">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="20"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <ToggleButton Name="Expander" Grid.Column="0"
+                                                                    IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
+                                                                    ClickMode="Press"
+                                                                    Foreground="{StaticResource PrimaryText}">
+                                                            <ToggleButton.Style>
+                                                                <Style TargetType="ToggleButton">
+                                                                    <Setter Property="Template">
+                                                                        <Setter.Value>
+                                                                            <ControlTemplate TargetType="ToggleButton">
+                                                                                <Path Name="Arrow" Width="6" Height="10"
+                                                                                      Data="M0,0 L6,5 L0,10 Z"
+                                                                                      Fill="{StaticResource MutedText}"
+                                                                                      HorizontalAlignment="Center"
+                                                                                      VerticalAlignment="Center"/>
+                                                                                <ControlTemplate.Triggers>
+                                                                                    <Trigger Property="IsChecked" Value="True">
+                                                                                        <Setter TargetName="Arrow" Property="RenderTransform">
+                                                                                            <Setter.Value>
+                                                                                                <RotateTransform Angle="90" CenterX="3" CenterY="5"/>
+                                                                                            </Setter.Value>
+                                                                                        </Setter>
+                                                                                    </Trigger>
+                                                                                </ControlTemplate.Triggers>
+                                                                            </ControlTemplate>
+                                                                        </Setter.Value>
+                                                                    </Setter>
+                                                                </Style>
+                                                            </ToggleButton.Style>
+                                                        </ToggleButton>
+                                                        <ContentPresenter Name="Header" Grid.Column="1"
+                                                                        ContentSource="Header"/>
+                                                    </Grid>
+                                                </Border>
+                                                <ItemsPresenter Name="ItemsPresenter" Margin="10,0,0,0"/>
+                                            </StackPanel>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="HasItems" Value="False">
+                                                    <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
+                                                </Trigger>
+                                                <Trigger Property="IsExpanded" Value="False">
+                                                    <Setter TargetName="ItemsPresenter" Property="Visibility" Value="Collapsed"/>
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="#0F000000"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="#14000000"/>
+                                                </Trigger>
+                                                <Trigger Property="IsEnabled" Value="False">
+                                                    <Setter Property="Foreground" Value="{StaticResource MutedText}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </TreeView.ItemContainerStyle>
+                    </TreeView>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <Button x:Name="BtnExpandLeft"
+                Grid.Column="0"
+                Content="▶"
+                Click="BtnExpandLeft_Click"
+                Visibility="Collapsed"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Margin="0,0,-5,0"
+                Width="10"
+                Height="44"
+                Panel.ZIndex="1000"
+                Background="{StaticResource PanelBackground}"
+                Foreground="{StaticResource MutedText}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                FontSize="14"
+                Padding="0"
+                Cursor="Hand"
+                ToolTip="展开或收起作业助手"/>
+
+        <Border x:Name="ThumbnailHost"
+                Grid.Column="1"
+                Width="72"
+                Margin="1,0,1,0"
+                Background="#66E6E3DD"
+                Visibility="Visible">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="False">
+                <ScrollViewer.Resources>
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
+                </ScrollViewer.Resources>
+                <StackPanel x:Name="ThumbnailPanel" Margin="6,6,6,6"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Homework Area (A4 fixed size) -->
+        <Grid x:Name="HomeworkHost" Grid.Column="2" Background="Transparent">
             <ScrollViewer x:Name="HomeworkScrollViewer"
                           HorizontalScrollBarVisibility="Hidden"
                           VerticalScrollBarVisibility="Hidden"
@@ -134,8 +286,8 @@
                     Visibility="Collapsed"/>
         </Grid>
 
-        <!-- Right: Draft Area (fills remaining space, height matches homework) -->
-        <Grid x:Name="DraftHost" Grid.Column="1" Margin="1,0,0,0" Background="Transparent" SizeChanged="DraftGrid_SizeChanged">
+        <!-- Draft Area (fills remaining space, height matches homework) -->
+        <Grid x:Name="DraftHost" Grid.Column="3" Margin="1,0,0,0" Background="Transparent" SizeChanged="DraftGrid_SizeChanged">
             <ScrollViewer x:Name="DraftScrollViewer"
                           HorizontalScrollBarVisibility="Hidden"
                           VerticalScrollBarVisibility="Hidden"
@@ -165,23 +317,7 @@
                     Visibility="Collapsed"/>
         </Grid>
 
-        <Border x:Name="ThumbnailHost"
-                Grid.Column="2"
-                Width="72"
-                Margin="1,0,1,0"
-                Background="#66E6E3DD"
-                Visibility="Collapsed">
-            <ScrollViewer VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          CanContentScroll="False">
-                <ScrollViewer.Resources>
-                    <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
-                </ScrollViewer.Resources>
-                <StackPanel x:Name="ThumbnailPanel" Margin="6,6,6,6"/>
-            </ScrollViewer>
-        </Border>
-
-        <StackPanel Grid.Column="1"
+        <StackPanel Grid.Column="3"
                     VerticalAlignment="Bottom"
                     HorizontalAlignment="Right"
                     Margin="0,0,10,10"
@@ -298,137 +434,5 @@
             </Border>
         </StackPanel>
 
-        <Button x:Name="BtnExpandLeft"
-                Grid.Column="3"
-                Content="▶"
-                Click="BtnExpandLeft_Click"
-                Visibility="Visible"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Center"
-                Margin="-5,0,0,0"
-                Width="10"
-                Height="44"
-                Panel.ZIndex="1000"
-                Background="{StaticResource PanelBackground}"
-                Foreground="{StaticResource MutedText}"
-                BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1"
-                FontSize="14"
-                Padding="0"
-                Cursor="Hand"
-                ToolTip="展开或收起作业助手"/>
-
-        <!-- Right: Homework Assistant Tree (collapsible) -->
-        <Border x:Name="LeftPanel" Grid.Column="3" Margin="0,0,0,0" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-                <!-- Header -->
-                <StackPanel Grid.Row="0" Margin="12,10">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="作业助手" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryText}"/>
-                            <TextBlock x:Name="TxtToday" FontSize="11" Foreground="{StaticResource MutedText}" Margin="0,4,0,0"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <!-- Menu Button -->
-                    <Button x:Name="BtnMenu" Content="☰ 菜单" Style="{StaticResource AssistantRectButtonStyle}"
-                            FontSize="11" Padding="8,4" Margin="0,6,0,0" Click="BtnMenu_Click"/>
-                </StackPanel>
-
-                <!-- Tree View -->
-                <ScrollViewer x:Name="HomeworkTreeScrollViewer"
-                              Grid.Row="2"
-                              VerticalScrollBarVisibility="Auto"
-                              PreviewMouseWheel="HomeworkTreeScrollViewer_PreviewMouseWheel">
-                    <ScrollViewer.Resources>
-                        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
-                    </ScrollViewer.Resources>
-                    <TreeView x:Name="HomeworkTree" Background="Transparent" BorderThickness="0"
-                              Foreground="{StaticResource PrimaryText}" FontSize="13">
-                        <TreeView.ItemContainerStyle>
-                            <Style TargetType="TreeViewItem">
-                                <Setter Property="Foreground" Value="{StaticResource PrimaryText}"/>
-                                <Setter Property="Background" Value="Transparent"/>
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="TreeViewItem">
-                                            <StackPanel>
-                                                <Border Name="Bd" Padding="4,2" CornerRadius="0">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="20"/>
-                                                            <ColumnDefinition Width="*"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <ToggleButton Name="Expander" Grid.Column="0"
-                                                                    IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
-                                                                    ClickMode="Press"
-                                                                    Foreground="{StaticResource PrimaryText}">
-                                                            <ToggleButton.Style>
-                                                                <Style TargetType="ToggleButton">
-                                                                    <Setter Property="Template">
-                                                                        <Setter.Value>
-                                                                            <ControlTemplate TargetType="ToggleButton">
-                                                                                <Path Name="Arrow" Width="6" Height="10"
-                                                                                      Data="M0,0 L6,5 L0,10 Z"
-                                                                                      Fill="{StaticResource MutedText}"
-                                                                                      HorizontalAlignment="Center"
-                                                                                      VerticalAlignment="Center"/>
-                                                                                <ControlTemplate.Triggers>
-                                                                                    <Trigger Property="IsChecked" Value="True">
-                                                                                        <Setter TargetName="Arrow" Property="RenderTransform">
-                                                                                            <Setter.Value>
-                                                                                                <RotateTransform Angle="90" CenterX="3" CenterY="5"/>
-                                                                                            </Setter.Value>
-                                                                                        </Setter>
-                                                                                    </Trigger>
-                                                                                </ControlTemplate.Triggers>
-                                                                            </ControlTemplate>
-                                                                        </Setter.Value>
-                                                                    </Setter>
-                                                                </Style>
-                                                            </ToggleButton.Style>
-                                                        </ToggleButton>
-                                                        <ContentPresenter Name="Header" Grid.Column="1"
-                                                                        ContentSource="Header"/>
-                                                    </Grid>
-                                                </Border>
-                                                <ItemsPresenter Name="ItemsPresenter" Margin="10,0,0,0"/>
-                                            </StackPanel>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="HasItems" Value="False">
-                                                    <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
-                                                </Trigger>
-                                                <Trigger Property="IsExpanded" Value="False">
-                                                    <Setter TargetName="ItemsPresenter" Property="Visibility" Value="Collapsed"/>
-                                                </Trigger>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#0F000000"/>
-                                                </Trigger>
-                                                <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#14000000"/>
-                                                </Trigger>
-                                                <Trigger Property="IsEnabled" Value="False">
-                                                    <Setter Property="Foreground" Value="{StaticResource MutedText}"/>
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </TreeView.ItemContainerStyle>
-                    </TreeView>
-                </ScrollViewer>
-            </Grid>
-        </Border>
     </Grid>
 </Page>
