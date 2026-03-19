@@ -106,6 +106,90 @@ namespace HomeworkApp.Views
             HomeworkTree.Items.Add(recentRoot);
             HomeworkTree.Items.Add(internalRoot);
             HomeworkTree.Items.Add(externalRoot);
+
+            SyncHomeworkTreeSelection();
+        }
+
+        private void SyncHomeworkTreeSelection()
+        {
+            if (_job == null)
+            {
+                return;
+            }
+
+            var mainRoots = HomeworkTree.Items
+                .OfType<TreeViewItem>()
+                .Where(item => item.Header is string header && (header == "课内" || header == "课外"))
+                .ToList();
+
+            var selected = mainRoots
+                .Select(root => FindMatchingHomeworkNode(root, preferJobId: false))
+                .FirstOrDefault(item => item != null);
+
+            if (selected == null)
+            {
+                selected = HomeworkTree.Items
+                    .OfType<TreeViewItem>()
+                    .Where(item => item.Header is string header && header == "最近打开")
+                    .Select(root => FindMatchingHomeworkNode(root, preferJobId: true))
+                    .FirstOrDefault(item => item != null);
+            }
+
+            if (selected == null)
+            {
+                return;
+            }
+
+            ExpandParents(selected);
+            selected.IsSelected = true;
+            selected.BringIntoView();
+            HomeworkTreeScrollViewer?.ScrollToVerticalOffset(Math.Max(0, HomeworkTreeScrollViewer.VerticalOffset - 24));
+        }
+
+        private TreeViewItem? FindMatchingHomeworkNode(TreeViewItem node, bool preferJobId)
+        {
+            if (NodeMatchesCurrentJob(node, preferJobId))
+            {
+                return node;
+            }
+
+            foreach (var child in node.Items.OfType<TreeViewItem>())
+            {
+                var match = FindMatchingHomeworkNode(child, preferJobId);
+                if (match != null)
+                {
+                    return match;
+                }
+            }
+
+            return null;
+        }
+
+        private bool NodeMatchesCurrentJob(TreeViewItem node, bool preferJobId)
+        {
+            if (node.Tag is not HomeworkNodeContext context || string.IsNullOrWhiteSpace(context.Subject))
+            {
+                return false;
+            }
+
+            if (preferJobId && context.Job != null)
+            {
+                return string.Equals(context.Job.JobId, _job.JobId, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return string.Equals(context.Bucket, ResolveBucket(_job), StringComparison.OrdinalIgnoreCase)
+                && context.Date.Date == _job.CreateTime.Date
+                && string.Equals(context.Subject, _job.Subject, StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private static void ExpandParents(TreeViewItem item)
+        {
+            var parent = ItemsControl.ItemsControlFromItemContainer(item) as TreeViewItem;
+            while (parent != null)
+            {
+                parent.IsExpanded = true;
+                parent = ItemsControl.ItemsControlFromItemContainer(parent) as TreeViewItem;
+            }
         }
 
         private TreeViewItem CreateHomeworkRootNode(string label)
