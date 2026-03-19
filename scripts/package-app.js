@@ -5,6 +5,21 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+function stopRunningProcesses() {
+  try {
+    execFileSync(
+      'taskkill',
+      ['/F', '/IM', 'StudyGate.exe', '/IM', 'HomeworkApp.exe', '/T'],
+      {
+        stdio: 'ignore',
+        windowsHide: true
+      }
+    );
+  } catch {
+    // Ignore when processes are not running.
+  }
+}
+
 async function packageApp() {
   const projectRoot = path.resolve(__dirname, '..');
   const packageJson = require(path.join(projectRoot, 'package.json'));
@@ -15,6 +30,7 @@ async function packageApp() {
   const zipPath = path.join(outputDir, `${productName}-win32-x64.zip`);
   const configSource = path.join(projectRoot, 'config.json');
   const videosSourceDir = path.join(projectRoot, 'videos');
+  const bannerSourceDir = path.join(projectRoot, 'banner');
   const homeworkProjectPath = path.join(projectRoot, 'modules', 'HomeworkApp', 'HomeworkApp.csproj');
   const homeworkPublishDir = path.join(projectRoot, 'modules', 'HomeworkApp', 'bin', 'Release', 'studygate-publish');
   const electronDistDir = path.join(projectRoot, 'node_modules', 'electron', 'dist');
@@ -33,6 +49,7 @@ async function packageApp() {
   };
 
   await fs.mkdir(outputDir, { recursive: true });
+  stopRunningProcesses();
   await fs.rm(appDir, { recursive: true, force: true });
   await fs.rm(zipPath, { force: true });
   if (await fs.stat(homeworkProjectPath).then((stats) => stats.isFile()).catch(() => false)) {
@@ -78,6 +95,9 @@ async function packageApp() {
   }
   if (await fs.stat(videosSourceDir).then((stats) => stats.isDirectory()).catch(() => false)) {
     await fs.cp(videosSourceDir, path.join(appDir, 'videos'), { recursive: true });
+  }
+  if (await fs.stat(bannerSourceDir).then((stats) => stats.isDirectory()).catch(() => false)) {
+    await fs.cp(bannerSourceDir, path.join(appDir, 'banner'), { recursive: true });
   }
   execFileSync(tarPath, ['-a', '-c', '-f', zipPath, path.basename(appDir)], {
     cwd: outputDir,

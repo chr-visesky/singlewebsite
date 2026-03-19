@@ -2,10 +2,9 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-const TOOLBAR_HEIGHT = 54;
+const TOOLBAR_HEIGHT = 62;
 const TOOLBAR_HOST_ID = 'studygate-nav-host';
 const REMINDER_HOST_ID = 'studygate-reminder-host';
-const TOOLBAR_BODY_MARGIN_ATTR = 'data-studygate-original-margin-top';
 const TOOLBAR_TOP_OFFSET_ATTR = 'data-studygate-original-top';
 let refreshTimer = null;
 let reminderHideTimer = null;
@@ -13,6 +12,14 @@ let reminderAudio = null;
 let reminderAlarmContext = null;
 let zoomShortcutBound = false;
 let layoutAdjustObserver = null;
+
+function dispatchToolbarAction(actionId) {
+  window.dispatchEvent(
+    new CustomEvent('studygate:toolbar-action', {
+      detail: { actionId }
+    })
+  );
+}
 
 function isExitVerificationPage() {
   return window.location.protocol === 'file:' && /exit-verify\.html$/i.test(window.location.pathname);
@@ -346,6 +353,9 @@ if (window.location.protocol === 'file:') {
     navigate(target) {
       return ipcRenderer.invoke('shell:navigate', target);
     },
+    refreshCurrentClassroom() {
+      return ipcRenderer.invoke('shell:refresh-current-classroom');
+    },
     resetCourseSiteState() {
       return ipcRenderer.invoke('shell:reset-course-site-state');
     },
@@ -367,10 +377,10 @@ function applyStyles(shadowRoot) {
   const cssText = `
     .bar {
       display: flex;
-      align-items: center;
+      align-items: stretch;
       gap: 10px;
       min-height: ${TOOLBAR_HEIGHT}px;
-      padding: 8px 14px;
+      padding: 0 14px;
       background: rgba(8, 15, 25, 0.88);
       color: #f4f7fb;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -389,20 +399,25 @@ function applyStyles(shadowRoot) {
       font: inherit;
     }
 
+    .nav-button--soft {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
     .nav-button[disabled] {
       opacity: 0.38;
       cursor: default;
     }
 
-    .crumbs {
+    .toolbar-left {
       display: flex;
       align-items: center;
       gap: 8px;
-      min-width: 0;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      flex: 1 1 auto;
+      flex: 0 0 auto;
+      padding: 6px 0;
+    }
+
+    .crumbs {
+      display: none;
     }
 
     .crumb {
@@ -426,6 +441,36 @@ function applyStyles(shadowRoot) {
 
     .sep {
       color: rgba(255, 255, 255, 0.36);
+      flex: 0 0 auto;
+    }
+
+    .banner {
+      flex: 1 1 auto;
+      min-width: 0;
+      align-self: stretch;
+      height: auto;
+      padding: 0;
+      border-radius: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    .banner[data-empty="true"] {
+      display: none;
+    }
+
+    .banner__image {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center center;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       flex: 0 0 auto;
     }
 
@@ -551,13 +596,13 @@ function ensureToolbarElements() {
   if (!host) {
     host = document.createElement('div');
     host.id = TOOLBAR_HOST_ID;
-    host.style.position = 'fixed';
+    host.style.position = 'sticky';
     host.style.top = '0';
-    host.style.left = '0';
-    host.style.right = '0';
     host.style.zIndex = '2147483647';
-    host.style.pointerEvents = 'none';
-    document.documentElement.append(host);
+    host.style.display = 'block';
+    document.body.prepend(host);
+  } else if (document.body.firstChild !== host) {
+    document.body.prepend(host);
   }
 
   if (!host.shadowRoot) {
@@ -567,6 +612,9 @@ function ensureToolbarElements() {
     const bar = document.createElement('div');
     bar.className = 'bar';
     bar.style.pointerEvents = 'auto';
+
+    const left = document.createElement('div');
+    left.className = 'toolbar-left';
 
     const backButton = document.createElement('button');
     backButton.type = 'button';
@@ -592,17 +640,54 @@ function ensureToolbarElements() {
       }, 80);
     });
 
+    const homeButton = document.createElement('button');
+    homeButton.type = 'button';
+    homeButton.className = 'nav-button nav-button--home';
+    homeButton.textContent = '⌂';
+    homeButton.title = '返回首页';
+    homeButton.addEventListener('click', async () => {
+      await ipcRenderer.invoke('shell:navigate', 'internal:home');
+      window.setTimeout(() => {
+        void refreshToolbar();
+      }, 80);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'toolbar-actions';
+
     const crumbs = document.createElement('div');
     crumbs.className = 'crumbs';
 
-    bar.append(backButton, forwardButton, crumbs);
-    shadowRoot.append(bar);
-  }
+    const banner = document.createElement('div');
+    banner.className = 'banner';
+    banner.setAttribute('data-empty', 'true');
 
-  if (window.location.protocol !== 'file:' && !document.body.hasAttribute(TOOLBAR_BODY_MARGIN_ATTR)) {
-    const originalMarginTop = window.getComputedStyle(document.body).marginTop || '0px';
-    document.body.setAttribute(TOOLBAR_BODY_MARGIN_ATTR, originalMarginTop);
-    document.body.style.marginTop = `calc(${originalMarginTop} + ${TOOLBAR_HEIGHT}px)`;
+    const bannerImage = document.createElement('img');
+    bannerImage.className = 'banner__image';
+    bannerImage.alt = 'Banner';
+    banner.append(bannerImage);
+
+    const stateResetButton = document.createElement('button');
+    stateResetButton.type = 'button';
+    stateResetButton.className = 'nav-button nav-button--soft';
+    stateResetButton.textContent = '初始化';
+    stateResetButton.hidden = true;
+    stateResetButton.addEventListener('click', async () => {
+      if (!window.confirm('这会清空当前在线课堂的缓存、登录状态和本地站点数据，但保留已保存的账号密码。继续吗？')) {
+        return;
+      }
+
+      try {
+        await ipcRenderer.invoke('shell:reset-course-site-state');
+        window.alert('在线课堂状态已初始化。');
+      } catch {
+        window.alert('初始化失败。');
+      }
+    });
+
+    left.append(backButton, forwardButton, homeButton, actions, stateResetButton);
+    bar.append(left, banner, crumbs);
+    shadowRoot.append(bar);
   }
 
   offsetTopAnchoredElements();
@@ -618,14 +703,20 @@ function ensureToolbarElements() {
     });
   }
 
-  document.documentElement.style.scrollPaddingTop = `${TOOLBAR_HEIGHT + 12}px`;
+  document.documentElement.style.scrollPaddingTop = `12px`;
 
   const shadowRoot = host.shadowRoot;
   return shadowRoot
-    ? {
+      ? {
+        left: shadowRoot.querySelector('.toolbar-left'),
         backButton: shadowRoot.querySelectorAll('.nav-button')[0],
         forwardButton: shadowRoot.querySelectorAll('.nav-button')[1],
-        crumbs: shadowRoot.querySelector('.crumbs')
+        homeButton: shadowRoot.querySelector('.nav-button--home'),
+        actions: shadowRoot.querySelector('.toolbar-actions'),
+        crumbs: shadowRoot.querySelector('.crumbs'),
+        banner: shadowRoot.querySelector('.banner'),
+        bannerImage: shadowRoot.querySelector('.banner__image'),
+        stateResetButton: shadowRoot.querySelector('.nav-button--soft')
       }
     : null;
 }
@@ -847,6 +938,26 @@ async function refreshToolbar() {
   const model = await ipcRenderer.invoke('shell:get-navigation-model');
   elements.backButton.disabled = !model.canGoBack;
   elements.forwardButton.disabled = !model.canGoForward;
+  elements.homeButton.hidden = Boolean(model.isHome);
+  const bannerImageUrl = typeof model.bannerImageUrl === 'string' ? model.bannerImageUrl : '';
+  elements.banner.setAttribute('data-empty', bannerImageUrl ? 'false' : 'true');
+
+  if (elements.bannerImage && elements.bannerImage.getAttribute('src') !== bannerImageUrl) {
+    elements.bannerImage.setAttribute('src', bannerImageUrl);
+  }
+  elements.stateResetButton.hidden = !model.showStateReset;
+  elements.actions.replaceChildren();
+
+  (Array.isArray(model.actions) ? model.actions : []).forEach((action) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nav-button nav-button--soft';
+    button.textContent = action.label;
+    button.addEventListener('click', () => {
+      dispatchToolbarAction(action.id);
+    });
+    elements.actions.append(button);
+  });
   elements.crumbs.replaceChildren();
 
   model.crumbs.forEach((crumb, index) => {
@@ -891,7 +1002,7 @@ function startToolbarRefresh() {
 }
 
 function bootstrapToolbar() {
-  if (!isTopFrame() || isExitVerificationPage()) {
+  if (!isTopFrame() || isExitVerificationPage() || window.location.protocol !== 'file:') {
     return;
   }
 

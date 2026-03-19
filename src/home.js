@@ -1,20 +1,22 @@
 'use strict';
 
-const titleNode = document.getElementById('title');
 const cardGrid = document.getElementById('card-grid');
-const refreshHomeButton = document.getElementById('refresh-home-button');
-const studentPlanButton = document.getElementById('student-plan-button');
 const scheduleDate = document.getElementById('schedule-date');
 const scheduleList = document.getElementById('schedule-list');
 const calendarMonth = document.getElementById('calendar-month');
 const calendarGrid = document.getElementById('calendar-grid');
 const calendarSelectedDate = document.getElementById('calendar-selected-date');
 const calendarSelectedList = document.getElementById('calendar-selected-list');
+const homeNoticeNode = document.getElementById('home-notice');
+const homeNoticeImage = document.getElementById('home-notice-image');
+const homeNoticeDismiss = document.getElementById('home-notice-dismiss');
 
 let refreshPromise = null;
 let queuedRefreshOptions = null;
 let selectedCalendarDateKey = '';
 let currentCalendarModel = null;
+let currentHomeNotice = null;
+let noticeArmed = true;
 
 function createEmptyNode(title) {
   const article = document.createElement('article');
@@ -27,12 +29,27 @@ function createEmptyNode(title) {
   return article;
 }
 
+function hideHomeNotice() {
+  homeNoticeNode.hidden = true;
+}
+
+function maybeShowHomeNotice() {
+  if (!currentHomeNotice || !currentHomeNotice.enabled || !noticeArmed) {
+    return;
+  }
+
+  homeNoticeImage.src = currentHomeNotice.imageUrl || '';
+  homeNoticeDismiss.textContent = currentHomeNotice.buttonText || '知道了';
+  homeNoticeNode.hidden = false;
+  noticeArmed = false;
+}
+
 async function launchStudyTarget(payload) {
   try {
     const result = await window.studyGate.enterStudyTarget(payload);
 
     if (result && result.success === false) {
-      window.alert('打开失败。');
+      window.alert(result.message || '打开失败。');
     }
   } catch (error) {
     window.alert((error && error.message) || '打开失败。');
@@ -86,17 +103,13 @@ function renderTodaySchedule(todaySchedule) {
     time.textContent = item.time;
 
     const scope = document.createElement('span');
-    scope.className = 'schedule-item__status';
+    scope.className = 'schedule-item__scope';
     scope.textContent = item.planScopeLabel;
 
     const heading = document.createElement('h3');
     heading.textContent = item.title;
 
-    const status = document.createElement('span');
-    status.className = 'schedule-item__status';
-    status.textContent = item.statusLabel;
-
-    titleRow.append(time, scope, heading, status);
+    titleRow.append(time, scope, heading);
     main.append(titleRow);
 
     const action = document.createElement('button');
@@ -114,7 +127,6 @@ function renderTodaySchedule(todaySchedule) {
     });
 
     article.append(main, action);
-
     scheduleList.append(article);
   });
 }
@@ -225,17 +237,24 @@ function renderCalendarSchedule(calendarSchedule) {
 
 function createCard(card) {
   const article = document.createElement('article');
-  article.className = `card card--${card.tone}`;
+  article.className = `card card--${card.tone || 'slate'}`;
+  const target = typeof card.target === 'string' ? card.target : '';
+  const hasTarget = Boolean(target);
 
   const inner = document.createElement('div');
   inner.className = 'card__inner';
 
+  const top = document.createElement('div');
+  top.className = 'card__top';
+
   const tag = document.createElement('span');
   tag.className = 'card__tag';
-  tag.textContent = card.badge || (card.target.startsWith('internal:') ? '媒体库' : '在线课堂');
+  tag.textContent = card.badge || (target.startsWith('internal:') ? '媒体库' : '在线课堂');
 
   const heading = document.createElement('h2');
   heading.textContent = card.title;
+
+  top.append(tag, heading);
 
   const actions = document.createElement('div');
   actions.className = 'card__actions';
@@ -243,9 +262,15 @@ function createCard(card) {
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = '打开';
+  button.disabled = !hasTarget;
+  button.title = hasTarget ? '打开' : '未配置';
   button.addEventListener('click', async () => {
+    if (!hasTarget) {
+      return;
+    }
+
     await launchStudyTarget({
-      target: card.target,
+      target,
       scheduleTargetId: card.scheduleTargetId,
       libraryId: card.libraryId,
       libraryTitle: card.title
@@ -254,24 +279,25 @@ function createCard(card) {
 
   actions.append(button);
 
-  if (card.supportsStateReset) {
+  if (card.supportsStateReset && hasTarget) {
     const resetButton = document.createElement('button');
     resetButton.type = 'button';
     resetButton.className = 'card__ghost-button';
-    resetButton.textContent = '初始化状态';
+    resetButton.textContent = '初始化';
     resetButton.addEventListener('click', async () => {
       await resetCourseSiteState(card.title);
     });
     actions.append(resetButton);
   }
 
-  inner.append(tag, heading, actions);
+  inner.append(top, actions);
   article.append(inner);
   return article;
 }
 
 function renderModel(model) {
-  titleNode.textContent = (model && model.appTitle) || '学习入口';
+  document.title = (model && model.appTitle) || 'StudyGate';
+  currentHomeNotice = model.homeNotice || null;
   cardGrid.replaceChildren();
 
   model.cards.forEach((card) => {
@@ -280,6 +306,7 @@ function renderModel(model) {
 
   renderTodaySchedule(model.todaySchedule);
   renderCalendarSchedule(model.calendarSchedule);
+  maybeShowHomeNotice();
 }
 
 async function refreshHomeModel(options = {}) {
@@ -317,25 +344,45 @@ window.setInterval(() => {
 }, 30000);
 
 window.addEventListener('focus', () => {
+  maybeShowHomeNotice();
   void refreshHomeModel();
 });
 
+window.addEventListener('blur', () => {
+  noticeArmed = true;
+  hideHomeNotice();
+});
+
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    void refreshHomeModel();
+  if (document.hidden) {
+    noticeArmed = true;
+    hideHomeNotice();
+    return;
   }
+
+  maybeShowHomeNotice();
+  void refreshHomeModel();
+});
+
+homeNoticeDismiss.addEventListener('click', () => {
+  hideHomeNotice();
 });
 
 refreshHomeModel().catch(() => {
   cardGrid.textContent = '本地首页加载失败。';
 });
 
-studentPlanButton.addEventListener('click', async () => {
-  await window.studyGate.navigate('internal:student-plan');
-});
+window.addEventListener('studygate:toolbar-action', async (event) => {
+  const actionId = event && event.detail ? event.detail.actionId : '';
 
-refreshHomeButton.addEventListener('click', () => {
-  void refreshHomeModel({
-    syncRemote: true
-  });
+  if (actionId === 'student-plan') {
+    await window.studyGate.navigate('internal:student-plan');
+    return;
+  }
+
+  if (actionId === 'refresh-home') {
+    void refreshHomeModel({
+      syncRemote: true
+    });
+  }
 });

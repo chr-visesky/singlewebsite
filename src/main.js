@@ -1,6 +1,17 @@
 'use strict';
 
-const { Notification, app, BrowserWindow, dialog, ipcMain, safeStorage, screen, session, shell: electronShell } = require('electron');
+const {
+  Notification,
+  app,
+  BrowserWindow,
+  BrowserView,
+  dialog,
+  ipcMain,
+  safeStorage,
+  screen,
+  session,
+  shell: electronShell
+} = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -23,6 +34,11 @@ const {
   resolveLearningToolTitle: resolveLearningToolTitleFromList,
   serializeLearningTools
 } = require('./learning-tools');
+const {
+  buildHomeUiModel,
+  buildNavigationUiModel,
+  buildClassroomNavigationUiModel
+} = require('./ui-models');
 
 const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
@@ -81,6 +97,8 @@ const DEFAULT_UI_ZOOM_FACTOR = 1;
 const MIN_UI_ZOOM_FACTOR = 0.75;
 const MAX_UI_ZOOM_FACTOR = 1.8;
 const UI_ZOOM_STEP = 0.1;
+const DEFAULT_NAVIGATION_BANNER_TEXT = '先看计划，再开始。';
+const CLASSROOM_SHELL_TOP_HEIGHT = 62;
 const WEEKDAY_ALIASES = new Map([
   ['1', 1],
   ['mon', 1],
@@ -276,10 +294,12 @@ const LEGACY_MEDIA_COMPATIBILITY_SCRIPT = String.raw`
 const INTERNAL_PAGES = {
   home: 'home.html',
   library: 'library.html',
-  studentPlan: 'student-plan.html'
+  studentPlan: 'student-plan.html',
+  classroomShell: 'classroom-shell.html'
 };
 
 let mainWindow = null;
+let classroomBrowserView = null;
 let authWindow = null;
 let exitPasswordWindow = null;
 let appConfig = null;
@@ -291,6 +311,7 @@ let learningToolDefinitions = [];
 let learningToolIndex = new Map();
 const nativeModuleDefinitions = listNativeModules();
 const nativeModuleIndex = new Map(nativeModuleDefinitions.map((moduleDefinition) => [moduleDefinition.id, moduleDefinition]));
+const bannerAssetCache = new Map();
 let sessionPersistTimer = null;
 let sessionPersistPromise = Promise.resolve();
 let internalServer = null;
@@ -318,6 +339,7 @@ let remoteScheduleSyncSerial = 0;
 let studyDataMutationSerial = 0;
 let allowAppQuit = false;
 let currentWindowZoomFactor = DEFAULT_UI_ZOOM_FACTOR;
+let activeClassroomShell = null;
 
 app.setPath('userData', STABLE_USER_DATA_DIR);
 app.disableHardwareAcceleration();
@@ -528,6 +550,26 @@ function normalizeControlSettings(rawSettings) {
     exitPasswordHash,
     exitPasswordSalt,
     exitPasswordUpdatedAt
+  };
+}
+
+function normalizeHomeNotice(rawNotice) {
+  const source = rawNotice && typeof rawNotice === 'object' ? rawNotice : {};
+  const buttonText = normalizePrefix(source.buttonText) || '知道了';
+  const imageUrl = normalizePrefix(source.imageUrl) || homeNoticeImageDataUrl();
+
+  if (source.enabled === false) {
+    return {
+      enabled: false,
+      buttonText,
+      imageUrl
+    };
+  }
+
+  return {
+    enabled: Boolean(imageUrl),
+    buttonText,
+    imageUrl
   };
 }
 
@@ -1239,6 +1281,8 @@ function loadConfig() {
     configDir: path.dirname(configPath),
     stateDir,
     appTitle: normalizePrefix(rawConfig.appTitle) || '学习入口',
+    homeNotice: normalizeHomeNotice(rawConfig.homeNotice),
+    navigationBannerText: normalizePrefix(rawConfig.navigationBannerText) || DEFAULT_NAVIGATION_BANNER_TEXT,
     startUrl,
     baseClassrooms: serializeOnlineClassrooms(classrooms),
     classrooms,
@@ -1317,6 +1361,78 @@ function resolveLearningTool(learningToolId) {
   }
 
   return learningToolDefinitions[0] || null;
+}
+
+function bannerAssetPath(baseName) {
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'banner', `${baseName}.png`),
+    path.join(path.resolve(__dirname, '..'), 'banner', `${baseName}.png`),
+    path.join(path.dirname(process.execPath), 'banner', `${baseName}.svg`),
+    path.join(path.resolve(__dirname, '..'), 'banner', `${baseName}.svg`),
+    path.join(__dirname, 'assets', `${baseName}.svg`)
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Ignore path probe failures.
+    }
+  }
+
+  return '';
+}
+
+function bannerAssetDataUrl(baseName) {
+  const assetPath = bannerAssetPath(baseName);
+
+  if (!assetPath) {
+    return '';
+  }
+
+  try {
+    const stats = fs.statSync(assetPath);
+    const cacheKey = normalizePrefix(assetPath);
+    const cached = bannerAssetCache.get(cacheKey);
+
+    if (
+      cached &&
+      cached.mtimeMs === stats.mtimeMs &&
+      cached.size === stats.size
+    ) {
+      return cached.dataUrl;
+    }
+
+    const extension = path.extname(assetPath).toLowerCase();
+    let dataUrl = '';
+
+    if (extension === '.png') {
+      const buffer = fs.readFileSync(assetPath);
+      dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
+    } else {
+      const svg = fs.readFileSync(assetPath, 'utf8');
+      dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`;
+    }
+
+    bannerAssetCache.set(cacheKey, {
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      dataUrl
+    });
+    return dataUrl;
+  } catch {
+    return '';
+  }
+}
+
+function navigationBannerDataUrl() {
+  return bannerAssetDataUrl('navigation-banner');
+}
+
+function homeNoticeImageDataUrl() {
+  return bannerAssetDataUrl('home-notice');
 }
 
 function matchesPrefix(url, prefixes) {
@@ -1737,6 +1853,302 @@ function learningToolEntryTarget(toolId) {
   return `internal:learning-tool:${toolId}`;
 }
 
+function isClassroomShellUrl(value) {
+  const normalized = normalizePrefix(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const parsed = parseUrl(normalized);
+
+  if (!parsed || parsed.protocol !== 'file:') {
+    return false;
+  }
+
+  try {
+    return path.basename(fileURLToPath(parsed)).toLowerCase() === 'classroom-shell.html';
+  } catch {
+    return false;
+  }
+}
+
+function isClassroomShellActive() {
+  return Boolean(
+    activeClassroomShell &&
+      mainWindow &&
+      !mainWindow.isDestroyed() &&
+      isClassroomShellUrl(mainWindow.webContents.getURL())
+  );
+}
+
+function activeNavigationWebContents() {
+  if (isClassroomShellActive() && classroomBrowserView && classroomBrowserView.webContents && !classroomBrowserView.webContents.isDestroyed()) {
+    return classroomBrowserView.webContents;
+  }
+
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+}
+
+function layoutClassroomBrowserView() {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    !classroomBrowserView ||
+    !isClassroomShellActive()
+  ) {
+    return;
+  }
+
+  const contentBounds = mainWindow.getContentBounds();
+  const topOffset = CLASSROOM_SHELL_TOP_HEIGHT;
+  classroomBrowserView.setBounds({
+    x: 0,
+    y: topOffset,
+    width: Math.max(0, contentBounds.width),
+    height: Math.max(0, contentBounds.height - topOffset)
+  });
+  classroomBrowserView.setAutoResize({
+    width: true,
+    height: true
+  });
+}
+
+function destroyClassroomBrowserView(options = {}) {
+  const preserveState = Boolean(options.preserveState);
+
+  if (mainWindow && !mainWindow.isDestroyed() && classroomBrowserView) {
+    try {
+      if (typeof mainWindow.removeBrowserView === 'function') {
+        mainWindow.removeBrowserView(classroomBrowserView);
+      } else if (typeof mainWindow.setBrowserView === 'function' && mainWindow.getBrowserView() === classroomBrowserView) {
+        mainWindow.setBrowserView(null);
+      }
+    } catch {
+      // Ignore detach failures.
+    }
+  }
+
+  if (classroomBrowserView) {
+    const contents = classroomBrowserView.webContents;
+    classroomBrowserView = null;
+
+    if (contents && !contents.isDestroyed()) {
+      try {
+        contents.destroy();
+      } catch {
+        // Ignore destroy failures.
+      }
+    }
+  }
+
+  if (!preserveState) {
+    activeClassroomShell = null;
+  }
+}
+
+async function applyCompatibilityPatch(targetWebContents = activeNavigationWebContents()) {
+  if (!targetWebContents || targetWebContents.isDestroyed()) {
+    return;
+  }
+
+  const currentUrl = targetWebContents.getURL();
+  const parsed = parseUrl(currentUrl);
+
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+    return;
+  }
+
+  try {
+    await targetWebContents.executeJavaScript(LEGACY_MEDIA_COMPATIBILITY_SCRIPT, true);
+  } catch {
+    // Ignore compatibility injection failures.
+  }
+}
+
+function attachClassroomBrowserViewHandlers(browserView) {
+  const contents = browserView.webContents;
+  contents.setUserAgent(MAIN_WINDOW_USER_AGENT);
+  contents.setZoomFactor(currentWindowZoomFactor);
+
+  contents.on('before-input-event', (event, input) => {
+    if (shouldBlockShortcut(input)) {
+      event.preventDefault();
+      return;
+    }
+
+    if (isExitShortcut(input)) {
+      event.preventDefault();
+      requestAppQuit();
+    }
+  });
+
+  contents.on('will-navigate', blockNavigation);
+  contents.on('will-redirect', blockNavigation);
+  contents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+    logNavigationDebug('classroom-view-did-start-navigation', {
+      url,
+      isInPlace,
+      isMainFrame
+    });
+  });
+  contents.on('did-redirect-navigation', (_event, url, isInPlace, isMainFrame) => {
+    logNavigationDebug('classroom-view-did-redirect-navigation', {
+      url,
+      isInPlace,
+      isMainFrame
+    });
+  });
+  contents.on('did-finish-load', () => {
+    if (activeClassroomShell) {
+      activeClassroomShell.targetUrl = normalizePrefix(contents.getURL()) || activeClassroomShell.targetUrl;
+    }
+    logNavigationDebug('classroom-view-did-finish-load', {
+      url: contents.getURL()
+    });
+    void applyCompatibilityPatch(contents);
+    scheduleSessionPersist();
+  });
+  contents.on('did-navigate', (_event, url) => {
+    if (activeClassroomShell) {
+      activeClassroomShell.targetUrl = normalizePrefix(url) || activeClassroomShell.targetUrl;
+    }
+    logNavigationDebug('classroom-view-did-navigate', {
+      url
+    });
+    scheduleSessionPersist();
+  });
+  contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+    if (activeClassroomShell) {
+      activeClassroomShell.targetUrl = normalizePrefix(url) || activeClassroomShell.targetUrl;
+    }
+    logNavigationDebug('classroom-view-did-navigate-in-page', {
+      url,
+      isMainFrame
+    });
+    scheduleSessionPersist();
+  });
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    logNavigationDebug('classroom-view-did-fail-load', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame
+    });
+  });
+  contents.on('render-process-gone', (_event, details) => {
+    logNavigationDebug('classroom-view-render-process-gone', details || {});
+  });
+  contents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level <= 1) {
+      logNavigationDebug('classroom-view-renderer-console', {
+        level,
+        message: normalizePrefix(message),
+        line,
+        sourceId: normalizePrefix(sourceId)
+      });
+    }
+  });
+  contents.on('context-menu', (event) => event.preventDefault());
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedTopLevel(url)) {
+      logNavigationDebug('classroom-view-window-open-allow', {
+        url,
+        decision: topLevelDecision(url)
+      });
+      setImmediate(() => {
+        if (contents && !contents.isDestroyed()) {
+          contents.loadURL(url);
+        }
+      });
+
+      return { action: 'deny' };
+    }
+
+    logBlockedRequest({ resourceType: 'window-open', url }, 'BLOCK_POPUP');
+    logNavigationDebug('classroom-view-window-open-deny', {
+      url,
+      decision: topLevelDecision(url)
+    });
+    return { action: 'deny' };
+  });
+}
+
+function ensureClassroomBrowserView() {
+  if (classroomBrowserView) {
+    return classroomBrowserView;
+  }
+
+  classroomBrowserView = new BrowserView({
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      devTools: false,
+      spellcheck: false,
+      preload: path.join(__dirname, 'preload.js'),
+      partition: SESSION_PARTITION
+    }
+  });
+  attachClassroomBrowserViewHandlers(classroomBrowserView);
+  return classroomBrowserView;
+}
+
+async function syncClassroomBrowserView(options = {}) {
+  if (!isClassroomShellActive() || !activeClassroomShell) {
+    return;
+  }
+
+  const browserView = ensureClassroomBrowserView();
+
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.getBrowserView() !== browserView) {
+    mainWindow.setBrowserView(browserView);
+  }
+
+  layoutClassroomBrowserView();
+
+  const desiredUrl = normalizePrefix(options.targetUrl || activeClassroomShell.targetUrl);
+  const currentUrl = normalizePrefix(browserView.webContents.getURL());
+
+  if (!desiredUrl) {
+    return;
+  }
+
+  if (options.forceLoad || currentUrl !== desiredUrl) {
+    await browserView.webContents.loadURL(desiredUrl);
+  }
+}
+
+function loadClassroomShell(classroom, targetUrl) {
+  const normalizedTarget = normalizePrefix(targetUrl);
+
+  if (!normalizedTarget || !mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  activeClassroomShell = {
+    classroomId: classroom ? classroom.id : '',
+    targetUrl: normalizedTarget
+  };
+
+  if (isClassroomShellActive()) {
+    void syncClassroomBrowserView({
+      targetUrl: normalizedTarget,
+      forceLoad: true
+    });
+    return;
+  }
+
+  destroyClassroomBrowserView({
+    preserveState: true
+  });
+  logNavigationDebug('load-classroom-shell', {
+    classroomId: classroom ? classroom.id : '',
+    targetUrl: normalizedTarget
+  });
+  mainWindow.loadFile(internalPagePath('classroomShell'));
+}
+
 function resolveNativeModuleDefinition(moduleId) {
   return nativeModuleIndex.get(normalizePrefix(moduleId)) || resolveNativeModule(moduleId);
 }
@@ -1791,6 +2203,7 @@ function launchLearningToolEntry(toolId) {
 }
 
 function loadHomePage(reason = 'manual') {
+  destroyClassroomBrowserView();
   logNavigationDebug('load-home-page', {
     reason
   });
@@ -1798,6 +2211,7 @@ function loadHomePage(reason = 'manual') {
 }
 
 function loadLibraryPage(libraryId) {
+  destroyClassroomBrowserView();
   const library = resolveLibrary(libraryId);
 
   if (!library) {
@@ -1817,6 +2231,7 @@ function loadLibraryPage(libraryId) {
 }
 
 function loadStudentPlanPage() {
+  destroyClassroomBrowserView();
   logNavigationDebug('load-student-plan-page');
   mainWindow.loadFile(internalPagePath('studentPlan'));
 }
@@ -1870,11 +2285,14 @@ function navigateMainWindow(target) {
     return false;
   }
 
-  logNavigationDebug('navigate-main-window-load-url', {
+  const classroom = resolveClassroomForUrl(normalizedTarget) || resolveClassroom(activeClassroomShell && activeClassroomShell.classroomId);
+
+  logNavigationDebug('navigate-main-window-load-classroom-shell', {
     target: normalizedTarget,
-    decision: topLevelDecision(normalizedTarget)
+    decision: topLevelDecision(normalizedTarget),
+    classroomId: classroom ? classroom.id : ''
   });
-  mainWindow.loadURL(normalizedTarget);
+  loadClassroomShell(classroom, normalizedTarget);
   return true;
 }
 
@@ -1889,7 +2307,10 @@ function launchStudyEntry(target, options = {}) {
   const success = navigateMainWindow(normalizedTarget);
 
   if (!success) {
-    return { success: false };
+    return {
+      success: false,
+      message: normalizedTarget ? '目标无法打开。' : '模块未配置。'
+    };
   }
 
   const completion = markScheduleCompletedForToday(options);
@@ -1905,14 +2326,18 @@ function launchStudyEntry(target, options = {}) {
 }
 
 function goBackIfPossible() {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.canGoBack()) {
-    mainWindow.webContents.goBack();
+  const contents = activeNavigationWebContents();
+
+  if (contents && !contents.isDestroyed() && contents.canGoBack()) {
+    contents.goBack();
   }
 }
 
 function goForwardIfPossible() {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.canGoForward()) {
-    mainWindow.webContents.goForward();
+  const contents = activeNavigationWebContents();
+
+  if (contents && !contents.isDestroyed() && contents.canGoForward()) {
+    contents.goForward();
   }
 }
 
@@ -1944,63 +2369,38 @@ function resolveClassroomForUrl(url) {
 }
 
 function currentNavigationModel() {
+  if (isClassroomShellActive()) {
+    const contents = activeNavigationWebContents();
+    const url = contents && !contents.isDestroyed() ? contents.getURL() : normalizePrefix(activeClassroomShell && activeClassroomShell.targetUrl);
+    const classroom = resolveClassroomForUrl(url) || resolveClassroom(activeClassroomShell && activeClassroomShell.classroomId);
+
+    return buildClassroomNavigationUiModel({
+      canGoBack: Boolean(contents && !contents.isDestroyed() && contents.canGoBack()),
+      canGoForward: Boolean(contents && !contents.isDestroyed() && contents.canGoForward()),
+      bannerText: appConfig.navigationBannerText,
+      bannerImageUrl: navigationBannerDataUrl(),
+      classroom,
+      currentTarget: url,
+      studentPlanTarget: studentPlanTarget()
+    });
+  }
+
   const url = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : '';
-  const parsed = parseUrl(url);
-  const model = {
+  return buildNavigationUiModel({
+    url,
     canGoBack: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.canGoBack()),
     canGoForward: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.canGoForward()),
-    crumbs: []
-  };
-
-  if (!parsed) {
-    model.crumbs = [{ label: '首页', target: 'internal:home', current: true }];
-    return model;
-  }
-
-  if (parsed.protocol === 'file:') {
-    const fileName = path.basename(fileURLToPath(parsed)).toLowerCase();
-
-    if (fileName === 'library.html') {
-      const library = resolveLibrary(parsed.searchParams.get('library'));
-      model.crumbs = [
-        { label: '首页', target: 'internal:home', current: false },
-        {
-          label: library ? library.title : '媒体库',
-          target: library ? libraryTarget(library.id) : 'internal:home',
-          current: true
-        }
-      ];
-      return model;
-    }
-
-    if (fileName === 'student-plan.html') {
-      model.crumbs = [
-        { label: '首页', target: 'internal:home', current: false },
-        { label: '学生计划', target: studentPlanTarget(), current: true }
-      ];
-      return model;
-    }
-
-    model.crumbs = [{ label: '首页', target: 'internal:home', current: true }];
-    return model;
-  }
-
-  const classroom = resolveClassroomForUrl(url);
-
-  model.crumbs.push({ label: '首页', target: 'internal:home', current: false });
-
-  if (classroom) {
-    model.crumbs.push({ label: classroom.title, target: classroom.entryUrl, current: true });
-    return model;
-  }
-
-  model.crumbs.push({
-    label: '当前页面',
-    target: url,
-    current: true
+    bannerText: appConfig.navigationBannerText,
+    bannerImageUrl: navigationBannerDataUrl(),
+    studentPlanTarget: studentPlanTarget(),
+    resolveLibrary,
+    libraryTarget,
+    resolveClassroomForUrl,
+    allowStateReset: isAllowedTopLevel(url),
+    parseUrl,
+    pathModule: path,
+    fileURLToPath
   });
-
-  return model;
 }
 
 function cookieToSetDetails(cookie) {
@@ -2069,25 +2469,6 @@ function persistSessionState() {
     .then(() => writeSessionState());
 
   return sessionPersistPromise.catch(() => {});
-}
-
-async function applyCompatibilityPatch() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-
-  const currentUrl = mainWindow.webContents.getURL();
-  const parsed = parseUrl(currentUrl);
-
-  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
-    return;
-  }
-
-  try {
-    await mainWindow.webContents.executeJavaScript(LEGACY_MEDIA_COMPATIBILITY_SCRIPT, true);
-  } catch {
-    // Ignore compatibility injection failures.
-  }
 }
 
 function scheduleSessionPersist(delayMs = 150) {
@@ -2852,6 +3233,10 @@ function applyWindowZoomFactor(factor, options = {}) {
     mainWindow.webContents.setZoomFactor(currentWindowZoomFactor);
   }
 
+  if (classroomBrowserView && classroomBrowserView.webContents && !classroomBrowserView.webContents.isDestroyed()) {
+    classroomBrowserView.webContents.setZoomFactor(currentWindowZoomFactor);
+  }
+
   return currentWindowZoomFactor;
 }
 
@@ -3274,65 +3659,19 @@ function buildStudyCalendarModel(selectedDate = new Date()) {
 }
 
 function buildHomeModel() {
-  const cards = [
-    ...nativeModuleDefinitions.map((moduleDefinition) => ({
-      id: moduleDefinition.id,
-      title: moduleDefinition.title,
-      tone: moduleDefinition.tone,
-      badge: moduleDefinition.badge || '作业模块',
-      target: nativeModuleTarget(moduleDefinition.id),
-      scheduleTargetId: moduleDefinition.id,
-      libraryId: ''
-    })),
-    ...classroomDefinitions.map((classroom) => ({
-      id: classroom.id,
-      title: classroom.title,
-      tone: classroom.tone,
-      badge: '在线课堂',
-      target: classroom.entryUrl,
-      scheduleTargetId: classroom.id,
-      classroomId: classroom.id,
-      libraryId: '',
-      supportsStateReset: isCourseEcosystemOrigin(classroom.entryUrl)
-    })),
-    ...libraryDefinitions.map((library) => ({
-      id: library.id,
-      title: library.title,
-      tone: library.tone,
-      badge: '百度网盘',
-      target: libraryTarget(library.id),
-      scheduleTargetId: library.id,
-      libraryId: library.id
-    })),
-    ...learningToolDefinitions.map((learningTool) => ({
-      id: learningTool.id,
-      title: learningTool.title,
-      tone: learningTool.tone,
-      badge: '学习工具',
-      target: learningToolEntryTarget(learningTool.id),
-      scheduleTargetId: learningTool.id,
-      libraryId: ''
-    }))
-  ];
-
-  cards.sort((left, right) => {
-    if (left.id === 'homework-module') {
-      return -1;
-    }
-
-    if (right.id === 'homework-module') {
-      return 1;
-    }
-
-    return 0;
-  });
-
-  return {
+  return buildHomeUiModel({
     appTitle: appConfig.appTitle,
+    homeNotice: appConfig.homeNotice,
     todaySchedule: buildStudyScheduleModel(),
     calendarSchedule: buildStudyCalendarModel(),
-    cards
-  };
+    nativeModules: nativeModuleDefinitions,
+    classrooms: classroomDefinitions,
+    libraries: libraryDefinitions,
+    learningTools: learningToolDefinitions,
+    nativeModuleTarget,
+    libraryTarget,
+    learningToolEntryTarget
+  });
 }
 
 function buildPlanItemsForDate(dateKey, options = {}) {
@@ -6383,6 +6722,7 @@ function createMainWindow() {
   mainWindow.webContents.setZoomFactor(currentWindowZoomFactor);
   mainWindow.on('closed', () => {
     logNavigationDebug('main-window-closed');
+    destroyClassroomBrowserView();
     mainWindow = null;
   });
   mainWindow.on('close', (event) => {
@@ -6394,6 +6734,7 @@ function createMainWindow() {
     requestAppQuit();
   });
   mainWindow.on('enter-full-screen', () => {
+    layoutClassroomBrowserView();
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('window:fullscreen-changed', {
         fullscreen: true
@@ -6401,11 +6742,21 @@ function createMainWindow() {
     }
   });
   mainWindow.on('leave-full-screen', () => {
+    layoutClassroomBrowserView();
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('window:fullscreen-changed', {
         fullscreen: false
       });
     }
+  });
+  mainWindow.on('resize', () => {
+    layoutClassroomBrowserView();
+  });
+  mainWindow.on('maximize', () => {
+    layoutClassroomBrowserView();
+  });
+  mainWindow.on('unmaximize', () => {
+    layoutClassroomBrowserView();
   });
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -6440,6 +6791,11 @@ function createMainWindow() {
     logNavigationDebug('did-finish-load', {
       url: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : ''
     });
+    if (isClassroomShellUrl(mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getURL() : '')) {
+      void syncClassroomBrowserView({
+        forceLoad: true
+      });
+    }
     void applyCompatibilityPatch();
     scheduleSessionPersist();
   });
@@ -6557,7 +6913,27 @@ function registerIpc() {
   ipcMain.on('shell:save-site-credentials', (_event, payload = {}) => {
     saveSiteCredentialSnapshot(payload);
   });
-  ipcMain.handle('shell:reset-course-site-state', async () => clearCourseSiteState());
+  ipcMain.handle('shell:reset-course-site-state', async () => {
+    await clearCourseSiteState();
+
+    if (isClassroomShellActive() && activeClassroomShell) {
+      await syncClassroomBrowserView({
+        targetUrl: activeClassroomShell.targetUrl,
+        forceLoad: true
+      });
+    }
+  });
+  ipcMain.handle('shell:refresh-current-classroom', async () => {
+    if (!isClassroomShellActive() || !activeClassroomShell) {
+      return { success: false };
+    }
+
+    await syncClassroomBrowserView({
+      targetUrl: activeClassroomShell.targetUrl,
+      forceLoad: true
+    });
+    return { success: true };
+  });
   ipcMain.handle('shell:get-home-model', async (_event, options = {}) => {
     if (options && options.syncRemote && appConfig.remoteSchedule.enabled) {
       await syncRemoteStudySchedule();
@@ -6754,6 +7130,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   allowAppQuit = true;
+  destroyClassroomBrowserView();
 
   if (sessionPersistTimer) {
     clearTimeout(sessionPersistTimer);

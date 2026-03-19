@@ -4,35 +4,30 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>学习入口</title>
+    <title>StudyGate</title>
     <link rel="stylesheet" href="./home.css" />
   </head>
   <body>
     <div class="glow glow-a"></div>
     <div class="glow glow-b"></div>
+
+    <div id="home-notice" class="home-notice" hidden>
+      <div class="home-notice__dialog">
+        <img id="home-notice-image" class="home-notice__image" alt="提醒图片" />
+        <button id="home-notice-dismiss" class="home-notice__button" type="button">知道了</button>
+      </div>
+    </div>
+
     <main class="shell">
-      <header class="hero">
-        <h1 id="title">学习入口</h1>
-        <div class="hero__actions">
-          <button id="refresh-home-button" class="hero__button hero__button--soft" type="button">刷新</button>
-          <button id="student-plan-button" class="hero__button" type="button">学生计划</button>
-        </div>
-      </header>
       <section class="dashboard">
-        <section id="card-grid" class="card-grid" aria-label="学习入口"></section>
-        <aside class="schedule-panel" aria-label="今日课程">
-          <section class="study-box study-box--today">
-            <div class="study-box__head">
-              <div>
-                <h2>当日计划</h2>
-              </div>
-              <p id="schedule-date" class="study-box__date"></p>
-            </div>
-            <div id="schedule-list" class="schedule-list"></div>
-          </section>
+        <section class="dashboard__column dashboard__column--modules" aria-label="学习模块">
+          <div id="card-grid" class="card-grid"></div>
+        </section>
+
+        <section class="dashboard__column dashboard__column--calendar">
           <section class="study-box study-box--calendar">
             <div class="study-box__head">
               <div>
@@ -46,7 +41,19 @@
             </div>
             <div id="calendar-selected-list" class="calendar-selected-list"></div>
           </section>
-        </aside>
+        </section>
+
+        <section class="dashboard__column dashboard__column--today">
+          <section class="study-box study-box--today">
+            <div class="study-box__head">
+              <div>
+                <h2>当日计划</h2>
+              </div>
+              <p id="schedule-date" class="study-box__date"></p>
+            </div>
+            <div id="schedule-list" class="schedule-list"></div>
+          </section>
+        </section>
       </section>
     </main>
     <script src="./home.js"></script>

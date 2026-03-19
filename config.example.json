@@ -1,5 +1,11 @@
 {
   "appTitle": "学习入口",
+  "homeNotice": {
+    "title": "开始学习",
+    "message": "先看今天的计划，再进入课程。",
+    "buttonText": "开始"
+  },
+  "navigationBannerText": "先看计划，再开始。",
   "startUrl": "https://www.talk915.com/student/login/",
   "onlineClassrooms": [
     {
