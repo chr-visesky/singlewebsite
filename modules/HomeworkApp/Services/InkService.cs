@@ -1,10 +1,7 @@
 using System;
 using System.IO;
-using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 
 namespace HomeworkApp.Services
 {
@@ -58,50 +55,32 @@ namespace HomeworkApp.Services
         }
 
         /// <summary>
-        /// Creates a visual with the ink strokes for printing by using an offscreen InkCanvas
+        /// Creates a visual with ink strokes for printing by drawing the strokes directly
+        /// into the print coordinate space. This preserves the original page-relative
+        /// stroke positions instead of rasterizing to the strokes' local bounds.
         /// </summary>
-        public static DrawingVisual CreateInkVisual(StrokeCollection strokes, double scaleX, double scaleY)
+        public static DrawingVisual CreateInkVisual(
+            StrokeCollection strokes,
+            double scaleX,
+            double scaleY,
+            double offsetX = 0,
+            double offsetY = 0)
         {
             if (strokes == null || strokes.Count == 0)
             {
                 return new DrawingVisual();
             }
 
-            // Transform strokes for print
-            var matrix = new Matrix(scaleX, 0, 0, scaleY, 0, 0);
+            // Transform strokes into print coordinates while preserving their original
+            // page-relative offsets.
             var transformedStrokes = strokes.Clone();
+            var matrix = new Matrix(scaleX, 0, 0, scaleY, offsetX, offsetY);
             transformedStrokes.Transform(matrix, false);
 
-            // Get bounds of strokes
-            var bounds = transformedStrokes.GetBounds();
-
-            if (bounds.IsEmpty)
-            {
-                return new DrawingVisual();
-            }
-
-            // Create an InkCanvas to render the strokes
-            var inkCanvas = new InkCanvas
-            {
-                Width = bounds.Right + 1,
-                Height = bounds.Bottom + 1
-            };
-            inkCanvas.Strokes.Add(transformedStrokes);
-
-            // Render the InkCanvas to a bitmap
-            var rtb = new RenderTargetBitmap(
-                (int)inkCanvas.Width,
-                (int)inkCanvas.Height,
-                96, 96,
-                PixelFormats.Pbgra32);
-
-            rtb.Render(inkCanvas);
-
-            // Create a visual with the rendered bitmap
             var visual = new DrawingVisual();
             using (var context = visual.RenderOpen())
             {
-                context.DrawImage(rtb, new Rect(0, 0, rtb.PixelWidth, rtb.PixelHeight));
+                transformedStrokes.Draw(context);
             }
 
             return visual;

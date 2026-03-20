@@ -12,21 +12,19 @@
   </head>
   <body>
     <main class="page">
-      <header class="page-header">
+      <div class="library-hidden-meta" hidden aria-hidden="true">
         <div>
           <h1 id="library-title">加载中</h1>
           <p id="library-description" class="description"></p>
         </div>
-        <div class="actions">
-          <button id="authorize-netdisk" type="button" class="ghost">连接百度网盘</button>
-        </div>
-      </header>
+      </div>
 
       <section class="layout">
         <aside class="playlist">
           <div class="playlist-head">
             <h2>目录</h2>
             <div class="playlist-head__side">
+              <button id="authorize-netdisk" type="button" class="ghost ghost--tiny">连接百度网盘</button>
               <span id="playlist-count"></span>
               <button id="playlist-refresh" type="button" class="ghost ghost--tiny">刷新</button>
             </div>

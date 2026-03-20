@@ -12,6 +12,7 @@ let reminderAudio = null;
 let reminderAlarmContext = null;
 let zoomShortcutBound = false;
 let layoutAdjustObserver = null;
+let lastReportedToolbarHeight = -1;
 
 function dispatchToolbarAction(actionId) {
   window.dispatchEvent(
@@ -586,6 +587,24 @@ function offsetTopAnchoredElements() {
   });
 }
 
+function reportToolbarHeight() {
+  if (!isTopFrame() || window.location.protocol !== 'file:') {
+    return;
+  }
+
+  const host = document.getElementById(TOOLBAR_HOST_ID);
+  const height = host ? Math.max(0, Math.ceil(host.getBoundingClientRect().height)) : 0;
+
+  if (height === lastReportedToolbarHeight) {
+    return;
+  }
+
+  lastReportedToolbarHeight = height;
+  ipcRenderer.send('shell:update-toolbar-height', {
+    height
+  });
+}
+
 function ensureToolbarElements() {
   if (!isTopFrame() || !document.documentElement || !document.body) {
     return null;
@@ -985,6 +1004,10 @@ async function refreshToolbar() {
 
     elements.crumbs.append(crumbNode);
   });
+
+  window.requestAnimationFrame(() => {
+    reportToolbarHeight();
+  });
 }
 
 function startToolbarRefresh() {
@@ -1015,6 +1038,9 @@ function bootstrapToolbar() {
       void refreshToolbar();
     });
     window.addEventListener('popstate', () => {
+      void refreshToolbar();
+    });
+    window.addEventListener('resize', () => {
       void refreshToolbar();
     });
     document.addEventListener('visibilitychange', () => {

@@ -784,7 +784,7 @@ exports.main = async (event = {}) => {
         });
       }
 
-      if (requestToken !== READ_TOKEN && requestToken !== STUDENT_WRITE_TOKEN) {
+      if (requestToken !== READ_TOKEN) {
         return jsonResponse(403, {
           error: 'forbidden'
         });

@@ -111,6 +111,7 @@ function buildNavigationUiModel(options = {}) {
     }
 
     if (fileName === 'student-plan.html') {
+      model.actions = [{ id: 'refresh-student-plan', label: '刷新' }];
       model.crumbs = [
         { label: '首页', target: 'internal:home', current: false },
         { label: '学生计划', target: options.studentPlanTarget, current: true }

@@ -123,7 +123,7 @@
                     </Grid>
 
                     <!-- Menu Button -->
-                    <Button x:Name="BtnMenu" Content="☰ 菜单" Style="{StaticResource AssistantRectButtonStyle}"
+                    <Button x:Name="BtnMenu" AutomationProperties.AutomationId="BtnMenu" Content="☰ 菜单" Style="{StaticResource AssistantRectButtonStyle}"
                             FontSize="11" Padding="8,4" Margin="0,6,0,0" Click="BtnMenu_Click"/>
                 </StackPanel>
 
@@ -180,8 +180,10 @@
                                                                 </Style>
                                                             </ToggleButton.Style>
                                                         </ToggleButton>
-                                                        <ContentPresenter Name="Header" Grid.Column="1"
-                                                                        ContentSource="Header"/>
+                                                        <TextBlock Name="HeaderText"
+                                                                   Grid.Column="1"
+                                                                   Text="{TemplateBinding Header}"
+                                                                   Foreground="{TemplateBinding Foreground}"/>
                                                     </Grid>
                                                 </Border>
                                                 <ItemsPresenter Name="ItemsPresenter" Margin="10,0,0,0"/>
@@ -197,10 +199,17 @@
                                                     <Setter TargetName="Bd" Property="Background" Value="#0F000000"/>
                                                 </Trigger>
                                                 <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="Bd" Property="Background" Value="#14000000"/>
+                                                    <Setter TargetName="HeaderText" Property="Foreground" Value="#4A90E2"/>
                                                 </Trigger>
+                                                <MultiTrigger>
+                                                    <MultiTrigger.Conditions>
+                                                        <Condition Property="IsSelected" Value="True"/>
+                                                        <Condition Property="IsSelectionActive" Value="False"/>
+                                                    </MultiTrigger.Conditions>
+                                                    <Setter TargetName="HeaderText" Property="Foreground" Value="#4A90E2"/>
+                                                </MultiTrigger>
                                                 <Trigger Property="IsEnabled" Value="False">
-                                                    <Setter Property="Foreground" Value="{StaticResource MutedText}"/>
+                                                    <Setter TargetName="HeaderText" Property="Foreground" Value="{StaticResource MutedText}"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -317,11 +326,12 @@
                     Visibility="Collapsed"/>
         </Grid>
 
-        <StackPanel Grid.Column="3"
+        <StackPanel Grid.ColumnSpan="4"
                     VerticalAlignment="Bottom"
                     HorizontalAlignment="Right"
                     Margin="0,0,10,10"
-                    Background="Transparent">
+                    Background="Transparent"
+                    Panel.ZIndex="2000">
             <!-- Collapsible Tool Panel -->
             <Border x:Name="ToolPanel"
                     Visibility="Collapsed"
@@ -412,11 +422,11 @@
                             Click="BtnClearDraft_Click" ToolTip="清空草稿"/>
 
                     <!-- Page Ratio -->
-                    <Button x:Name="BtnPageRatio" Content="A4 竖" Style="{StaticResource SecondaryButtonStyle}"
+                    <Button x:Name="BtnPageRatio" AutomationProperties.AutomationId="BtnPageRatio" Content="A4 竖" Style="{StaticResource SecondaryButtonStyle}"
                             FontSize="9" Padding="6,3" Margin="0,8,0,0" Click="BtnPageRatio_Click"/>
 
                     <!-- Print -->
-                    <Button x:Name="BtnPrint" Content="🖨 打印" Style="{StaticResource PrimaryButtonStyle}"
+                    <Button x:Name="BtnPrint" AutomationProperties.AutomationId="BtnPrint" Content="🖨 打印" Style="{StaticResource PrimaryButtonStyle}"
                             FontSize="9" Padding="8,3" Margin="0,4,0,0" Click="BtnPrint_Click"/>
                     </StackPanel>
                 </Border>
@@ -428,7 +438,7 @@
                     BorderThickness="1"
                     Padding="6"
                     Margin="0,-1,0,0">
-                <Button x:Name="BtnTools" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
+                <Button x:Name="BtnTools" AutomationProperties.AutomationId="BtnTools" Content="✏" Style="{StaticResource SecondaryButtonStyle}"
                         Width="40" Height="40" FontSize="18" Padding="0"
                         Click="BtnTools_Click" ToolTip="工具"/>
             </Border>

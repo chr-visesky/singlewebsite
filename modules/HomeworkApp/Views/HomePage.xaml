@@ -22,6 +22,7 @@
         <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" MaxWidth="560" HorizontalAlignment="Center" VerticalAlignment="Center">
             <StackPanel>
                 <Button x:Name="BtnNewHomework"
+                        AutomationProperties.AutomationId="BtnNewHomework"
                         Content="+ 新建作业"
                         Style="{StaticResource PrimaryButtonStyle}"
                         FontSize="18"
@@ -30,6 +31,7 @@
                         Click="BtnNewHomework_Click"/>
 
                 <Button x:Name="BtnContinueHomework"
+                        AutomationProperties.AutomationId="BtnContinueHomework"
                         Content="继续上次作业"
                         Style="{StaticResource SecondaryButtonStyle}"
                         FontSize="16"
@@ -44,6 +46,7 @@
                     </Grid.ColumnDefinitions>
 
                     <Button x:Name="BtnHistory"
+                            AutomationProperties.AutomationId="BtnHistory"
                             Grid.Column="0"
                             Content="历史作业"
                             Style="{StaticResource SecondaryButtonStyle}"
@@ -52,6 +55,7 @@
                             Click="BtnHistory_Click"/>
 
                     <Button x:Name="BtnSettings"
+                            AutomationProperties.AutomationId="BtnSettings"
                             Grid.Column="1"
                             Content="设置"
                             Style="{StaticResource SecondaryButtonStyle}"

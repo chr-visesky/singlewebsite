@@ -26,10 +26,9 @@ body {
 
 .shell {
   min-height: 100vh;
-  padding: 72px 38px 34px;
+  padding: 14px 38px 34px;
 }
 
-.hero,
 .panel__head,
 .section-head,
 .selected-item,
@@ -38,10 +37,6 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-
-.hero {
-  margin-bottom: 22px;
 }
 
 .status-banner {
@@ -76,24 +71,6 @@ body {
   margin-top: 4px;
   font-size: 13px;
   color: var(--muted);
-}
-
-.hero__actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.hero__eyebrow {
-  margin: 0 0 10px;
-  color: var(--accent);
-  font-size: 12px;
-  letter-spacing: 0.16em;
-}
-
-.hero h1 {
-  margin: 0;
-  font-size: 40px;
 }
 
 .ghost-button,
@@ -383,7 +360,7 @@ body {
 
 @media (max-width: 960px) {
   .shell {
-    padding: 72px 20px 20px;
+    padding: 14px 20px 20px;
   }
 
   .dashboard,

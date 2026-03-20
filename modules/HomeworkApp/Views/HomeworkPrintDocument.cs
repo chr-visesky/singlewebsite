@@ -2,43 +2,44 @@ using System;
 using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using HomeworkApp.Models;
 using HomeworkApp.Services;
 
 namespace HomeworkApp.Views
 {
     /// <summary>
-    /// Print document for homework pages
+    /// Print document for homework pages.
     /// </summary>
     public class HomeworkPrintDocument
     {
+        private readonly HomeworkPrintRenderer _renderer;
         private readonly JobSession _job;
-        private readonly DocumentService _documentService;
 
         public HomeworkPrintDocument(JobSession job, DocumentService documentService)
         {
             _job = job;
-            _documentService = documentService;
+            _renderer = new HomeworkPrintRenderer(job, documentService);
         }
 
         public void Print(PrintQueue printQueue, PrintTicket? printTicket = null)
         {
-            var printDialog = new PrintDialog();
-            printDialog.PrintQueue = printQueue;
-            printDialog.PrintTicket = printTicket ?? printQueue.UserPrintTicket ?? printQueue.DefaultPrintTicket;
+            var printDialog = new PrintDialog
+            {
+                PrintQueue = printQueue,
+                PrintTicket = printTicket ?? printQueue.UserPrintTicket ?? printQueue.DefaultPrintTicket ?? new PrintTicket()
+            };
+            printDialog.PrintTicket.PageOrientation = _job.IsPortrait ? PageOrientation.Portrait : PageOrientation.Landscape;
 
             var pageSize = ResolvePrintableArea(printQueue, printDialog.PrintTicket, printDialog);
+            var renderDpi = ResolveRenderDpi(printQueue, printDialog.PrintTicket);
+            var fixedDocument = _renderer.CreateBitmapFixedDocument(pageSize, renderDpi);
+            printDialog.PrintDocument(fixedDocument.DocumentPaginator, "Homework");
+        }
 
-            // Print all pages
-            for (int i = 0; i < _job.TotalPages; i++)
-            {
-                var page = GetPage(i, pageSize);
-                if (page != null)
-                {
-                    printDialog.PrintVisual(page, $"Homework Page {i + 1}");
-                }
-            }
+        public BitmapSource CreatePreviewBitmap(int pageNumber, Size pageSize, double dpi = 96)
+        {
+            return _renderer.RenderPagePreview(pageNumber, pageSize, dpi);
         }
 
         private static Size ResolvePrintableArea(PrintQueue printQueue, PrintTicket? printTicket, PrintDialog printDialog)
@@ -64,58 +65,47 @@ namespace HomeworkApp.Views
                 return new Size(printDialog.PrintableAreaWidth, printDialog.PrintableAreaHeight);
             }
 
-            return new Size(794, 1123);
+            return HomeworkPrintRenderer.DefaultPageSize;
         }
 
-        private Visual GetPage(int pageNumber, Size pageSize)
+        private static double ResolveRenderDpi(PrintQueue printQueue, PrintTicket? printTicket)
         {
-            try
+            double selectedDpi = ExtractDpi(printTicket?.PageResolution);
+            if (selectedDpi > 0)
             {
-                var docPage = _documentService
-                    .GetPageAsync(pageNumber, pageSize.Width, pageSize.Height)
-                    .ConfigureAwait(false)
-                    .GetAwaiter()
-                    .GetResult();
-
-                // Create visual for printing
-                var mainVisual = new ContainerVisual();
-
-                // Draw document image or blank page background
-                var imageVisual = new DrawingVisual();
-                using (var context = imageVisual.RenderOpen())
-                {
-                    context.DrawRectangle(Brushes.White, null, new Rect(0, 0, pageSize.Width, pageSize.Height));
-
-                    if (docPage != null && docPage.Image != null)
-                    {
-                        context.DrawImage(docPage.Image, new Rect(0, 0, pageSize.Width, pageSize.Height));
-                    }
-                }
-                mainVisual.Children.Add(imageVisual);
-
-                // Load and draw ink
-                string inkPath = _job.GetInkFilePath(pageNumber);
-                var strokes = InkService.LoadInk(inkPath);
-
-                if (strokes != null && strokes.Count > 0)
-                {
-                    // Calculate scale from logical to print coordinates
-                    double baseWidth = docPage?.Width > 0 ? docPage.Width : pageSize.Width;
-                    double baseHeight = docPage?.Height > 0 ? docPage.Height : pageSize.Height;
-                    double scaleX = pageSize.Width / baseWidth;
-                    double scaleY = pageSize.Height / baseHeight;
-
-                    var inkVisual = InkService.CreateInkVisual(strokes, scaleX, scaleY);
-                    mainVisual.Children.Add(inkVisual);
-                }
-
-                return mainVisual;
+                return Math.Max(300, selectedDpi);
             }
-            catch (Exception ex)
+
+            double userTicketDpi = ExtractDpi(printQueue.UserPrintTicket?.PageResolution);
+            if (userTicketDpi > 0)
             {
-                System.Diagnostics.Debug.WriteLine($"Error getting print page {pageNumber}: {ex.Message}");
-                return new DrawingVisual();
+                return Math.Max(300, userTicketDpi);
             }
+
+            double defaultTicketDpi = ExtractDpi(printQueue.DefaultPrintTicket?.PageResolution);
+            if (defaultTicketDpi > 0)
+            {
+                return Math.Max(300, defaultTicketDpi);
+            }
+
+            return 300;
+        }
+
+        private static double ExtractDpi(PageResolution? resolution)
+        {
+            if (resolution == null)
+            {
+                return 0;
+            }
+
+            double x = resolution.X ?? 0;
+            double y = resolution.Y ?? 0;
+            if (x > 0 && y > 0)
+            {
+                return Math.Min(x, y);
+            }
+
+            return x > 0 ? x : y;
         }
     }
 }

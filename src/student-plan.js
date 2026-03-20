@@ -1,7 +1,5 @@
 'use strict';
 
-const backHomeButton = document.getElementById('back-home');
-const refreshPlanButton = document.getElementById('refresh-plan');
 const accessStatusNode = document.getElementById('access-status');
 const accessStatusTitleNode = document.getElementById('access-status-title');
 const accessStatusMessageNode = document.getElementById('access-status-message');
@@ -505,14 +503,6 @@ async function saveForm() {
   }
 }
 
-backHomeButton.addEventListener('click', async () => {
-  await window.studyGate.navigate('internal:home');
-});
-
-refreshPlanButton.addEventListener('click', () => {
-  void refreshModel();
-});
-
 prevMonthButton.addEventListener('click', () => {
   void refreshModel({
     monthKey: shiftMonthKey(currentMonthKey, -1),
@@ -558,6 +548,11 @@ window.addEventListener('focus', () => {
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    void refreshModel();
+  }
+});
+window.addEventListener('studygate:toolbar-action', (event) => {
+  if (event && event.detail && event.detail.actionId === 'refresh-student-plan') {
     void refreshModel();
   }
 });

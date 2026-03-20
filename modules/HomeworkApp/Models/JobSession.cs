@@ -28,6 +28,9 @@ namespace HomeworkApp.Models
         [JsonProperty("currentPage")]
         public int CurrentPage { get; set; } = 0;
 
+        [JsonProperty("isPortrait")]
+        public bool IsPortrait { get; set; } = true;
+
         [JsonProperty("createTime")]
         public DateTime CreateTime { get; set; } = DateTime.Now;
 
