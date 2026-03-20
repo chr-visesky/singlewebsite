@@ -889,7 +889,6 @@ if (gotSingleInstanceLock) {
       loadSiteCredentialState();
       loadStudyToolsState();
       appendStartupDebug('state-loaded');
-      reminderRuntime.scheduleReminderAudioPrewarm(50);
       await startInternalServer();
       appendStartupDebug('internal-server-started');
       app.setName(appConfig.appTitle);

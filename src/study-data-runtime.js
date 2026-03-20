@@ -31,6 +31,7 @@ function createStudyDataRuntime(dependencies = {}) {
   let studentDeviceAccessStatus = createEmptyStudentDeviceAccessStatus();
   let remoteScheduleSyncSerial = 0;
   let studyDataMutationSerial = 0;
+  let lastReminderAudioPrewarmSignature = '';
 
   function currentConfig() {
     return getAppConfig();
@@ -88,6 +89,42 @@ function createStudyDataRuntime(dependencies = {}) {
     return studyDataMutationSerial;
   }
 
+  function reminderLeadMinutes() {
+    const appConfig = currentConfig();
+    return (Array.isArray(appConfig && appConfig.reminders && appConfig.reminders.leadMinutes)
+      ? appConfig.reminders.leadMinutes
+      : [5, 1]
+    )
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((left, right) => left - right);
+  }
+
+  function buildReminderAudioPrewarmSignature(parentItems = [], studentItems = []) {
+    const titles = [...new Set(
+      mergeStudySchedules(parentItems, studentItems)
+        .filter((item) => item && item.enabled !== false)
+        .map((item) => normalizePrefix(item.title))
+        .filter(Boolean)
+    )].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+
+    return JSON.stringify({
+      titles,
+      leadMinutes: reminderLeadMinutes()
+    });
+  }
+
+  function requestReminderAudioPrewarm(parentItems = [], studentItems = []) {
+    const signature = buildReminderAudioPrewarmSignature(parentItems, studentItems);
+
+    if (!signature || signature === lastReminderAudioPrewarmSignature) {
+      return;
+    }
+
+    lastReminderAudioPrewarmSignature = signature;
+    reminderAudioPrewarm();
+  }
+
   function applyStudyData(state, source = 'local') {
     const appConfig = currentConfig();
     const normalized = normalizeStudyData(
@@ -114,7 +151,7 @@ function createStudyDataRuntime(dependencies = {}) {
       remoteScheduleStatus.source = 'remote';
     }
 
-    reminderAudioPrewarm();
+    requestReminderAudioPrewarm(normalized.parentItems, normalized.studentItems);
   }
 
   function loadPersistedStudySchedule() {
