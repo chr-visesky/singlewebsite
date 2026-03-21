@@ -50,6 +50,10 @@ async function callAgentAccessAdmin(action, extra = {}) {
   return callNamedFunction(config.agentAccessAdminFunctionName, action, extra);
 }
 
+async function callHomeworkAdmin(action, extra = {}) {
+  return callNamedFunction(config.homeworkAdminFunctionName, action, extra);
+}
+
 function normalizeWeekdayValues(values) {
   return Array.from(new Set((values || []).map((item) => String(item))))
     .filter((item) => /^(?:[1-7])$/.test(item))
@@ -353,6 +357,73 @@ function decorateAgentAccessRequests(items) {
     : [];
 }
 
+function decorateAgentHomeworkRequests(items) {
+  return Array.isArray(items)
+    ? items
+        .map((item) => {
+          const rawStatus = item && typeof item.status === 'string' ? item.status : '';
+          const status = rawStatus === 'completed'
+            ? 'completed'
+            : rawStatus === 'approved'
+              ? 'approved'
+              : rawStatus === 'rejected'
+                ? 'rejected'
+                : rawStatus === 'pending_review'
+                  ? 'pending_review'
+                  : 'pending';
+          const operation = item && item.operation === 'delete' ? 'delete' : 'create';
+          const sourceFileCount = Math.max(0, Number(item && item.sourceFileCount) || 0);
+          const reviewRequired = operation === 'delete';
+
+          return {
+            id: item.id || '',
+            label: item.label || '学习助手',
+            subject: item.subject || '作业',
+            bucket: item.bucket || '课内',
+            targetDate: item.targetDate || '',
+            targetJobId: item.targetJobId || '',
+            summary: item.summary || (operation === 'delete' ? '作业删除申请' : '作业创建申请'),
+            note: item.note || '',
+            status,
+            statusLabel: status === 'completed'
+              ? '已完成'
+              : status === 'approved'
+                ? '已批准'
+                : status === 'rejected'
+                  ? '已驳回'
+                  : status === 'pending_review'
+                    ? '待审核'
+                    : '待同步',
+            operation,
+            operationLabel: operation === 'delete' ? '删除' : '创建',
+            reviewRequired,
+            sourceFileCount,
+            requestedAt: item.requestedAt || '',
+            requestedAtDisplay: formatCloudTimestamp(item.requestedAt, {
+              emptyText: '未记录'
+            }),
+            reviewedAt: item.reviewedAt || '',
+            reviewedAtDisplay: formatCloudTimestamp(item.reviewedAt, {
+              emptyText: '未处理'
+            }),
+            completedAt: item.completedAt || '',
+            completedAtDisplay: formatCloudTimestamp(item.completedAt, {
+              emptyText: '未完成'
+            }),
+            updatedAt: item.updatedAt || '',
+            resultJobId: item && item.result ? item.result.jobId || '' : ''
+          };
+        })
+        .sort(
+          (left, right) =>
+            Number(left.status !== 'pending_review') - Number(right.status !== 'pending_review') ||
+            Number(left.status !== 'pending') - Number(right.status !== 'pending') ||
+            (right.updatedAt || right.requestedAt || '').localeCompare(left.updatedAt || left.requestedAt || '') ||
+            left.subject.localeCompare(right.subject)
+        )
+    : [];
+}
+
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
@@ -414,6 +485,7 @@ module.exports = {
   emptyScheduleForm,
   callAdmin,
   callAgentAccessAdmin,
+  callHomeworkAdmin,
   callNamedFunction,
   normalizeWeekdayValues,
   normalizeSpecificDate,
@@ -427,6 +499,7 @@ module.exports = {
   decorateStudentDevices,
   decorateAgentPlanRequests,
   decorateAgentAccessRequests,
+  decorateAgentHomeworkRequests,
   buildHomeTiles,
   formatCloudTimestamp
 };

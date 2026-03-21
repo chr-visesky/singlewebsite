@@ -202,14 +202,17 @@ Invoke-RestMethod -Method Post -Uri 'https://你的地址/api/schedule' -Headers
    `subject`
    `bucket`
    `targetDate`
-   `sourceUrls`
+   `sourceUrls` / `sourceFiles` / `inlineSources`
 
 规则是：
 
 1. 不传 `sourceUrls` 会创建空白作业
-2. 传 `sourceUrls` 时，只支持“单个 PDF”或“多张图片”
-3. 请求先进云端队列，再由桌面端同步创建本地作业
-4. 创建完成后，可以再用 `action=getAgentHomeworkRequestStatus` + `requestId` 查询是否已变成 `completed`
+2. 传 `sourceUrls`、`sourceFiles` 或 `inlineSources` 时，只支持“单个 PDF”或“多张图片”
+3. `sourceFiles` 适合学习助手拿到本地临时图片文件时直接上传，不需要公网地址
+4. `inlineSources` 适合学习助手已经拿到 base64 图片内容的情况
+5. 也支持批量创建：`action=submitAgentHomeworkRequests` + `requests=[...]`
+6. 请求先进云端队列，再由桌面端同步创建本地作业
+7. 创建完成后，可以再用 `action=getAgentHomeworkRequestStatus` + `requestId`，或者 `action=getAgentHomeworkRequestStatuses` + `requestIds` 查询是否已变成 `completed`
 
 智能体删除作业时，同样调用 `homeworkPublic`：
 
@@ -217,7 +220,10 @@ Invoke-RestMethod -Method Post -Uri 'https://你的地址/api/schedule' -Headers
 2. `Authorization: Bearer 你的AGENT_WRITE_TOKEN`
 3. 字段至少要带：
    `jobId`
-4. 删除完成后，也可以再用 `action=getAgentHomeworkRequestStatus` + `requestId` 查询是否已变成 `completed`
+4. 删除请求会先进入 `pending_review`，家长要在小程序“系统管理 > 智能体作业申请”里批准
+5. 批量删除可用：`action=submitAgentHomeworkDeleteRequests` + `requests=[...]`
+6. 审核通过后，请求会变成 `approved`，桌面端下次同步时才会真正删除
+7. 删除完成后，也可以再用 `action=getAgentHomeworkRequestStatus` + `requestId`，或者 `action=getAgentHomeworkRequestStatuses` + `requestIds` 查询是否已变成 `completed`
 
 如果你想让学习助手自己申请 token，再给 `agentAccessPublic` 开 HTTP 访问。
 

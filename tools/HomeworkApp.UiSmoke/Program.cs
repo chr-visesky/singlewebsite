@@ -11,9 +11,10 @@ using System.Windows.Media.Imaging;
 using HomeworkApp.Models;
 using HomeworkApp.Services;
 using HomeworkApp.Views;
+using Newtonsoft.Json;
 
 var report = await HomeworkAppUiSmoke.RunAsync(args);
-var json = JsonSerializer.Serialize(report, new JsonSerializerOptions
+var json = System.Text.Json.JsonSerializer.Serialize(report, new JsonSerializerOptions
 {
     WriteIndented = true,
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -29,6 +30,7 @@ internal static class HomeworkAppUiSmoke
         return command switch
         {
             "run-print-smoke" => await RunPrintSmokeAsync(args.Skip(1).ToArray()),
+            "run-history-delete-smoke" => await RunHistoryDeleteSmokeAsync(args.Skip(1).ToArray()),
             _ => new SmokeReport
             {
                 Passed = false,
@@ -121,6 +123,86 @@ internal static class HomeworkAppUiSmoke
 
             await WaitForFileAsync(pdfPath, TimeSpan.FromSeconds(30));
             VerifyPrintedPdf(jobDir!, pdfPath, report);
+            report.Passed = report.FailedChecks.Count == 0;
+        }
+        catch (Exception exception)
+        {
+            report.FailedChecks.Add(exception.Message);
+            report.ErrorMessage = exception.ToString();
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(report.AppPath))
+            {
+                KillProcessesByPath(report.AppPath);
+            }
+        }
+
+        return report;
+    }
+
+    private static async Task<SmokeReport> RunHistoryDeleteSmokeAsync(string[] args)
+    {
+        var report = new SmokeReport();
+
+        try
+        {
+            string appPath = GetOption(args, "--app") ??
+                Path.Combine(Environment.CurrentDirectory, "dist", "StudyGate-win32-x64", "modules", "homework", "HomeworkApp.exe");
+            string? jobDir = GetOption(args, "--job-dir") ?? FindLatestJobDirectory();
+
+            report.AppPath = appPath;
+            report.JobDirectory = jobDir ?? string.Empty;
+
+            if (!File.Exists(appPath))
+            {
+                report.FailedChecks.Add($"HomeworkApp executable was not found: {appPath}");
+                return report;
+            }
+
+            if (string.IsNullOrWhiteSpace(jobDir) || !Directory.Exists(jobDir))
+            {
+                report.FailedChecks.Add("没有可删除的本地作业目录。");
+                return report;
+            }
+
+            var job = PromoteJobToHistory(jobDir);
+            report.DeletedJobId = job.JobId;
+            report.DeletedJobSubject = job.Subject;
+
+            KillProcessesByPath(appPath);
+            Process process = StartHomeworkApp(appPath);
+            report.ProcessId = process.Id;
+
+            RunSta(() =>
+            {
+                var mainWindow = WaitForMainWindow(process.Id, TimeSpan.FromSeconds(30));
+                report.MainWindowTitle = mainWindow.Current.Name;
+
+                var historyButton = FindDescendantByAutomationId(mainWindow, "BtnHistory");
+                if (historyButton != null)
+                {
+                    InvokeElement(historyButton, "BtnHistory");
+                }
+                else
+                {
+                    var menuButton = WaitForDescendant(process.Id, "BtnMenu", TimeSpan.FromSeconds(20));
+                    InvokeElement(menuButton, "BtnMenu");
+                    var historyMenuItem = WaitForElementByName(process.Id, "历史作业", TimeSpan.FromSeconds(10));
+                    InvokeElement(historyMenuItem, "历史作业");
+                }
+
+                var deleteButton = WaitForHistoryDeleteButton(process.Id, job.Subject, TimeSpan.FromSeconds(20));
+                InvokeElement(deleteButton, "HistoryDeleteButton");
+
+                IntPtr confirmDialogHandle = WaitForDialogHandle(
+                    ["确认删除", "Delete"],
+                    TimeSpan.FromSeconds(15));
+                report.DeleteDialogTitle = GetWindowText(confirmDialogHandle);
+                ClickDialogButton(confirmDialogHandle, ["是", "Yes"]);
+            });
+
+            await WaitForDirectoryDeletedAsync(jobDir, TimeSpan.FromSeconds(20));
             report.Passed = report.FailedChecks.Count == 0;
         }
         catch (Exception exception)
@@ -248,6 +330,30 @@ internal static class HomeworkAppUiSmoke
         throw new TimeoutException($"未找到控件 {automationId}。");
     }
 
+    private static AutomationElement WaitForElementByName(int processId, string name, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var root = WaitForMainWindow(processId, TimeSpan.FromSeconds(2));
+            var match = root.FindAll(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.NameProperty, name))
+                .Cast<AutomationElement>()
+                .FirstOrDefault((element) => !element.Current.IsOffscreen);
+
+            if (match != null)
+            {
+                return match;
+            }
+
+            Thread.Sleep(200);
+        }
+
+        throw new TimeoutException($"未找到名称为 {name} 的控件。");
+    }
+
     private static AutomationElement? FindDescendantByAutomationId(AutomationElement root, string automationId)
     {
         var matches = root.FindAll(
@@ -266,6 +372,62 @@ internal static class HomeworkAppUiSmoke
         }
 
         throw new InvalidOperationException($"控件 {label} 不支持 InvokePattern。");
+    }
+
+    private static JobSession PromoteJobToHistory(string jobDirectory)
+    {
+        var job = JobSession.Load(jobDirectory) ?? throw new InvalidDataException("无法读取待删除作业。");
+        DateTime historyTime = DateTime.Today.AddDays(-15).AddHours(8);
+        job.CreateTime = historyTime;
+        job.UpdateTime = historyTime.AddMinutes(5);
+
+        string jsonPath = Path.Combine(jobDirectory, "job.json");
+        File.WriteAllText(jsonPath, JsonConvert.SerializeObject(job, Formatting.Indented));
+        return job;
+    }
+
+    private static AutomationElement WaitForHistoryDeleteButton(int processId, string subject, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var root = WaitForMainWindow(processId, TimeSpan.FromSeconds(2));
+            var subjectMatches = root.FindAll(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.NameProperty, subject));
+
+            foreach (AutomationElement subjectElement in subjectMatches)
+            {
+                AutomationElement? container = subjectElement;
+
+                while (container != null)
+                {
+                    var deleteButton = FindButtonByName(container, "删除");
+                    if (deleteButton != null && !deleteButton.Current.IsOffscreen)
+                    {
+                        return deleteButton;
+                    }
+
+                    container = TreeWalker.ControlViewWalker.GetParent(container);
+                }
+            }
+
+            Thread.Sleep(250);
+        }
+
+        throw new TimeoutException($"没有找到作业“{subject}”对应的删除按钮。");
+    }
+
+    private static AutomationElement? FindButtonByName(AutomationElement root, string name)
+    {
+        var matches = root.FindAll(
+            TreeScope.Descendants,
+            new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button),
+                new PropertyCondition(AutomationElement.NameProperty, name)));
+
+        return matches.Cast<AutomationElement>().FirstOrDefault();
     }
 
     private static IntPtr WaitForSaveDialogHandle(TimeSpan timeout)
@@ -288,6 +450,28 @@ internal static class HomeworkAppUiSmoke
         }
 
         throw new TimeoutException("打印保存对话框没有出现。");
+    }
+
+    private static IntPtr WaitForDialogHandle(IEnumerable<string> titleHints, TimeSpan timeout)
+    {
+        string[] hints = titleHints.Where((item) => !string.IsNullOrWhiteSpace(item)).ToArray();
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (IntPtr handle in EnumerateTopLevelWindows())
+            {
+                string title = GetWindowText(handle);
+                if (hints.Any((hint) => title.Contains(hint, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return handle;
+                }
+            }
+
+            Thread.Sleep(200);
+        }
+
+        throw new TimeoutException("确认对话框没有出现。");
     }
 
     private static void SetSaveDialogFileName(IntPtr dialogHandle, string filePath)
@@ -328,6 +512,26 @@ internal static class HomeworkAppUiSmoke
         if (buttonHandle == IntPtr.Zero)
         {
             throw new InvalidOperationException($"没有找到保存按钮。现有窗口标题: {GetWindowText(dialogHandle)}");
+        }
+
+        _ = NativeMethods.SendMessage(buttonHandle, NativeMethods.BmClick, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static void ClickDialogButton(IntPtr dialogHandle, IEnumerable<string> buttonTitles)
+    {
+        string[] titles = buttonTitles.Where((item) => !string.IsNullOrWhiteSpace(item)).ToArray();
+        IntPtr buttonHandle = EnumerateChildWindows(dialogHandle)
+            .Where((handle) => NativeMethods.IsWindowVisible(handle))
+            .Where((handle) => string.Equals(GetClassName(handle), "Button", StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault((handle) =>
+            {
+                string title = GetWindowText(handle);
+                return titles.Any((candidate) => title.Contains(candidate, StringComparison.OrdinalIgnoreCase));
+            });
+
+        if (buttonHandle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException($"没有找到确认按钮。现有窗口标题: {GetWindowText(dialogHandle)}");
         }
 
         _ = NativeMethods.SendMessage(buttonHandle, NativeMethods.BmClick, IntPtr.Zero, IntPtr.Zero);
@@ -374,6 +578,23 @@ internal static class HomeworkAppUiSmoke
         }
 
         throw new TimeoutException("打印后的 PDF 没有在预期时间内生成。");
+    }
+
+    private static async Task WaitForDirectoryDeletedAsync(string path, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!Directory.Exists(path))
+            {
+                return;
+            }
+
+            await Task.Delay(250);
+        }
+
+        throw new TimeoutException("本地作业目录没有在预期时间内删除。");
     }
 
     private static void VerifyPrintedPdf(string jobDirectory, string pdfPath, SmokeReport report)
@@ -724,6 +945,9 @@ internal sealed class SmokeReport
     public int ProcessId { get; set; }
     public string MainWindowTitle { get; set; } = string.Empty;
     public string SaveDialogTitle { get; set; } = string.Empty;
+    public string DeleteDialogTitle { get; set; } = string.Empty;
+    public string DeletedJobId { get; set; } = string.Empty;
+    public string DeletedJobSubject { get; set; } = string.Empty;
     public int ExpectedPageCount { get; set; }
     public int ActualPageCount { get; set; }
     public string? ErrorMessage { get; set; }

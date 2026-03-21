@@ -149,6 +149,40 @@
   </view>
 
   <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">智能体作业申请</view>
+    <view class="panel__subtitle">{{agentHomeworkUpdatedAtDisplay}}</view>
+
+    <view class="action-row">
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="reloadAgentHomeworkRequests">刷新列表</view>
+    </view>
+
+    <view wx:if="{{!hasAgentHomeworkRequests}}" class="empty-state">
+      <view class="empty-state__title">还没有智能体作业申请</view>
+      <view class="meta">创建作业会直接进入桌面端同步队列，删除作业请让孩子在客户端里手工处理。</view>
+    </view>
+
+    <view wx:if="{{hasAgentHomeworkRequests}}" class="list-stack">
+      <view wx:for="{{agentHomeworkRequests}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.subject}} · {{item.operationLabel}}</view>
+            <view class="meta">{{item.summary}}</view>
+            <view class="meta">来源：{{item.label}} · {{item.bucket}} · {{item.targetDate}}</view>
+            <view wx:if="{{item.targetJobId}}" class="meta meta--break">作业 ID：{{item.targetJobId}}</view>
+            <view wx:if="{{item.sourceFileCount}}" class="meta">图片/文件：{{item.sourceFileCount}} 个</view>
+            <view wx:if="{{item.status === 'pending_review'}}" class="meta">申请时间：{{item.requestedAtDisplay}}</view>
+            <view wx:if="{{item.status === 'pending'}}" class="meta">等待桌面端同步：{{item.requestedAtDisplay}}</view>
+            <view wx:if="{{item.status === 'approved' || item.status === 'rejected'}}" class="meta">处理时间：{{item.reviewedAtDisplay}}</view>
+            <view wx:if="{{item.status === 'completed'}}" class="meta">完成时间：{{item.completedAtDisplay}}</view>
+          </view>
+          <view class="badge">{{item.statusLabel}}</view>
+        </view>
+
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
     <view class="panel__title">管理员列表</view>
     <view class="panel__subtitle">{{adminUpdatedAtDisplay}}</view>
 

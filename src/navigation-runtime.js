@@ -35,6 +35,7 @@ function createNavigationRuntime(dependencies = {}) {
     shouldAllowAppQuit,
     shouldBlockShortcut,
     syncCompatibilityPatch,
+    syncCompatibilityPatchForFrame,
     topLevelDecision
   } = dependencies;
 
@@ -244,6 +245,17 @@ function createNavigationRuntime(dependencies = {}) {
       void syncCompatibilityPatch(contents);
       scheduleSessionPersist();
     });
+    contents.on('did-frame-finish-load', (_event, isMainFrame, frameProcessId, frameRoutingId) => {
+      logNavigationDebug('classroom-view-did-frame-finish-load', {
+        isMainFrame,
+        frameProcessId,
+        frameRoutingId
+      });
+
+      if (!isMainFrame) {
+        void syncCompatibilityPatchForFrame(frameProcessId, frameRoutingId);
+      }
+    });
     contents.on('did-navigate', (_event, url) => {
       if (activeClassroomShell) {
         activeClassroomShell.targetUrl = normalizePrefix(url) || activeClassroomShell.targetUrl;
@@ -317,6 +329,7 @@ function createNavigationRuntime(dependencies = {}) {
     classroomBrowserView = new BrowserView({
       webPreferences: {
         contextIsolation: true,
+        nodeIntegrationInSubFrames: true,
         sandbox: true,
         nodeIntegration: false,
         devTools: false,

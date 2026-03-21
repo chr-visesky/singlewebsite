@@ -191,9 +191,11 @@ exports.main = async (event = {}) => {
   await assertAdmin(event);
 
   if (action === 'listAgentHomeworkRequests') {
+    const items = await homeworkRuntime.listRequests();
     return {
       ok: true,
-      items: await homeworkRuntime.listRequests()
+      items,
+      updatedAt: items[0] ? items[0].updatedAt : ''
     };
   }
 
@@ -201,6 +203,13 @@ exports.main = async (event = {}) => {
     return {
       ok: true,
       request: await homeworkRuntime.getRequestStatus(event.requestId || event.id)
+    };
+  }
+
+  if (action === 'getAgentHomeworkRequestStatuses') {
+    return {
+      ok: true,
+      requests: await homeworkRuntime.getRequestStatuses(event.requestIds || event.ids)
     };
   }
 

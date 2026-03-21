@@ -14,6 +14,7 @@ function registerShellIpc(dependencies = {}) {
     isClassroomShellActive,
     getActiveClassroomShell,
     syncClassroomBrowserView,
+    logNavigationDebug,
     getAppConfig,
     syncRemoteStudySchedule,
     buildHomeModel,
@@ -58,6 +59,10 @@ function registerShellIpc(dependencies = {}) {
 
   ipcMain.on('shell:update-toolbar-height', (_event, payload = {}) => {
     updateClassroomShellTopHeight(payload.height);
+  });
+
+  ipcMain.on('shell:log-classroom-media-event', (_event, payload = {}) => {
+    logNavigationDebug('classroom-media-runtime', payload && typeof payload === 'object' ? payload : {});
   });
 
   ipcMain.handle('shell:reset-course-site-state', async () => {

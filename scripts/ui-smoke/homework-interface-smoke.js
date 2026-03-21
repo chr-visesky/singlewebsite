@@ -1,8 +1,8 @@
 'use strict';
 
 const fs = require('node:fs');
-const http = require('node:http');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { createAgentHomeworkPublicRuntime } = require('../../cloudbase/functions/shared/agent-homework-public');
 const { createAgentHomeworkRuntime: createCloudHomeworkRuntime } = require('../../cloudbase/functions/shared/agent-homework-runtime');
 const { createHomeworkAgentRuntime } = require('../../src/homework-agent-runtime');
@@ -129,40 +129,72 @@ function createTestImageBuffer() {
   );
 }
 
-async function startStaticImageServer(filePath) {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((request, response) => {
-      if (!request || request.url !== '/test-source.png') {
-        response.writeHead(404);
-        response.end();
-        return;
+function createInlineImageSource(fileName) {
+  return {
+    fileName,
+    contentType: 'image/png',
+    base64: createTestImageBuffer().toString('base64')
+  };
+}
+
+function createMemorySourceStore() {
+  const sourceMap = new Map();
+
+  return {
+    async saveInlineSources(requestId, inlineSources = []) {
+      return inlineSources.map((item, index) => {
+        const fileId = `${requestId}-source-${index + 1}`;
+        sourceMap.set(fileId, `data:${item.contentType};base64,${item.buffer.toString('base64')}`);
+
+        return {
+          sourceType: 'storage',
+          fileId,
+          cloudPath: fileId,
+          fileName: item.fileName,
+          contentType: item.contentType,
+          fileKind: item.fileKind,
+          size: item.buffer.length
+        };
+      });
+    },
+    async resolveSourceUrls(sourceItems = []) {
+      return sourceItems
+        .map((item) => sourceMap.get(item.fileId) || '')
+        .filter(Boolean);
+    },
+    async deleteStoredSources(sourceItems = []) {
+      const deleted = [];
+
+      for (const item of sourceItems) {
+        const fileId = normalizePrefix(item && item.fileId);
+
+        if (!fileId || !sourceMap.has(fileId)) {
+          continue;
+        }
+
+        sourceMap.delete(fileId);
+        deleted.push(fileId);
       }
 
-      response.writeHead(200, {
-        'Content-Type': 'image/png',
-        'Cache-Control': 'no-store'
-      });
-      response.end(fs.readFileSync(filePath));
-    });
+      return deleted;
+    },
+    getStoredSourceCount() {
+      return sourceMap.size;
+    }
+  };
+}
 
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
+function collectStatuses(items = []) {
+  return items.map((item) => normalizePrefix(item && item.status));
+}
 
-      if (!address || typeof address === 'string') {
-        reject(new Error('测试图片服务启动失败。'));
-        return;
-      }
+function ensureStatuses(report, statuses, expectedStatus, label) {
+  if (!statuses.length || statuses.some((status) => status !== expectedStatus)) {
+    report.failedChecks.push(`${label} 的状态不对：${JSON.stringify(statuses)}`);
+    return false;
+  }
 
-      resolve({
-        close: () =>
-          new Promise((closeResolve) => {
-            server.close(() => closeResolve());
-          }),
-        url: `http://127.0.0.1:${address.port}/test-source.png`
-      });
-    });
-  });
+  return true;
 }
 
 async function runHomeworkInterfaceSmoke(options = {}) {
@@ -177,17 +209,17 @@ async function runHomeworkInterfaceSmoke(options = {}) {
     outputDirectory: outputDir,
     failedChecks: [],
     errorMessage: null,
-    createRequestId: '',
-    deleteRequestId: '',
-    createdJobId: '',
-    createdJobDirectory: '',
-    createStatusBeforeSync: '',
-    createStatusAfterSync: '',
-    deleteStatusBeforeSync: '',
-    deleteStatusAfterSync: '',
-    sourceImagePath: '',
-    sourceImageUrl: '',
-    createdSourceFileCount: 0
+    singleCreateRequestId: '',
+    batchCreateRequestIds: [],
+    createdJobIds: [],
+    pendingCreateCountBeforeSync: 0,
+    singleCreateStatusBeforeSync: '',
+    batchCreateStatusesBeforeSync: [],
+    createStatusesAfterSync: [],
+    deleteSingleBlocked: false,
+    deleteBatchBlocked: false,
+    createdSourceFileCounts: [],
+    remainingStoredSourceCountAfterSync: -1
   };
 
   const studyToolsStatePath = path.join(process.env.APPDATA || '', 'StudyGate', 'study-tools-state.json');
@@ -198,6 +230,7 @@ async function runHomeworkInterfaceSmoke(options = {}) {
   const readToken = 'homework-read-token';
   const agentWriteToken = 'homework-agent-token';
   const db = createInMemoryDb();
+  const sourceStore = createMemorySourceStore();
   const stateBackup = readOptionalFile(studyToolsStatePath);
   const recentBackup = readOptionalFile(recentJobsPath);
   const lastBackup = readOptionalFile(lastJobPath);
@@ -215,6 +248,7 @@ async function runHomeworkInterfaceSmoke(options = {}) {
     db,
     collectionName: 'study_agent_homework_requests',
     docId: 'main',
+    ensureCollectionExists: async () => {},
     maxRequests: 60,
     normalizePrefix,
     normalizeId: (value, fallback) => {
@@ -224,7 +258,8 @@ async function runHomeworkInterfaceSmoke(options = {}) {
         .replace(/^-+|-+$/g, '');
 
       return normalized || fallback;
-    }
+    },
+    sourceStore
   });
   const publicRuntime = createAgentHomeworkPublicRuntime({
     agentHomeworkRuntime: cloudHomeworkRuntime,
@@ -246,7 +281,7 @@ async function runHomeworkInterfaceSmoke(options = {}) {
       });
       fs.writeFileSync(studyToolsStatePath, `${JSON.stringify(studyToolsState, null, 2)}\n`, 'utf8');
     },
-    spawn: require('node:child_process').spawn
+    spawn
   });
   const remoteHomeworkRuntime = createHomeworkRemoteRuntime({
     fetchJson,
@@ -269,17 +304,13 @@ async function runHomeworkInterfaceSmoke(options = {}) {
     recursive: true
   });
 
-  const subject = `接口作业测试-${Date.now()}`;
-  const createRequestId = `api-create-${Date.now()}`;
-  const deleteRequestId = `api-delete-${Date.now()}`;
-  const sourceImagePath = path.join(outputDir, 'test-source.png');
-  report.createRequestId = createRequestId;
-  report.deleteRequestId = deleteRequestId;
-  report.sourceImagePath = sourceImagePath;
-
-  fs.writeFileSync(sourceImagePath, createTestImageBuffer());
-
-  let sourceImageServer = null;
+  const singleCreateRequestId = `api-create-single-${Date.now()}`;
+  const batchCreateRequestIds = [
+    `api-create-batch-${Date.now()}-1`,
+    `api-create-batch-${Date.now()}-2`
+  ];
+  report.singleCreateRequestId = singleCreateRequestId;
+  report.batchCreateRequestIds = batchCreateRequestIds;
 
   try {
     if (!fs.existsSync(appPath)) {
@@ -287,130 +318,163 @@ async function runHomeworkInterfaceSmoke(options = {}) {
       return report;
     }
 
-    sourceImageServer = await startStaticImageServer(sourceImagePath);
-    report.sourceImageUrl = sourceImageServer.url;
-
-    const createResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+    const singleCreateResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
       action: 'submitAgentHomeworkRequest',
-      requestId: createRequestId,
+      requestId: singleCreateRequestId,
       agentId: 'openclaw',
       label: 'OpenClaw',
-      subject,
+      subject: '接口作业测试-单条',
       bucket: '课外',
-      targetDate: '2026-03-20',
-      sourceUrls: [sourceImageServer.url]
+      targetDate: '2026-03-21',
+      inlineSources: [createInlineImageSource('single-source.png')]
     });
 
-    if (createResponse.statusCode !== 200 || !createResponse.body.ok) {
-      report.failedChecks.push(`作业创建接口返回异常：${JSON.stringify(createResponse.body)}`);
+    if (singleCreateResponse.statusCode !== 200 || !singleCreateResponse.body.ok) {
+      report.failedChecks.push(`单条作业创建接口返回异常：${JSON.stringify(singleCreateResponse.body)}`);
       return report;
     }
 
-    const createStatusBefore = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
-      action: 'getAgentHomeworkRequestStatus',
-      requestId: createRequestId
+    const batchCreateResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'submitAgentHomeworkRequests',
+      requests: batchCreateRequestIds.map((requestId, index) => ({
+        requestId,
+        agentId: 'openclaw',
+        label: 'OpenClaw',
+        subject: `接口作业测试-批量${index + 1}`,
+        bucket: index === 0 ? '课内' : '课外',
+        targetDate: '2026-03-21',
+        inlineSources: [createInlineImageSource(`batch-source-${index + 1}.png`)]
+      }))
     });
-    report.createStatusBeforeSync = normalizePrefix(
-      createStatusBefore.body && createStatusBefore.body.request && createStatusBefore.body.request.status
+
+    if (batchCreateResponse.statusCode !== 200 || !batchCreateResponse.body.ok) {
+      report.failedChecks.push(`批量作业创建接口返回异常：${JSON.stringify(batchCreateResponse.body)}`);
+      return report;
+    }
+
+    const pendingBeforeSyncResponse = await callHomeworkInterface(publicRuntime, 'GET', readToken);
+    report.pendingCreateCountBeforeSync = Array.isArray(pendingBeforeSyncResponse.body.items)
+      ? pendingBeforeSyncResponse.body.items.length
+      : 0;
+
+    if (report.pendingCreateCountBeforeSync !== 3) {
+      report.failedChecks.push(`创建同步前的待处理作业数量不对：${report.pendingCreateCountBeforeSync}`);
+      return report;
+    }
+
+    const singleCreateStatusBefore = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'getAgentHomeworkRequestStatus',
+      requestId: singleCreateRequestId
+    });
+    report.singleCreateStatusBeforeSync = normalizePrefix(
+      singleCreateStatusBefore.body && singleCreateStatusBefore.body.request && singleCreateStatusBefore.body.request.status
     );
 
-    if (report.createStatusBeforeSync !== 'pending') {
-      report.failedChecks.push(`作业创建接口在同步前状态不对：${report.createStatusBeforeSync || 'empty'}`);
+    const batchCreateStatusBefore = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'getAgentHomeworkRequestStatuses',
+      requestIds: batchCreateRequestIds
+    });
+    report.batchCreateStatusesBeforeSync = collectStatuses(batchCreateStatusBefore.body.requests);
+
+    if (report.singleCreateStatusBeforeSync !== 'pending') {
+      report.failedChecks.push(`单条作业创建在同步前状态不对：${report.singleCreateStatusBeforeSync || 'empty'}`);
+      return report;
+    }
+
+    if (!ensureStatuses(report, report.batchCreateStatusesBeforeSync, 'pending', '批量作业创建')) {
       return report;
     }
 
     if (!(await remoteHomeworkRuntime.syncRemoteHomeworkRequests())) {
-      report.failedChecks.push('远程作业创建同步返回 false。');
+      report.failedChecks.push('创建作业同步返回 false。');
       return report;
     }
 
-    const createStatusAfter = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
-      action: 'getAgentHomeworkRequestStatus',
-      requestId: createRequestId
+    const createStatusesAfter = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'getAgentHomeworkRequestStatuses',
+      requestIds: [singleCreateRequestId, ...batchCreateRequestIds]
     });
-    report.createStatusAfterSync = normalizePrefix(
-      createStatusAfter.body && createStatusAfter.body.request && createStatusAfter.body.request.status
+    report.createStatusesAfterSync = collectStatuses(createStatusesAfter.body.requests);
+
+    if (!ensureStatuses(report, report.createStatusesAfterSync, 'completed', '创建作业同步后')) {
+      return report;
+    }
+
+    report.remainingStoredSourceCountAfterSync = sourceStore.getStoredSourceCount();
+
+    if (report.remainingStoredSourceCountAfterSync !== 0) {
+      report.failedChecks.push(
+        `创建作业同步完成后，云端暂存源文件没有被清空：${report.remainingStoredSourceCountAfterSync}`
+      );
+      return report;
+    }
+
+    const createdRequests = Array.isArray(createStatusesAfter.body.requests) ? createStatusesAfter.body.requests : [];
+    report.createdJobIds = createdRequests.map((item) =>
+      normalizePrefix(item && item.result && item.result.jobId)
     );
 
-    if (report.createStatusAfterSync !== 'completed') {
-      report.failedChecks.push(`作业创建接口在同步后没有完成：${report.createStatusAfterSync || 'empty'}`);
-      return report;
+    for (const request of createdRequests) {
+      const jobId = normalizePrefix(request && request.result && request.result.jobId);
+      const jobDirectory = path.join(jobsPath, jobId);
+
+      if (!jobId || !fs.existsSync(jobDirectory)) {
+        report.failedChecks.push(`作业创建完成后目录不存在：${jobId || 'empty'}`);
+        return report;
+      }
+
+      const jobJsonPath = path.join(jobDirectory, 'job.json');
+      const jobJson = fs.existsSync(jobJsonPath)
+        ? JSON.parse(fs.readFileSync(jobJsonPath, 'utf8'))
+        : null;
+      const sourceFileCount = jobJson && Array.isArray(jobJson.sourceFiles) ? jobJson.sourceFiles.length : 0;
+      report.createdSourceFileCounts.push(sourceFileCount);
+
+      if (sourceFileCount < 1) {
+        report.failedChecks.push(`作业 ${jobId} 没有把 inline 图片导入进去。`);
+        return report;
+      }
     }
 
-    report.createdJobId = normalizePrefix(
-      createStatusAfter.body &&
-        createStatusAfter.body.request &&
-        createStatusAfter.body.request.result &&
-        createStatusAfter.body.request.result.jobId
-    );
-    report.createdJobDirectory = path.join(jobsPath, report.createdJobId);
-
-    if (!report.createdJobId || !fs.existsSync(report.createdJobDirectory)) {
-      report.failedChecks.push('作业创建完成后，本地作业目录不存在。');
-      return report;
-    }
-
-    const createdJobJsonPath = path.join(report.createdJobDirectory, 'job.json');
-    const createdJobJson = fs.existsSync(createdJobJsonPath)
-      ? JSON.parse(fs.readFileSync(createdJobJsonPath, 'utf8'))
-      : null;
-    report.createdSourceFileCount =
-      createdJobJson && Array.isArray(createdJobJson.sourceFiles) ? createdJobJson.sourceFiles.length : 0;
-
-    if (report.createdSourceFileCount < 1) {
-      report.failedChecks.push('接口创建作业后，没有把测试图片导入到作业里。');
-      return report;
-    }
-
-    const deleteResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+    const singleDeleteResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
       action: 'submitAgentHomeworkDeleteRequest',
-      requestId: deleteRequestId,
+      requestId: `api-delete-single-${Date.now()}`,
       agentId: 'openclaw',
       label: 'OpenClaw',
-      jobId: report.createdJobId,
-      subject,
+      jobId: report.createdJobIds[0],
+      subject: '接口作业测试-单条',
       bucket: '课外',
-      targetDate: '2026-03-20'
+      targetDate: '2026-03-21'
     });
 
-    if (deleteResponse.statusCode !== 200 || !deleteResponse.body.ok) {
-      report.failedChecks.push(`作业删除接口返回异常：${JSON.stringify(deleteResponse.body)}`);
+    report.deleteSingleBlocked =
+      singleDeleteResponse.statusCode === 400
+      && normalizePrefix(singleDeleteResponse.body && singleDeleteResponse.body.error) === 'unsupported_action';
+
+    if (!report.deleteSingleBlocked) {
+      report.failedChecks.push(`单条作业删除接口应该被禁用：${JSON.stringify(singleDeleteResponse.body)}`);
       return report;
     }
 
-    const deleteStatusBefore = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
-      action: 'getAgentHomeworkRequestStatus',
-      requestId: deleteRequestId
+    const batchDeleteResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'submitAgentHomeworkDeleteRequests',
+      requests: report.createdJobIds.slice(1).map((jobId, index) => ({
+        requestId: `api-delete-batch-${Date.now()}-${index + 1}`,
+        agentId: 'openclaw',
+        label: 'OpenClaw',
+        jobId,
+        subject: `接口作业测试-批量${index + 1}`,
+        bucket: index === 0 ? '课内' : '课外',
+        targetDate: '2026-03-21'
+      }))
     });
-    report.deleteStatusBeforeSync = normalizePrefix(
-      deleteStatusBefore.body && deleteStatusBefore.body.request && deleteStatusBefore.body.request.status
-    );
 
-    if (report.deleteStatusBeforeSync !== 'pending') {
-      report.failedChecks.push(`作业删除接口在同步前状态不对：${report.deleteStatusBeforeSync || 'empty'}`);
-      return report;
-    }
+    report.deleteBatchBlocked =
+      batchDeleteResponse.statusCode === 400
+      && normalizePrefix(batchDeleteResponse.body && batchDeleteResponse.body.error) === 'unsupported_action';
 
-    if (!(await remoteHomeworkRuntime.syncRemoteHomeworkRequests())) {
-      report.failedChecks.push('远程作业删除同步返回 false。');
-      return report;
-    }
-
-    const deleteStatusAfter = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
-      action: 'getAgentHomeworkRequestStatus',
-      requestId: deleteRequestId
-    });
-    report.deleteStatusAfterSync = normalizePrefix(
-      deleteStatusAfter.body && deleteStatusAfter.body.request && deleteStatusAfter.body.request.status
-    );
-
-    if (report.deleteStatusAfterSync !== 'completed') {
-      report.failedChecks.push(`作业删除接口在同步后没有完成：${report.deleteStatusAfterSync || 'empty'}`);
-      return report;
-    }
-
-    if (fs.existsSync(report.createdJobDirectory)) {
-      report.failedChecks.push('作业删除接口完成后，本地作业目录还存在。');
+    if (!report.deleteBatchBlocked) {
+      report.failedChecks.push(`批量作业删除接口应该被禁用：${JSON.stringify(batchDeleteResponse.body)}`);
       return report;
     }
 
@@ -426,12 +490,8 @@ async function runHomeworkInterfaceSmoke(options = {}) {
     report.failedChecks.push(error && error.message ? error.message : String(error));
     return report;
   } finally {
-    if (sourceImageServer) {
-      await sourceImageServer.close().catch(() => {});
-    }
-
-    if (report.createdJobId) {
-      fs.rmSync(path.join(jobsPath, report.createdJobId), {
+    for (const jobId of report.createdJobIds) {
+      fs.rmSync(path.join(jobsPath, jobId), {
         recursive: true,
         force: true
       });

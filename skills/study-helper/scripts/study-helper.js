@@ -28,7 +28,6 @@ function canonicalizeCommand(command) {
     '计划状态': 'schedule-status',
     '查询计划状态': 'schedule-status',
     '创建作业': 'homework-create',
-    '删除作业': 'homework-delete',
     '作业状态': 'homework-status',
     '查询作业状态': 'homework-status'
   };
@@ -63,7 +62,6 @@ Usage:
   node ./scripts/study-helper.js 删除计划 --载荷文件 <文件>
   node ./scripts/study-helper.js 计划状态 --请求编号 <编号>
   node ./scripts/study-helper.js 创建作业 --载荷文件 <文件>
-  node ./scripts/study-helper.js 删除作业 --载荷文件 <文件>
   node ./scripts/study-helper.js 作业状态 --请求编号 <编号>
 
 参数:
@@ -74,6 +72,10 @@ Usage:
   --标准输入         从标准输入读取 JSON 请求体
   --超时毫秒 <毫秒>  请求超时时间，默认 30000
   --帮助             显示帮助
+
+作业创建载荷除了 sourceUrls，还支持：
+  sourceFiles      本地 PDF 或图片文件路径数组
+  inlineSources    直接内嵌 base64 的文件数组
 `);
 }
 
@@ -348,6 +350,55 @@ function normalizeHomeworkSourceUrls(sourceUrls) {
   return normalized;
 }
 
+function extensionFromPathLike(value) {
+  const matched = String(value || '').trim().toLowerCase().match(/\.([a-z0-9]{2,5})$/i);
+  return matched ? `.${matched[1]}` : '';
+}
+
+function fileKindFromExtension(extension) {
+  const normalized = String(extension || '').trim().toLowerCase();
+
+  if (normalized === '.pdf') {
+    return 'pdf';
+  }
+
+  if (['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'].includes(normalized)) {
+    return 'image';
+  }
+
+  return '';
+}
+
+function contentTypeFromExtension(extension) {
+  const normalized = String(extension || '').trim().toLowerCase();
+
+  if (normalized === '.pdf') {
+    return 'application/pdf';
+  }
+
+  if (normalized === '.jpg' || normalized === '.jpeg') {
+    return 'image/jpeg';
+  }
+
+  if (normalized === '.png') {
+    return 'image/png';
+  }
+
+  if (normalized === '.bmp') {
+    return 'image/bmp';
+  }
+
+  if (normalized === '.gif') {
+    return 'image/gif';
+  }
+
+  if (normalized === '.webp') {
+    return 'image/webp';
+  }
+
+  return '';
+}
+
 function fileKindFromUrl(url) {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
@@ -366,8 +417,41 @@ function fileKindFromUrl(url) {
   return '';
 }
 
-function validateHomeworkSourceUrls(sourceUrls) {
-  const kinds = sourceUrls.map(fileKindFromUrl).filter(Boolean);
+function fileKindFromInlineSource(source) {
+  const item = source && typeof source === 'object' ? source : {};
+  const contentType = normalizeText(item.contentType || item.mimeType).toLowerCase();
+
+  if (contentType.includes('pdf')) {
+    return 'pdf';
+  }
+
+  if (contentType.startsWith('image/')) {
+    return 'image';
+  }
+
+  const base64Text = normalizeText(item.base64 || item.data || item.content);
+  const dataUrlMatch = base64Text.match(/^data:([^;,]+);base64,/i);
+
+  if (dataUrlMatch) {
+    const dataUrlContentType = normalizeText(dataUrlMatch[1]).toLowerCase();
+
+    if (dataUrlContentType.includes('pdf')) {
+      return 'pdf';
+    }
+
+    if (dataUrlContentType.startsWith('image/')) {
+      return 'image';
+    }
+  }
+
+  return fileKindFromExtension(extensionFromPathLike(item.fileName || item.name));
+}
+
+function validateHomeworkSources(sourceUrls, inlineSources) {
+  const kinds = [
+    ...sourceUrls.map(fileKindFromUrl).filter(Boolean),
+    ...inlineSources.map(fileKindFromInlineSource).filter(Boolean)
+  ];
   const pdfCount = kinds.filter((kind) => kind === 'pdf').length;
   const imageCount = kinds.filter((kind) => kind === 'image').length;
 
@@ -376,40 +460,109 @@ function validateHomeworkSourceUrls(sourceUrls) {
   }
 
   if (pdfCount > 0 && imageCount > 0) {
-    throw new Error('一次作业请求里不能混用 PDF 和图片 URL。');
+    throw new Error('一次作业请求里不能混用 PDF 和图片。');
   }
 }
 
-function buildHomeworkCreatePayload(payload) {
+async function inlineSourcesFromLocalFiles(sourceFiles) {
+  const items = Array.isArray(sourceFiles) ? sourceFiles : [];
+  const normalized = [];
+
+  for (const rawItem of items) {
+    const item = rawItem && typeof rawItem === 'object' ? rawItem : {
+      path: rawItem
+    };
+    const filePath = normalizeText(item.path || item.filePath);
+
+    if (!filePath) {
+      continue;
+    }
+
+    const absolutePath = path.resolve(filePath);
+    const stat = await fs.promises.stat(absolutePath);
+
+    if (!stat.isFile()) {
+      throw new Error(`作业源文件不是普通文件：${absolutePath}`);
+    }
+
+    const extension = extensionFromPathLike(item.fileName || absolutePath);
+    const fileKind = fileKindFromExtension(extension);
+
+    if (!fileKind) {
+      throw new Error(`作业源文件只支持 PDF 或图片：${absolutePath}`);
+    }
+
+    const buffer = await fs.promises.readFile(absolutePath);
+
+    normalized.push({
+      fileName: normalizeText(item.fileName || item.name) || path.basename(absolutePath),
+      contentType: normalizeText(item.contentType || item.mimeType) || contentTypeFromExtension(extension),
+      base64: buffer.toString('base64')
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeInlineSourcesPayload(inlineSources) {
+  const source = Array.isArray(inlineSources) ? inlineSources : [];
+  const normalized = [];
+
+  for (const rawItem of source) {
+    const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
+    const base64 = normalizeText(item.base64 || item.data || item.content);
+
+    if (!base64) {
+      continue;
+    }
+
+    normalized.push({
+      fileName: normalizeText(item.fileName || item.name) || 'source',
+      contentType: normalizeText(item.contentType || item.mimeType),
+      base64
+    });
+  }
+
+  return normalized;
+}
+
+async function buildHomeworkCreateRequest(payload, index = 0) {
   const nextPayload = ensureObjectPayload(payload, 'homework-create');
   const sourceUrls = normalizeHomeworkSourceUrls(nextPayload.sourceUrls);
-  validateHomeworkSourceUrls(sourceUrls);
+  const inlineSources = [
+    ...normalizeInlineSourcesPayload(nextPayload.inlineSources),
+    ...await inlineSourcesFromLocalFiles(nextPayload.sourceFiles)
+  ];
+  validateHomeworkSources(sourceUrls, inlineSources);
 
   return {
     ...nextPayload,
-    action: 'submitAgentHomeworkRequest',
-    requestId: normalizeText(nextPayload.requestId) || makeRequestId('openclaw-homework'),
+    requestId: normalizeText(nextPayload.requestId) || makeRequestId(`openclaw-homework-${index + 1}`),
     agentId: normalizeText(nextPayload.agentId) || 'openclaw',
     label: normalizeText(nextPayload.label) || 'OpenClaw',
-    sourceUrls
+    sourceUrls,
+    inlineSources
   };
 }
 
-function buildHomeworkDeletePayload(payload) {
-  const nextPayload = ensureObjectPayload(payload, 'homework-delete');
-  const jobId = normalizeText(nextPayload.jobId || nextPayload.targetJobId);
+async function buildHomeworkCreatePayload(payload) {
+  const nextPayload = ensureObjectPayload(payload, 'homework-create');
+  const requests = Array.isArray(nextPayload.requests)
+    ? nextPayload.requests
+    : Array.isArray(nextPayload.items)
+      ? nextPayload.items
+      : null;
 
-  if (!jobId) {
-    throw new Error('删除作业时必须提供 jobId。');
+  if (requests) {
+    return {
+      action: 'submitAgentHomeworkRequests',
+      requests: await Promise.all(requests.map((item, index) => buildHomeworkCreateRequest(item, index)))
+    };
   }
 
   return {
-    ...nextPayload,
-    action: 'submitAgentHomeworkDeleteRequest',
-    requestId: normalizeText(nextPayload.requestId) || makeRequestId('openclaw-homework-delete'),
-    agentId: normalizeText(nextPayload.agentId) || 'openclaw',
-    label: normalizeText(nextPayload.label) || 'OpenClaw',
-    jobId
+    action: 'submitAgentHomeworkRequest',
+    ...(await buildHomeworkCreateRequest(nextPayload))
   };
 }
 
@@ -424,6 +577,27 @@ function buildStatusPayload(action, requestId) {
     action,
     requestId: normalizedId
   };
+}
+
+function buildHomeworkStatusPayload(payload, requestIdOption) {
+  const nextPayload = payload && typeof payload === 'object' ? payload : {};
+  const requestIds = Array.isArray(nextPayload.requestIds)
+    ? nextPayload.requestIds.filter((item) => normalizeText(item))
+    : Array.isArray(nextPayload.ids)
+      ? nextPayload.ids.filter((item) => normalizeText(item))
+      : [];
+
+  if (requestIds.length) {
+    return {
+      action: 'getAgentHomeworkRequestStatuses',
+      requestIds
+    };
+  }
+
+  return buildStatusPayload(
+    'getAgentHomeworkRequestStatus',
+    requestIdOption || nextPayload.requestId || nextPayload.id
+  );
 }
 
 async function invokeJsonRequest(url, token, method, payload, timeoutMs, options = {}) {
@@ -668,16 +842,7 @@ async function main() {
         endpoint,
         token,
         'POST',
-        buildHomeworkCreatePayload(payload),
-        timeoutMs
-      );
-      break;
-    case 'homework-delete':
-      result = await invokeJsonRequest(
-        endpoint,
-        token,
-        'POST',
-        buildHomeworkDeletePayload(payload),
+        await buildHomeworkCreatePayload(payload),
         timeoutMs
       );
       break;
@@ -686,10 +851,7 @@ async function main() {
         endpoint,
         token,
         'POST',
-        buildStatusPayload(
-          'getAgentHomeworkRequestStatus',
-          options['request-id'] || payload.requestId || payload.id
-        ),
+        buildHomeworkStatusPayload(payload, options['request-id']),
         timeoutMs
       );
       break;

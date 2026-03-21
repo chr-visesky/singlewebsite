@@ -16,7 +16,8 @@ function createSecurityRuntime(dependencies = {}) {
     parseUrl,
     pathModule,
     runtimePaths,
-    shortcutMatches
+    shortcutMatches,
+    webFrameMain
   } = dependencies;
 
   function isLocalAppFile(urlObject) {
@@ -421,8 +422,40 @@ function createSecurityRuntime(dependencies = {}) {
     }
   }
 
+  async function applyCompatibilityPatchForFrame(frameProcessId, frameRoutingId) {
+    if (!webFrameMain || typeof webFrameMain.fromId !== 'function') {
+      return;
+    }
+
+    let frame = null;
+
+    try {
+      frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
+    } catch {
+      frame = null;
+    }
+
+    if (!frame || frame.isDestroyed()) {
+      return;
+    }
+
+    const frameUrl = typeof frame.url === 'string' ? frame.url : '';
+    const parsed = parseUrl(frameUrl);
+
+    if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) {
+      return;
+    }
+
+    try {
+      await frame.executeJavaScript(legacyMediaCompatibilityScript, true);
+    } catch {
+      // Ignore compatibility injection failures for nested frames.
+    }
+  }
+
   return {
     applyCompatibilityPatch,
+    applyCompatibilityPatchForFrame,
     blockNavigation,
     isAllowedTopLevel,
     isCourseEcosystemOrigin,

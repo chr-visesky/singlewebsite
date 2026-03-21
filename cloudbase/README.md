@@ -178,15 +178,22 @@ npm run cloudbase:token
 
 智能体创建作业这条链路：
 
-- `submitAgentHomeworkRequest`：提交作业创建请求
-- `submitAgentHomeworkDeleteRequest`：提交作业删除请求
-- `getAgentHomeworkRequestStatus`：按 `requestId` 查询创建状态
-- 请求会先进入云端队列，再由桌面端同步创建本地作业
+- `submitAgentHomeworkRequest`：提交单条作业创建请求
+- `submitAgentHomeworkRequests`：批量提交作业创建请求
+- `submitAgentHomeworkDeleteRequest`：提交单条作业删除请求
+- `submitAgentHomeworkDeleteRequests`：批量提交作业删除请求
+- `getAgentHomeworkRequestStatus`：按 `requestId` 查询单条状态
+- `getAgentHomeworkRequestStatuses`：按 `requestIds` 批量查询状态
+- 创建作业会直接进入云端队列，再由桌面端同步创建本地作业
+- 删除作业会先进入 `pending_review`，要等家长在小程序“系统管理 > 智能体作业申请”里批准后，桌面端才会执行删除
 - 桌面端创建或删除成功后都会把状态回写成 `completed`
-- 支持两种模式：
-  - 空白作业：不传 `sourceUrls`
-  - 文件作业：传 `sourceUrls`，支持单个 PDF 或多张图片，不支持 PDF 和图片混传
-- 删除作业时需要传 `jobId`
+- 支持四种模式：
+  - 空白作业：不传任何来源字段
+  - 远程文件作业：传 `sourceUrls`
+  - 本地文件作业：传 `sourceFiles`
+  - 直接内嵌文件：传 `inlineSources`
+- 不管来源字段怎么组合，整次请求都只支持“单个 PDF”或“多张图片”，不支持 PDF 和图片混传
+- 删除作业时必须传 `jobId`
 
 `agentAccessPublic` 支持：
 

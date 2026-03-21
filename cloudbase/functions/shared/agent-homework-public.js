@@ -53,6 +53,67 @@ function createAgentHomeworkPublicRuntime(options = {}) {
     }
   }
 
+  function requestIdList(payload = {}) {
+    if (Array.isArray(payload.requestIds)) {
+      return payload.requestIds;
+    }
+
+    if (Array.isArray(payload.ids)) {
+      return payload.ids;
+    }
+
+    return [];
+  }
+
+  function requestPayloadList(payload = {}) {
+    if (Array.isArray(payload.requests)) {
+      return payload.requests;
+    }
+
+    if (Array.isArray(payload.items)) {
+      return payload.items;
+    }
+
+    return [];
+  }
+
+  async function handleAgentAction(action, payload) {
+    if (action === 'submitAgentHomeworkRequest') {
+      return {
+        ok: true,
+        status: 'pending',
+        message: '作业创建请求已提交，等待桌面端同步创建。',
+        request: await agentHomeworkRuntime.submitRequest(payload)
+      };
+    }
+
+    if (action === 'submitAgentHomeworkRequests') {
+      const requests = await agentHomeworkRuntime.submitRequests(requestPayloadList(payload));
+      return {
+        ok: true,
+        status: 'pending',
+        message: `已提交 ${requests.length} 条作业创建请求，等待桌面端同步创建。`,
+        requests
+      };
+    }
+
+    if (action === 'getAgentHomeworkRequestStatus') {
+      return {
+        ok: true,
+        request: await agentHomeworkRuntime.getRequestStatus(payload.requestId || payload.id)
+      };
+    }
+
+    if (action === 'getAgentHomeworkRequestStatuses') {
+      return {
+        ok: true,
+        requests: await agentHomeworkRuntime.getRequestStatuses(requestIdList(payload))
+      };
+    }
+
+    throw new Error('unsupported_action');
+  }
+
   async function handleHttpEvent(event = {}) {
     const method = (event.httpMethod || 'GET').toUpperCase();
 
@@ -94,12 +155,14 @@ function createAgentHomeworkPublicRuntime(options = {}) {
 
       const action = normalizePrefix(payload.action);
       const requestToken = bearerToken(event.headers);
+      const agentActions = new Set([
+        'submitAgentHomeworkRequest',
+        'submitAgentHomeworkRequests',
+        'getAgentHomeworkRequestStatus',
+        'getAgentHomeworkRequestStatuses'
+      ]);
 
-      if (
-        action === 'submitAgentHomeworkRequest' ||
-        action === 'submitAgentHomeworkDeleteRequest' ||
-        action === 'getAgentHomeworkRequestStatus'
-      ) {
+      if (agentActions.has(action)) {
         if (!agentWriteToken) {
           return jsonResponse(500, {
             error: 'missing_agent_write_token'
@@ -113,32 +176,17 @@ function createAgentHomeworkPublicRuntime(options = {}) {
         }
 
         try {
-          if (action === 'submitAgentHomeworkRequest') {
-            return jsonResponse(200, {
-              ok: true,
-              status: 'pending',
-              message: '作业创建请求已提交，等待桌面端同步创建。',
-              request: await agentHomeworkRuntime.submitRequest(payload)
-            });
-          }
-
-          if (action === 'submitAgentHomeworkDeleteRequest') {
-            return jsonResponse(200, {
-              ok: true,
-              status: 'pending',
-              message: '作业删除请求已提交，等待桌面端同步处理。',
-              request: await agentHomeworkRuntime.submitDeleteRequest(payload)
-            });
-          }
-
-          return jsonResponse(200, {
-            ok: true,
-            request: await agentHomeworkRuntime.getRequestStatus(payload.requestId || payload.id)
-          });
+          return jsonResponse(200, await handleAgentAction(action, payload));
         } catch (error) {
           if (error && error.code) {
             return jsonResponse(400, {
               error: error.code
+            });
+          }
+
+          if (error && error.message === 'unsupported_action') {
+            return jsonResponse(400, {
+              error: 'unsupported_action'
             });
           }
 

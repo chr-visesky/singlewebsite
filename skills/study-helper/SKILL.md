@@ -1,7 +1,7 @@
 ---
-version: "1.1.0"
+version: "1.2.4"
 name: study-helper
-description: 学习助手 / Study Helper。用于让 OpenClaw 通过已部署的 schedulePublic 和 homeworkPublic 管理 StudyGate 的计划与作业，包括读取计划、创建计划、修改计划、删除计划、查询计划状态、创建作业、删除作业、查询作业状态。
+description: 学习助手 / Study Helper。用于让 OpenClaw 通过已部署的 schedulePublic 和 homeworkPublic 管理 StudyGate 的计划与作业，包括读取计划、创建计划、修改计划、删除计划、查询计划状态、创建作业、查询作业状态，并支持把本地图片或 PDF 直接上传成作业来源。
 author: StudyGate
 homepage: https://github.com/chr-visesky/singlewebsite/tree/main/skills/study-helper
 source: https://github.com/chr-visesky/singlewebsite
@@ -26,9 +26,10 @@ metadata: {"openclaw":{"skillKey":"study-helper","emoji":"📚","homepage":"http
 - 删除计划
 - 查询计划状态
 - 创建作业
-- 删除作业
 - 查询作业状态
 - 用图片创建作业
+- 批量创建作业
+- 批量查询作业状态
 
 ## 所需环境
 
@@ -65,7 +66,6 @@ node {baseDir}/scripts/study-helper.js 修改计划 --载荷文件 /tmp/plan-upd
 node {baseDir}/scripts/study-helper.js 删除计划 --载荷文件 /tmp/plan-delete.json
 node {baseDir}/scripts/study-helper.js 计划状态 --请求编号 openclaw-plan-123
 node {baseDir}/scripts/study-helper.js 创建作业 --载荷文件 /tmp/homework.json
-node {baseDir}/scripts/study-helper.js 删除作业 --载荷文件 /tmp/homework-delete.json
 node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-homework-123
 ```
 
@@ -121,17 +121,62 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 
 ## 作业流程
 
-“创建作业”支持两种模式：
+### 从对话里提取信息
+
+处理“创建作业”时，优先从当前对话里直接提取这些信息，不要先把责任推回给用户：
+
+- `subject`：从用户文字里提取科目，例如“数学作业”“语文卷子”“英语抄写”。
+- `targetDate`：从用户文字里提取日期；如果用户说“今天”“明天”“后天”，先换算成明确的 `YYYY-MM-DD` 再提交。
+- 作业图片：优先使用当前对话里已经提供的图片或本地临时图片文件，不要要求用户先把图片变成公网 URL。
+
+如果一次对话里给了多张作业图片：
+
+- 按用户发送顺序保留图片顺序。
+- 只要这些图片属于同一次作业，就应作为同一份作业一起提交。
+- 不要因为第一张已经能看懂就忽略后面的图片；默认要把这一轮对话里同一份作业的所有图片都带上。
+
+如果以上三个字段里有缺失：
+
+- 缺科目：再追问科目。
+- 缺日期：先结合上下文判断；如果对话里没有明确日期，就默认使用这条消息发给智能体当天的本地日期作为 `targetDate`，不要先追问。
+- 缺图片：明确告诉上层当前还没有可创建的作业图片。
+
+不要把“从对话中提取科目、日期、作业图片”当成可选优化；这是默认行为。
+
+典型场景示例：
+
+- 老师在对话里说“这是今天的数学作业，晚上做完”，并附上一张作业图片。
+  这时应提取：
+  - `subject = 数学`
+  - `targetDate = 对应今天的明确日期`
+  - 作业图片 = 当前消息里附带的那张图片
+- 老师在对话里说“明天交语文卷子，图片发你了”，并附上两张卷子图片。
+  这时应提取：
+  - `subject = 语文`
+  - `targetDate = 明天对应的明确日期`
+  - 作业图片 = 这两张按发送顺序排列的图片
+- 老师只说“这是数学作业，做完发我”，没有写日期，但附了一张作业图片。
+  这时应提取：
+  - `subject = 数学`
+  - `targetDate = 这条消息发给智能体当天的本地日期`
+  - 作业图片 = 当前消息里附带的那张图片
+
+不要把老师的聊天文字截图本身当作业图片上传；应把聊天里真正附带的作业图片作为 `sourceFiles` 或 `inlineSources` 提交。
+
+“创建作业”支持三种来源模式：
 
 - 空白作业：不传 `sourceUrls`
-- 文件作业：传 `sourceUrls`
+- 远程文件作业：传 `sourceUrls`
+- 本地文件作业：传 `sourceFiles`
+- 直接内嵌文件：传 `inlineSources`
 
 规则：
 
-- `sourceUrls` 可以是单个 PDF，或者多张图片。
-- 一次请求里不能混用 PDF 和图片 URL。
-- 运行 StudyGate 的桌面端机器必须能直接访问并下载这些 URL。
-- 优先使用带签名的 HTTPS 临时地址。
+- `sourceUrls`、`sourceFiles`、`inlineSources` 可以混合使用，但整次请求里仍然只能是“单个 PDF”或“多张图片”。
+- `sourceFiles` 适合 OpenClaw 已经拿到本地临时图片文件时直接上传，不需要先做公网地址。
+- `inlineSources` 适合上层已经拿到 base64 文件内容的情况。
+- 对话里如果附了很多张同一份作业图片，默认要作为同一份作业的多页图片一起提交，不要拆成很多份单页作业。
+- `requests` 数组可用于批量创建、批量删除和批量查询状态。
 
 最小作业创建请求体示例：
 
@@ -140,25 +185,22 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
   "subject": "Math",
   "bucket": "课内",
   "targetDate": "2026-03-20",
-  "sourceUrls": [
-    "https://example.com/homework/page-1.png"
+  "sourceFiles": [
+    "/tmp/page-1.png"
   ]
-}
-```
-
-最小作业删除请求体示例：
-
-```json
-{
-  "jobId": "951c3fe0-2702-42e1-9d20-eed303e24c30"
 }
 ```
 
 提交之后：
 
 1. 告诉用户：请求已经进入队列。
-2. 告诉用户：要等桌面端同步后，状态才会变成 `completed`。
-3. 用户追问进度时，用“作业状态”查询。
+2. 创建作业会直接进入桌面端同步队列。
+3. 告诉用户：要等桌面端同步后，状态才会变成 `completed`。
+4. 用户追问进度时，用“作业状态”查询。
+
+注意：
+
+- 智能体作业删除接口已移除，不要尝试删除作业。
 
 ## 结果解释
 
@@ -166,7 +208,7 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 
 - 计划提交返回 `status: "applied"`，表示后端已经直接接受并生效。
 - 计划提交返回 `status: "pending"`，表示这次修改需要人工确认。
-- 作业创建或删除返回 `status: "pending"`，表示请求已经进入桌面端同步队列。
+- 作业创建返回 `status: "pending"`，表示请求已经进入桌面端同步队列。
 - 查询作业状态时如果 `request.status: "completed"`，表示桌面端已经完成了动作。
 
 如果 API 返回了 `error` 字段，就直接把错误告诉上层，不要自己编造兜底逻辑。

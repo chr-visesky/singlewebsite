@@ -9,7 +9,8 @@ const {
   ipcMain,
   safeStorage,
   session,
-  shell: electronShell
+  shell: electronShell,
+  webFrameMain
 } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -153,6 +154,10 @@ const {
 const {
   createHomeworkRemoteRuntime
 } = require('./homework-remote-runtime');
+const {
+  LEGACY_MEDIA_COMPATIBILITY_SCRIPT,
+  configureClassroomSecurityBootstrap
+} = require('./classroom-security-bootstrap');
 
 const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
@@ -175,154 +180,6 @@ const REMINDER_CHECK_ALIGNMENT_FUZZ_MS = 150;
 const MAIN_WINDOW_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
 const CLASSROOM_SHELL_TOP_HEIGHT = 62;
 const STARTUP_DEBUG_LOG = path.join(os.tmpdir(), 'studygate-startup-debug.log');
-const LEGACY_MEDIA_COMPATIBILITY_SCRIPT = String.raw`
-(() => {
-  if (!window || !window.navigator || !/^https?:$/.test(window.location.protocol)) {
-    return;
-  }
-
-  const navigatorObject = window.navigator;
-  const originalMediaDevices = navigatorObject.mediaDevices || {};
-
-  const normalizeTrackConstraints = (value) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return value;
-    }
-
-    const nextValue = { ...value };
-    let sourceId = '';
-
-    if (typeof nextValue.sourceId === 'string' && nextValue.sourceId) {
-      sourceId = nextValue.sourceId;
-    }
-
-    if (nextValue.mandatory && typeof nextValue.mandatory.sourceId === 'string' && nextValue.mandatory.sourceId) {
-      sourceId = nextValue.mandatory.sourceId;
-    }
-
-    if (Array.isArray(nextValue.optional)) {
-      for (const option of nextValue.optional) {
-        if (option && typeof option.sourceId === 'string' && option.sourceId) {
-          sourceId = option.sourceId;
-          break;
-        }
-      }
-    }
-
-    delete nextValue.sourceId;
-    delete nextValue.optional;
-    delete nextValue.mandatory;
-
-    if (sourceId) {
-      nextValue.deviceId = { exact: sourceId };
-    }
-
-    return Object.keys(nextValue).length ? nextValue : true;
-  };
-
-  const normalizeConstraints = (constraints) => {
-    if (constraints === 'video') {
-      return { video: true };
-    }
-
-    if (constraints === 'audio') {
-      return { audio: true };
-    }
-
-    if (!constraints || typeof constraints !== 'object' || Array.isArray(constraints)) {
-      return constraints;
-    }
-
-    const nextConstraints = { ...constraints };
-
-    if ('video' in nextConstraints) {
-      nextConstraints.video = normalizeTrackConstraints(nextConstraints.video);
-    }
-
-    if ('audio' in nextConstraints) {
-      nextConstraints.audio = normalizeTrackConstraints(nextConstraints.audio);
-    }
-
-    return nextConstraints;
-  };
-
-  const nativeLegacyGetUserMedia =
-    (typeof navigatorObject.getUserMedia === 'function' && navigatorObject.getUserMedia.bind(navigatorObject)) ||
-    (typeof navigatorObject.webkitGetUserMedia === 'function' && navigatorObject.webkitGetUserMedia.bind(navigatorObject)) ||
-    (typeof navigatorObject.mozGetUserMedia === 'function' && navigatorObject.mozGetUserMedia.bind(navigatorObject)) ||
-    (typeof navigatorObject.msGetUserMedia === 'function' && navigatorObject.msGetUserMedia.bind(navigatorObject)) ||
-    null;
-
-  const nativeModernGetUserMedia =
-    originalMediaDevices && typeof originalMediaDevices.getUserMedia === 'function'
-      ? originalMediaDevices.getUserMedia.bind(originalMediaDevices)
-      : null;
-
-  if (!nativeModernGetUserMedia && !nativeLegacyGetUserMedia) {
-    return;
-  }
-
-  const modernShim = (constraints) => {
-    const normalizedConstraints = normalizeConstraints(constraints);
-
-    if (nativeModernGetUserMedia) {
-      return nativeModernGetUserMedia(normalizedConstraints);
-    }
-
-    return new Promise((resolve, reject) => {
-      nativeLegacyGetUserMedia(normalizedConstraints, resolve, reject);
-    });
-  };
-
-  const legacyShim = (constraints, successCallback, errorCallback) =>
-    modernShim(constraints).then(
-      (stream) => {
-        if (typeof successCallback === 'function') {
-          successCallback(stream);
-        }
-
-        return stream;
-      },
-      (error) => {
-        if (typeof errorCallback === 'function') {
-          errorCallback(error);
-        }
-
-        throw error;
-      }
-    );
-
-  try {
-    if (!navigatorObject.mediaDevices) {
-      Object.defineProperty(navigatorObject, 'mediaDevices', {
-        configurable: true,
-        enumerable: true,
-        value: originalMediaDevices
-      });
-    }
-  } catch {
-    // Ignore read-only navigator properties.
-  }
-
-  try {
-    navigatorObject.mediaDevices.getUserMedia = modernShim;
-  } catch {
-    // Ignore read-only mediaDevices methods.
-  }
-
-  for (const key of ['getUserMedia', 'webkitGetUserMedia', 'mozGetUserMedia', 'msGetUserMedia']) {
-    try {
-      navigatorObject[key] = legacyShim;
-    } catch {
-      // Ignore read-only legacy navigator properties.
-    }
-  }
-
-  if (!window.AudioContext && window.webkitAudioContext) {
-    window.AudioContext = window.webkitAudioContext;
-  }
-})();
-`;
 let mainWindow = null;
 let appConfig = null;
 let classroomDefinitions = [];
@@ -409,10 +266,12 @@ const securityRuntime = createSecurityRuntime({
   parseUrl,
   pathModule: path,
   runtimePaths,
-  shortcutMatches
+  shortcutMatches,
+  webFrameMain
 });
 const {
   applyCompatibilityPatch,
+  applyCompatibilityPatchForFrame,
   blockNavigation,
   isAllowedTopLevel,
   isCourseEcosystemOrigin,
@@ -488,6 +347,8 @@ navigationRuntime = createNavigationRuntime({
   shouldAllowAppQuit: () => allowAppQuit,
   shouldBlockShortcut,
   syncCompatibilityPatch: (targetWebContents) => applyCompatibilityPatch(targetWebContents),
+  syncCompatibilityPatchForFrame: (frameProcessId, frameRoutingId) =>
+    applyCompatibilityPatchForFrame(frameProcessId, frameRoutingId),
   topLevelDecision
 });
 const {
@@ -794,7 +655,17 @@ appendStartupDebug('process-start', {
 app.setPath('userData', STABLE_USER_DATA_DIR);
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-features', 'Translate,msSmartScreenProtection');
+app.commandLine.appendSwitch('enable-features', 'SpeakerSelection,AudioOutputDevicesApi');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+configureClassroomSecurityBootstrap({
+  app,
+  fs,
+  path,
+  processCwd: process.cwd(),
+  processExecPath: process.execPath,
+  stableUserDataDir: STABLE_USER_DATA_DIR,
+  configFile: CONFIG_FILE
+});
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 appendStartupDebug('single-instance-lock', {
@@ -939,6 +810,7 @@ if (gotSingleInstanceLock) {
         isClassroomShellActive,
         getActiveClassroomShell,
         syncClassroomBrowserView,
+        logNavigationDebug,
         getAppConfig: () => appConfig,
         syncRemoteStudySchedule,
         buildHomeModel,

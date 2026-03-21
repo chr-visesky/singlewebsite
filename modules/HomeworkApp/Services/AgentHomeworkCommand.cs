@@ -24,12 +24,6 @@ namespace HomeworkApp.Services
             public List<string> SourceFiles { get; set; } = new();
         }
 
-        private sealed class DeleteHomeworkPayload
-        {
-            [JsonProperty("jobId")]
-            public string JobId { get; set; } = string.Empty;
-        }
-
         private sealed class CreateHomeworkResult
         {
             [JsonProperty("ok")]
@@ -59,12 +53,6 @@ namespace HomeworkApp.Services
             if (HasFlag(args, "--agent-create-homework"))
             {
                 Environment.ExitCode = HandleCreate(args);
-                return true;
-            }
-
-            if (HasFlag(args, "--agent-delete-homework"))
-            {
-                Environment.ExitCode = HandleDelete(args);
                 return true;
             }
 
@@ -99,58 +87,6 @@ namespace HomeworkApp.Services
                     Bucket = job.Bucket,
                     TargetDate = job.CreateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     TotalPages = job.TotalPages
-                });
-            }
-            catch (Exception ex)
-            {
-                exitCode = 1;
-                WriteResult(resultFile, new CreateHomeworkResult
-                {
-                    Ok = false,
-                    Error = ex.Message
-                });
-            }
-
-            return exitCode;
-        }
-
-        private static int HandleDelete(string[] args)
-        {
-            string payloadFile = ReadOption(args, "--payload-file");
-            string resultFile = ReadOption(args, "--result-file");
-            int exitCode = 0;
-
-            try
-            {
-                if (string.IsNullOrWhiteSpace(payloadFile))
-                {
-                    throw new InvalidOperationException("缺少 --payload-file。");
-                }
-
-                var payload = ReadDeletePayload(payloadFile);
-                string jobId = string.IsNullOrWhiteSpace(payload.JobId) ? string.Empty : payload.JobId.Trim();
-
-                if (string.IsNullOrWhiteSpace(jobId))
-                {
-                    throw new InvalidOperationException("缺少作业 jobId。");
-                }
-
-                JobSession? job = JobManager.LoadJob(jobId);
-
-                if (job == null)
-                {
-                    throw new InvalidOperationException("找不到要删除的作业。");
-                }
-
-                JobManager.DeleteJob(jobId);
-                WriteResult(resultFile, new CreateHomeworkResult
-                {
-                    Ok = true,
-                    JobId = jobId,
-                    Subject = job.Subject,
-                    Bucket = job.Bucket,
-                    TargetDate = job.CreateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    TotalPages = 0
                 });
             }
             catch (Exception ex)
@@ -201,17 +137,6 @@ namespace HomeworkApp.Services
 
             string json = File.ReadAllText(payloadFile);
             return JsonConvert.DeserializeObject<CreateHomeworkPayload>(json) ?? new CreateHomeworkPayload();
-        }
-
-        private static DeleteHomeworkPayload ReadDeletePayload(string payloadFile)
-        {
-            if (!File.Exists(payloadFile))
-            {
-                throw new FileNotFoundException("找不到作业删除参数文件。", payloadFile);
-            }
-
-            string json = File.ReadAllText(payloadFile);
-            return JsonConvert.DeserializeObject<DeleteHomeworkPayload>(json) ?? new DeleteHomeworkPayload();
         }
 
         private static DateTime ParseTargetDate(string rawValue)

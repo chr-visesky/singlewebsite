@@ -14,12 +14,6 @@ function createHomeworkAgentRuntime(dependencies = {}) {
 
   let syncPromise = Promise.resolve();
 
-  function normalizeRequestOperation(request) {
-    return normalizePrefix(request && (request.operation || request.mode)).toLowerCase() === 'delete'
-      ? 'delete'
-      : 'create';
-  }
-
   function ensureMarksState() {
     const studyToolsState = typeof getStudyToolsState === 'function' ? getStudyToolsState() : {};
 
@@ -51,6 +45,11 @@ function createHomeworkAgentRuntime(dependencies = {}) {
 
   function supportedExtensionFromUrl(url) {
     try {
+      if (/^data:/i.test(String(url || ''))) {
+        const matched = String(url).match(/^data:([^;,]+);base64,/i);
+        return matched ? supportedExtensionFromContentType(matched[1]) : '';
+      }
+
       const pathname = new URL(url).pathname.toLowerCase();
       const extension = pathModule.extname(pathname);
       return ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.gif'].includes(extension) ? extension : '';
@@ -125,23 +124,34 @@ function createHomeworkAgentRuntime(dependencies = {}) {
 
     for (let index = 0; index < sourceUrls.length; index += 1) {
       const sourceUrl = sourceUrls[index];
-      const response = await fetch(sourceUrl);
+      let extension = supportedExtensionFromUrl(sourceUrl);
+      let buffer = null;
 
-      if (!response.ok) {
-        throw new Error(`下载作业源文件失败：${response.status}`);
+      if (/^data:/i.test(String(sourceUrl || ''))) {
+        const matched = String(sourceUrl).match(/^data:([^;,]+);base64,(.*)$/is);
+
+        if (!matched) {
+          throw new Error('智能体作业源文件 data URL 不合法。');
+        }
+
+        extension = extension || supportedExtensionFromContentType(matched[1]);
+        buffer = Buffer.from(matched[2].replace(/\s+/g, ''), 'base64');
+      } else {
+        const response = await fetch(sourceUrl);
+
+        if (!response.ok) {
+          throw new Error(`下载作业源文件失败：${response.status}`);
+        }
+
+        extension = extension || supportedExtensionFromContentType(response.headers.get('content-type')) || '';
+        buffer = Buffer.from(await response.arrayBuffer());
       }
 
-      const extension =
-        supportedExtensionFromUrl(sourceUrl) ||
-        supportedExtensionFromContentType(response.headers.get('content-type')) ||
-        '';
-
-      if (!extension) {
+      if (!extension || !buffer) {
         throw new Error('智能体作业源文件必须是 PDF 或图片。');
       }
 
       const filePath = pathModule.join(sourceDirectory, `source-${index + 1}${extension}`);
-      const buffer = Buffer.from(await response.arrayBuffer());
       await fs.promises.writeFile(filePath, buffer);
       downloadedFiles.push(filePath);
     }
@@ -182,43 +192,6 @@ function createHomeworkAgentRuntime(dependencies = {}) {
 
     if (!result || result.ok !== true) {
       throw new Error(normalizePrefix(result && result.error) || 'HomeworkApp 创建作业失败。');
-    }
-
-    return result;
-  }
-
-  async function invokeHomeworkAgentDelete(executablePath, payload, workingDirectory) {
-    const payloadPath = pathModule.join(workingDirectory, 'payload.json');
-    const resultPath = pathModule.join(workingDirectory, 'result.json');
-    await writeTempJson(payloadPath, payload);
-
-    await new Promise((resolve, reject) => {
-      const child = spawn(
-        executablePath,
-        ['--agent-delete-homework', '--payload-file', payloadPath, '--result-file', resultPath],
-        {
-          cwd: pathModule.dirname(executablePath),
-          windowsHide: true,
-          stdio: 'ignore'
-        }
-      );
-
-      child.once('error', reject);
-      child.once('exit', (code) => {
-        if (code === 0) {
-          resolve();
-          return;
-        }
-
-        reject(new Error(`HomeworkApp 删除作业失败，退出码 ${code}`));
-      });
-    });
-
-    const resultText = await fs.promises.readFile(resultPath, 'utf8');
-    const result = JSON.parse(resultText);
-
-    if (!result || result.ok !== true) {
-      throw new Error(normalizePrefix(result && result.error) || 'HomeworkApp 删除作业失败。');
     }
 
     return result;
@@ -296,68 +269,20 @@ function createHomeworkAgentRuntime(dependencies = {}) {
     }
   }
 
-  async function deleteHomeworkFromRequest(request) {
-    const executablePath = normalizePrefix(resolveHomeworkExecutablePath());
-
-    if (!executablePath) {
-      throw new Error('找不到 HomeworkApp.exe。');
-    }
-
-    const jobId = normalizePrefix(request && (request.targetJobId || request.jobId));
-
-    if (!jobId) {
-      throw new Error('智能体删除作业请求缺少 jobId。');
-    }
-
-    const workingDirectory = pathModule.join(
-      process.env.TEMP || process.env.TMP || pathModule.dirname(executablePath),
-      'studygate-agent-homework',
-      request.id
-    );
-
-    try {
-      const result = await invokeHomeworkAgentDelete(
-        executablePath,
-        {
-          jobId
-        },
-        workingDirectory
-      );
-
-      return {
-        status: 'deleted',
-        jobId: normalizePrefix(result.jobId || jobId),
-        totalPages: 0,
-        subject: normalizePrefix(result.subject) || request.subject,
-        bucket: normalizePrefix(result.bucket) || request.bucket,
-        targetDate: normalizePrefix(result.targetDate) || request.targetDate
-      };
-    } finally {
-      await removeTempDirectory(workingDirectory);
-    }
-  }
-
   async function processRequest(request, context) {
     const marks = ensureMarksState();
     const currentMark = marks[request.id];
-    const operation = normalizeRequestOperation(request);
 
     if (currentMark && currentMark.status === 'acknowledged') {
       return;
     }
 
-    if (
-      currentMark &&
-      ((operation === 'delete' && currentMark.status === 'deleted') ||
-        (operation !== 'delete' && currentMark.status === 'created'))
-    ) {
+    if (currentMark && currentMark.status === 'created') {
       await completeRemoteRequest(request, currentMark, context).catch(() => {});
       return;
     }
 
-    const nextMark = operation === 'delete'
-      ? await deleteHomeworkFromRequest(request)
-      : await createHomeworkFromRequest(request);
+    const nextMark = await createHomeworkFromRequest(request);
     rememberMark(request.id, nextMark);
     await completeRemoteRequest(request, nextMark, context).catch(() => {});
   }
@@ -365,7 +290,8 @@ function createHomeworkAgentRuntime(dependencies = {}) {
   function normalizeIncomingRequests(requests) {
     return (Array.isArray(requests) ? requests : [])
       .filter((item) => item && typeof item === 'object')
-      .filter((item) => normalizePrefix(item.id) && normalizePrefix(item.status) !== 'completed');
+      .filter((item) => normalizePrefix(item.id) && normalizePrefix(item.status) !== 'completed')
+      .filter((item) => normalizePrefix(item.operation || item.mode).toLowerCase() !== 'delete');
   }
 
   async function syncAgentHomeworkRequests(requests = [], context = {}) {

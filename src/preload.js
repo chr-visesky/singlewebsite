@@ -1,6 +1,7 @@
 'use strict';
 
 const { contextBridge, ipcRenderer } = require('electron');
+const { bootstrapClassroomMediaRuntime } = require('./preload-media-runtime');
 
 const TOOLBAR_HEIGHT = 62;
 const TOOLBAR_HOST_ID = 'studygate-nav-host';
@@ -13,6 +14,14 @@ let reminderAlarmContext = null;
 let zoomShortcutBound = false;
 let layoutAdjustObserver = null;
 let lastReportedToolbarHeight = -1;
+
+bootstrapClassroomMediaRuntime({
+  windowObject: window,
+  consoleObject: console,
+  sendLog(payload) {
+    ipcRenderer.send('shell:log-classroom-media-event', payload);
+  }
+});
 
 function dispatchToolbarAction(actionId) {
   window.dispatchEvent(

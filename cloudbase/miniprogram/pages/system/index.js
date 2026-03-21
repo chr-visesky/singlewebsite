@@ -1,8 +1,10 @@
 const {
   callAdmin,
   callAgentAccessAdmin,
+  callHomeworkAdmin,
   decorateAdmins,
   decorateAgentAccessRequests,
+  decorateAgentHomeworkRequests,
   decorateStudentDevices,
   formatCloudTimestamp
 } = require('../../utils/studygate-admin');
@@ -14,6 +16,7 @@ let devicesRequestSerial = 0;
 let devicesMutationSerial = 0;
 let agentAccessRequestSerial = 0;
 let agentAccessMutationSerial = 0;
+let agentHomeworkRequestSerial = 0;
 let controlRequestSerial = 0;
 let controlMutationSerial = 0;
 
@@ -33,6 +36,9 @@ Page({
     agentAccessRequests: [],
     hasAgentAccessRequests: false,
     agentAccessUpdatedAtDisplay: '还没有智能体接入申请。',
+    agentHomeworkRequests: [],
+    hasAgentHomeworkRequests: false,
+    agentHomeworkUpdatedAtDisplay: '还没有智能体作业申请。',
     hasExitPassword: false,
     exitPasswordUpdatedAtDisplay: '未设置',
     exitPasswordDraft: '',
@@ -69,6 +75,7 @@ Page({
         this.reloadAdmins(),
         this.reloadStudentDevices(),
         this.reloadAgentAccessRequests(),
+        this.reloadAgentHomeworkRequests(),
         this.reloadControlSettings()
       ]);
       return;
@@ -84,6 +91,9 @@ Page({
       agentAccessRequests: [],
       hasAgentAccessRequests: false,
       agentAccessUpdatedAtDisplay: '还没有智能体接入申请。',
+      agentHomeworkRequests: [],
+      hasAgentHomeworkRequests: false,
+      agentHomeworkUpdatedAtDisplay: '还没有智能体作业申请。',
       hasExitPassword: false,
       exitPasswordUpdatedAtDisplay: '未设置'
     });
@@ -231,6 +241,38 @@ Page({
 
       wx.showToast({
         title: error && error.message ? error.message : '智能体申请加载失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async reloadAgentHomeworkRequests() {
+    const requestSerial = ++agentHomeworkRequestSerial;
+
+    try {
+      const result = await callHomeworkAdmin('listAgentHomeworkRequests');
+
+      if (requestSerial !== agentHomeworkRequestSerial) {
+        return;
+      }
+
+      const agentHomeworkRequests = decorateAgentHomeworkRequests(result.items);
+
+      this.setData({
+        agentHomeworkRequests,
+        hasAgentHomeworkRequests: agentHomeworkRequests.length > 0,
+        agentHomeworkUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有智能体作业申请。'
+        })
+      });
+    } catch (error) {
+      if (requestSerial !== agentHomeworkRequestSerial) {
+        return;
+      }
+
+      wx.showToast({
+        title: error && error.message ? error.message : '作业申请加载失败',
         icon: 'none'
       });
     }
