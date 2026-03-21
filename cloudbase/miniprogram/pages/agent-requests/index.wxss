@@ -1,0 +1,32 @@
+.agent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.agent-meta__pill {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: rgba(202, 109, 51, 0.12);
+  color: #a95f31;
+  font-size: 22rpx;
+}
+
+.preview-list {
+  display: grid;
+  gap: 8rpx;
+  margin-top: 16rpx;
+}
+
+.preview-list__row {
+  padding: 14rpx 16rpx;
+  border-radius: 18rpx;
+  background: rgba(31, 39, 45, 0.04);
+  color: #495863;
+  font-size: 24rpx;
+}
+
+.preview-list__row--soft {
+  color: #7b8891;
+}

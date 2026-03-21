@@ -72,6 +72,7 @@ function createEmptyNetdiskState() {
 function createEmptyStudyToolsState() {
   return {
     classMarks: {},
+    agentHomeworkRequestMarks: {},
     mobileToken: crypto.randomBytes(12).toString('hex'),
     uiZoomFactor: DEFAULT_UI_ZOOM_FACTOR,
     studentDeviceCredential: {

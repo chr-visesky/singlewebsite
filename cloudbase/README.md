@@ -4,8 +4,13 @@
 
 目录说明：
 
-- `functions/scheduleAdmin`：小程序调用的管理云函数
+- `functions/scheduleAdmin`：小程序调用的计划管理云函数
 - `functions/schedulePublic`：给桌面程序拉课表和保存学生计划的 HTTP 云函数
+- `functions/homeworkAdmin`：作业请求的管理云函数
+- `functions/homeworkPublic`：给智能体提交作业创建请求、给桌面程序拉取待创建作业的 HTTP 云函数
+- `functions/agentAccessAdmin`：小程序里批准“学习助手”接入申请的管理云函数
+- `functions/agentAccessPublic`：给学习助手自动申请/轮询授权 token 的 HTTP 云函数
+- `functions/skillPublic`：给 OpenClaw 下载“学习助手”技能包的 HTTP 云函数
 - `miniprogram`：家长自己用的小程序管理端
 
 如果你现在就要开始部署，直接看：
@@ -18,6 +23,7 @@
 - 一个 CloudBase 环境 ID
 - 一个给桌面程序读课表用的 `READ_TOKEN`
 - 一个给桌面程序写学生计划用的 `STUDENT_WRITE_TOKEN`
+- 一个给智能体提交计划变更的 `AGENT_WRITE_TOKEN`（可选）
 - 你自己的微信 `OPENID`
 
 两个 token 可以直接一起生成：
@@ -28,7 +34,7 @@ npm run cloudbase:token
 
 ## 2. CloudBase 环境变量
 
-两个云函数都建议设置：
+计划和作业云函数都建议设置：
 
 - `SCHEDULE_COLLECTION=study_schedule`
 - `SCHEDULE_DOC_ID=main`
@@ -48,6 +54,26 @@ npm run cloudbase:token
 
 - `READ_TOKEN=你给桌面程序的只读 token`
 - `STUDENT_WRITE_TOKEN=你给桌面程序写学生计划的 token`
+- `AGENT_WRITE_TOKEN=你给 OpenClaw 之类智能体改计划的 token`
+
+`homeworkPublic` 还需要：
+
+- `READ_TOKEN=你给桌面程序拉作业请求和回写完成状态的 token`
+- `AGENT_WRITE_TOKEN=你给 OpenClaw 之类智能体创建作业的 token`
+
+`agentAccessPublic` 还需要：
+
+- `AGENT_WRITE_TOKEN=批准后要下发给学习助手的 token`
+
+`agentAccessAdmin` 还需要：
+
+- `ADMIN_OPENIDS=和 scheduleAdmin 一样即可`
+
+`skillPublic` 默认不需要环境变量。
+
+如果你不想公开下载，也可以额外配置：
+
+- `SKILL_DOWNLOAD_TOKEN=你给 OpenClaw 下载技能包用的 token`
 
 ## 3. 小程序端
 
@@ -65,6 +91,22 @@ npm run cloudbase:token
 - `listAdmins`：读当前管理员列表
 - `addAdmin`：添加管理员
 - `removeAdmin`：移除管理员
+- `listAgentPlanRequests`：查看智能体变更申请
+- `approveAgentPlanRequest`：批准删除/覆盖类申请
+- `rejectAgentPlanRequest`：驳回智能体申请
+
+`homeworkAdmin` 支持的动作：
+
+- `whoami`：返回当前小程序用户身份以及是否管理员
+- `listAgentHomeworkRequests`：查看智能体作业创建请求
+- `getAgentHomeworkRequestStatus`：按 `requestId` 查询作业创建状态
+
+`agentAccessAdmin` 支持的动作：
+
+- `whoami`：返回当前小程序用户身份以及是否管理员
+- `listAgentAccessRequests`：查看学习助手接入申请
+- `approveAgentAccessRequest`：批准学习助手接入申请
+- `rejectAgentAccessRequest`：驳回学习助手接入申请
 
 第一次可以先让小程序跑起来，点“刷新身份”，拿到自己的 `OPENID`，再把它填进 `ADMIN_OPENIDS`。等你进入小程序后，后面就直接在小程序页面里加你老婆，不用再回云函数环境变量。
 
@@ -75,7 +117,12 @@ npm run cloudbase:token
 ```json
 {
   "remoteSchedule": {
-    "url": "https://你的-http-访问地址",
+    "url": "https://你的计划 HTTP 地址",
+    "authToken": "和 READ_TOKEN 一致",
+    "refreshMinutes": 3
+  },
+  "remoteHomework": {
+    "url": "https://你的作业 HTTP 地址",
     "authToken": "和 READ_TOKEN 一致",
     "refreshMinutes": 3
   }
@@ -85,10 +132,11 @@ npm run cloudbase:token
 `schedulePublic` 支持：
 
 - `GET`
-- `Authorization: Bearer <READ_TOKEN>`
+- `Authorization: Bearer <READ_TOKEN>` 或 `Authorization: Bearer <AGENT_WRITE_TOKEN>`
 - `POST`
 - `Authorization: Bearer <STUDENT_WRITE_TOKEN>`，可直接保存学生计划
 - `Authorization: Bearer <READ_TOKEN>` + 桌面端自动申请并经家长批准后的设备身份，也可以保存学生计划
+- `Authorization: Bearer <AGENT_WRITE_TOKEN>`，可提交智能体计划变更申请
 
 不再接受：
 
@@ -111,6 +159,50 @@ npm run cloudbase:token
   ]
 }
 ```
+
+智能体变更这条链路：
+
+- `submitAgentPlanRequest`：提交智能体计划修改
+- `getAgentPlanRequestStatus`：按 `requestId` 查询处理状态
+- 纯新增计划会直接生效，并在申请记录里标记为 `approved`
+- 删除或覆盖现有计划会进入管理端“小程序 > 计划管理 > 智能体申请”等待人工确认
+
+`homeworkPublic` 支持：
+
+- `GET`
+- `Authorization: Bearer <READ_TOKEN>`，桌面端读取待创建作业请求
+- `POST`
+- `Authorization: Bearer <AGENT_WRITE_TOKEN>`，提交或查询智能体作业创建请求
+- `Authorization: Bearer <AGENT_WRITE_TOKEN>`，提交或查询智能体作业删除请求
+- `Authorization: Bearer <READ_TOKEN>`，桌面端回写作业创建完成状态
+
+智能体创建作业这条链路：
+
+- `submitAgentHomeworkRequest`：提交作业创建请求
+- `submitAgentHomeworkDeleteRequest`：提交作业删除请求
+- `getAgentHomeworkRequestStatus`：按 `requestId` 查询创建状态
+- 请求会先进入云端队列，再由桌面端同步创建本地作业
+- 桌面端创建或删除成功后都会把状态回写成 `completed`
+- 支持两种模式：
+  - 空白作业：不传 `sourceUrls`
+  - 文件作业：传 `sourceUrls`，支持单个 PDF 或多张图片，不支持 PDF 和图片混传
+- 删除作业时需要传 `jobId`
+
+`agentAccessPublic` 支持：
+
+- `POST action=requestAgentAccess`
+- `POST action=getAgentAccessRequestStatus`
+- 学习助手第一次没有 token 时，会先提交接入申请
+- 家长在小程序“系统管理 > 智能体接入授权”里批准后，学习助手就能自动领取 `AGENT_WRITE_TOKEN`
+- 学习助手会把拿到的 token 缓存到当前机器的 `~/.openclaw/study-helper-auth.json`
+
+`skillPublic` 支持：
+
+- `GET`
+- 默认返回技能包元信息
+- `?action=download` 返回 `study-helper.zip`
+- 如果配置了 `SKILL_DOWNLOAD_TOKEN`，就需要：
+  `Authorization: Bearer <SKILL_DOWNLOAD_TOKEN>`
 
 ## 5. 目标字段
 

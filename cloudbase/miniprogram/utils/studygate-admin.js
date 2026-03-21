@@ -34,6 +34,22 @@ async function callAdmin(action, extra = {}) {
   return response && response.result ? response.result : {};
 }
 
+async function callNamedFunction(functionName, action, extra = {}) {
+  const response = await wx.cloud.callFunction({
+    name: functionName,
+    data: {
+      action,
+      ...extra
+    }
+  });
+
+  return response && response.result ? response.result : {};
+}
+
+async function callAgentAccessAdmin(action, extra = {}) {
+  return callNamedFunction(config.agentAccessAdminFunctionName, action, extra);
+}
+
 function normalizeWeekdayValues(values) {
   return Array.from(new Set((values || []).map((item) => String(item))))
     .filter((item) => /^(?:[1-7])$/.test(item))
@@ -196,6 +212,147 @@ function decorateStudentDevices(items) {
     : [];
 }
 
+function decorateAgentPlanRequests(items) {
+  return Array.isArray(items)
+    ? items
+        .map((item) => {
+          const status = item && item.status === 'approved'
+            ? 'approved'
+            : item && item.status === 'rejected'
+              ? 'rejected'
+              : 'pending';
+          const scope = item && item.scope === 'parent'
+            ? 'parent'
+            : item && item.scope === 'student'
+              ? 'student'
+              : item && item.scope === 'both'
+                ? 'both'
+                : 'unknown';
+          const operation = item && item.operation === 'add'
+            ? 'add'
+            : item && item.operation === 'update'
+              ? 'update'
+              : item && item.operation === 'delete'
+                ? 'delete'
+                : 'replace';
+          const previewRows = [];
+          const changeItems = Array.isArray(item.changes) ? item.changes : [];
+          const previewSource = changeItems.length
+            ? changeItems
+            : [
+                ...(Array.isArray(item.parentItems) ? item.parentItems.map((entry) => ({
+                  planScope: 'parent',
+                  beforeItem: null,
+                  afterItem: entry
+                })) : []),
+                ...(Array.isArray(item.studentItems) ? item.studentItems.map((entry) => ({
+                  planScope: 'student',
+                  beforeItem: null,
+                  afterItem: entry
+                })) : [])
+              ];
+
+          for (const change of previewSource.slice(0, 4)) {
+            const planScopeLabel = change.planScope === 'student' ? '学生' : '家长';
+            const beforeItem = change.beforeItem;
+            const afterItem = change.afterItem;
+
+            if (operation === 'delete' && beforeItem) {
+              previewRows.push(`${planScopeLabel} · 删除 · ${beforeItem.time} · ${beforeItem.title}`);
+              continue;
+            }
+
+            if (operation === 'update' && beforeItem && afterItem) {
+              previewRows.push(`${planScopeLabel} · 修改 · ${beforeItem.time} · ${beforeItem.title} → ${afterItem.time} · ${afterItem.title}`);
+              continue;
+            }
+
+            const previewItem = afterItem || beforeItem;
+
+            if (previewItem) {
+              previewRows.push(`${planScopeLabel} · 新增 · ${previewItem.time} · ${previewItem.title}`);
+            }
+          }
+
+          return {
+            id: item.id || '',
+            role: item.role || 'agent',
+            label: item.label || '智能体',
+            agentId: item.agentId || '',
+            status,
+            statusLabel: status === 'approved' ? '已批准' : status === 'rejected' ? '已驳回' : '待确认',
+            operation,
+            operationLabel: operation === 'add' ? '新增' : operation === 'update' ? '修改' : operation === 'delete' ? '删除' : '旧版替换',
+            scope,
+            scopeLabel: scope === 'parent' ? '家长计划' : scope === 'student' ? '学生计划' : scope === 'both' ? '家长+学生计划' : '计划申请',
+            summary: item.summary || '申请变更计划',
+            note: item.note || '',
+            itemCount: Number(item.itemCount) || 0,
+            parentItemCount: Number(item.parentItemCount) || 0,
+            studentItemCount: Number(item.studentItemCount) || 0,
+            requestedAt: item.requestedAt || '',
+            requestedAtDisplay: formatCloudTimestamp(item.requestedAt, {
+              emptyText: '未记录'
+            }),
+            reviewedAt: item.reviewedAt || '',
+            reviewedAtDisplay: formatCloudTimestamp(item.reviewedAt, {
+              emptyText: '未处理'
+            }),
+            updatedAt: item.updatedAt || '',
+            previewRows: previewRows.slice(0, 4),
+            extraPreviewCount: Math.max(0, (Number(item.itemCount) || 0) - previewRows.slice(0, 4).length)
+          };
+        })
+        .sort(
+          (left, right) =>
+            Number(left.status !== 'pending') - Number(right.status !== 'pending') ||
+            (right.updatedAt || right.requestedAt || '').localeCompare(left.updatedAt || left.requestedAt || '') ||
+            left.label.localeCompare(right.label)
+        )
+    : [];
+}
+
+function decorateAgentAccessRequests(items) {
+  return Array.isArray(items)
+    ? items
+        .map((item) => {
+          const status = item && item.status === 'approved'
+            ? 'approved'
+            : item && item.status === 'rejected'
+              ? 'rejected'
+              : 'pending';
+
+          return {
+            id: item.id || '',
+            clientId: item.clientId || '',
+            label: item.label || '学习助手',
+            summary: item.summary || '学习助手请求接入',
+            status,
+            statusLabel: status === 'approved' ? '已批准' : status === 'rejected' ? '已驳回' : '待确认',
+            requestedAt: item.requestedAt || '',
+            requestedAtDisplay: formatCloudTimestamp(item.requestedAt, {
+              emptyText: '未记录'
+            }),
+            reviewedAt: item.reviewedAt || '',
+            reviewedAtDisplay: formatCloudTimestamp(item.reviewedAt, {
+              emptyText: '未处理'
+            }),
+            issuedAt: item.issuedAt || '',
+            issuedAtDisplay: formatCloudTimestamp(item.issuedAt, {
+              emptyText: '未领取'
+            }),
+            updatedAt: item.updatedAt || ''
+          };
+        })
+        .sort(
+          (left, right) =>
+            Number(left.status !== 'pending') - Number(right.status !== 'pending') ||
+            (right.updatedAt || right.requestedAt || '').localeCompare(left.updatedAt || left.requestedAt || '') ||
+            left.label.localeCompare(right.label)
+        )
+    : [];
+}
+
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
@@ -256,6 +413,8 @@ module.exports = {
   WEEKDAY_OPTIONS,
   emptyScheduleForm,
   callAdmin,
+  callAgentAccessAdmin,
+  callNamedFunction,
   normalizeWeekdayValues,
   normalizeSpecificDate,
   normalizeDateList,
@@ -266,6 +425,8 @@ module.exports = {
   decorateLearningToolItems,
   decorateAdmins,
   decorateStudentDevices,
+  decorateAgentPlanRequests,
+  decorateAgentAccessRequests,
   buildHomeTiles,
   formatCloudTimestamp
 };

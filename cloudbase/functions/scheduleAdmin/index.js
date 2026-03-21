@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const cloud = require('wx-server-sdk');
+const { createAgentPlanAdminRuntime } = require('./shared/agent-plan-admin');
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
@@ -12,6 +13,9 @@ const COLLECTION = process.env.SCHEDULE_COLLECTION || 'study_schedule';
 const STATE_DOC_ID = process.env.SCHEDULE_DOC_ID || 'main';
 const ADMIN_COLLECTION = process.env.ADMIN_COLLECTION || 'study_admins';
 const ADMIN_DOC_ID = process.env.ADMIN_DOC_ID || 'main';
+const AGENT_REQUEST_COLLECTION = process.env.AGENT_REQUEST_COLLECTION || 'study_agent_plan_requests';
+const AGENT_REQUEST_DOC_ID = process.env.AGENT_REQUEST_DOC_ID || 'main';
+const MAX_AGENT_PLAN_REQUESTS = 40;
 const DEFAULT_ONLINE_CLASSROOMS = [
   {
     id: 'english-course',
@@ -429,6 +433,27 @@ function normalizeSchedule(rawItems, planScope = 'parent') {
 function combineItems(parentItems, studentItems) {
   return [...parentItems, ...studentItems];
 }
+
+const agentPlanRuntime = createAgentPlanAdminRuntime({
+  db,
+  scheduleCollection: COLLECTION,
+  scheduleDocId: STATE_DOC_ID,
+  agentRequestCollection: AGENT_REQUEST_COLLECTION,
+  agentRequestDocId: AGENT_REQUEST_DOC_ID,
+  maxAgentPlanRequests: MAX_AGENT_PLAN_REQUESTS,
+  defaultOnlineClassrooms: DEFAULT_ONLINE_CLASSROOMS,
+  normalizePrefix,
+  normalizeId,
+  normalizeSchedule,
+  normalizeOnlineClassrooms,
+  fallbackOnlineClassrooms,
+  normalizeContentLibraries,
+  normalizeLearningTools,
+  normalizeStudentDeviceAccess,
+  normalizeControlSettings,
+  createEmptyControlSettings,
+  combineItems
+});
 
 function assertLearningToolsNotInUse(currentState, nextLearningTools) {
   const currentIds = new Set((Array.isArray(currentState.learningTools) ? currentState.learningTools : []).map((item) => item.id));
@@ -976,6 +1001,27 @@ exports.main = async (event = {}) => {
       ok: true,
       updatedAt: state.studentDeviceAccessUpdatedAt,
       items: sanitizeStudentDeviceAccess(state.studentDeviceAccess)
+    };
+  }
+
+  if (action === 'listAgentPlanRequests') {
+    return {
+      ok: true,
+      ...(await agentPlanRuntime.listRequests())
+    };
+  }
+
+  if (action === 'approveAgentPlanRequest') {
+    return {
+      ok: true,
+      ...(await agentPlanRuntime.approveRequest(event.requestId || event.id))
+    };
+  }
+
+  if (action === 'rejectAgentPlanRequest') {
+    return {
+      ok: true,
+      ...(await agentPlanRuntime.rejectRequest(event.requestId || event.id))
     };
   }
 

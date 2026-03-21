@@ -1,0 +1,8 @@
+{
+  "name": "homework-public",
+  "private": true,
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.10.0",
+    "wx-server-sdk": "latest"
+  }
+}

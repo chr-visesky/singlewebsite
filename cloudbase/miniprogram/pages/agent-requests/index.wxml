@@ -1,0 +1,68 @@
+<view class="shell">
+  <view class="masthead">
+    <view class="masthead__eyebrow">AGENT</view>
+    <view class="masthead__title">智能体变更确认</view>
+    <view class="masthead__desc">OpenClaw 这类智能体提交的计划修改会在这里排队。纯新增会自动通过，修改或删除才需要你确认。</view>
+    <view class="status-pill">{{identityHint}}</view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">申请列表</view>
+    <view class="panel__subtitle">{{updatedAtDisplay}} · 待确认 {{pendingCount}} 条</view>
+
+    <view class="action-row">
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="manualRefresh">刷新</view>
+    </view>
+
+    <view wx:if="{{!hasRequests}}" class="empty-state">
+      <view class="empty-state__title">当前没有待处理申请</view>
+      <view class="meta">智能体的纯新增计划会直接通过；只有修改或删除当前计划时，才会出现在这里。</view>
+    </view>
+
+    <view wx:if="{{hasRequests}}" class="list-stack">
+      <view wx:for="{{requests}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.label}}</view>
+            <view class="meta meta--break">{{item.agentId}}</view>
+            <view class="meta">{{item.summary}}</view>
+          </view>
+          <view class="badge">{{item.statusLabel}}</view>
+        </view>
+
+        <view class="agent-meta">
+          <view class="agent-meta__pill">{{item.operationLabel}}</view>
+          <view class="agent-meta__pill">{{item.scopeLabel}}</view>
+          <view class="agent-meta__pill">共 {{item.itemCount}} 条</view>
+          <view class="agent-meta__pill">家长 {{item.parentItemCount}} 条</view>
+          <view class="agent-meta__pill">学生 {{item.studentItemCount}} 条</view>
+        </view>
+
+        <view class="meta">提交时间：{{item.requestedAtDisplay}}</view>
+        <view wx:if="{{item.status !== 'pending'}}" class="meta">处理时间：{{item.reviewedAtDisplay}}</view>
+        <view wx:if="{{item.note}}" class="meta">说明：{{item.note}}</view>
+
+        <view wx:if="{{item.previewRows.length}}" class="preview-list">
+          <view wx:for="{{item.previewRows}}" wx:key="*this" class="preview-list__row">{{item}}</view>
+          <view wx:if="{{item.extraPreviewCount}}" class="preview-list__row preview-list__row--soft">还有 {{item.extraPreviewCount}} 条未展开</view>
+        </view>
+
+        <view wx:if="{{item.status === 'pending'}}" class="action-row">
+          <view
+            class="tap-button tap-button--primary"
+            hover-class="tap-button--active"
+            data-requestid="{{item.id}}"
+            bindtap="approveRequest"
+          >批准并生效</view>
+          <view
+            class="tap-button tap-button--danger"
+            hover-class="tap-button--active"
+            data-requestid="{{item.id}}"
+            data-label="{{item.label}}"
+            bindtap="rejectRequest"
+          >驳回</view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

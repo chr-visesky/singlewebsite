@@ -442,6 +442,10 @@ function createStorageRuntime(dependencies = {}) {
       const rawState = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       studyToolsState = {
         classMarks: rawState.classMarks && typeof rawState.classMarks === 'object' ? rawState.classMarks : {},
+        agentHomeworkRequestMarks:
+          rawState.agentHomeworkRequestMarks && typeof rawState.agentHomeworkRequestMarks === 'object'
+            ? rawState.agentHomeworkRequestMarks
+            : {},
         mobileToken: normalizePrefix(rawState.mobileToken) || crypto.randomBytes(12).toString('hex'),
         uiZoomFactor: normalizeUiZoomFactor(rawState.uiZoomFactor),
         studentDeviceCredential: {
@@ -502,6 +506,44 @@ function createStorageRuntime(dependencies = {}) {
         delete studyToolsState.classMarks[occurrenceKey];
       }
     }
+
+    const homeworkCutoff = new Date();
+    homeworkCutoff.setDate(homeworkCutoff.getDate() - 120);
+    const homeworkCutoffIso = homeworkCutoff.toISOString();
+    const homeworkMarks =
+      studyToolsState.agentHomeworkRequestMarks && typeof studyToolsState.agentHomeworkRequestMarks === 'object'
+        ? studyToolsState.agentHomeworkRequestMarks
+        : {};
+    const sortedHomeworkMarks = Object.entries(homeworkMarks)
+      .filter(([, mark]) => mark && typeof mark === 'object')
+      .sort((left, right) =>
+        normalizePrefix(right[1] && right[1].updatedAt).localeCompare(normalizePrefix(left[1] && left[1].updatedAt))
+      );
+    const nextHomeworkMarks = {};
+
+    for (const [requestId, mark] of sortedHomeworkMarks) {
+      const updatedAt = normalizePrefix(mark.updatedAt || mark.completedAt || mark.createdAt);
+
+      if (!updatedAt || updatedAt < homeworkCutoffIso) {
+        continue;
+      }
+
+      if (Object.keys(nextHomeworkMarks).length >= 120) {
+        continue;
+      }
+
+      nextHomeworkMarks[requestId] = {
+        status: normalizePrefix(mark.status),
+        jobId: normalizePrefix(mark.jobId),
+        subject: normalizePrefix(mark.subject),
+        bucket: normalizePrefix(mark.bucket),
+        targetDate: normalizePrefix(mark.targetDate),
+        updatedAt,
+        totalPages: Number(mark.totalPages) || 0
+      };
+    }
+
+    studyToolsState.agentHomeworkRequestMarks = nextHomeworkMarks;
   }
 
   function saveStudyToolsState() {

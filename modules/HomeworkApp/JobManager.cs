@@ -292,14 +292,14 @@ namespace HomeworkApp
         {
             EnsureJobUsesImageSources(job);
 
-            if (job.SourceFiles.Count <= 1)
-            {
-                throw new InvalidOperationException("至少保留 1 页作业。");
-            }
-
             if (pageIndex < 0 || pageIndex >= job.SourceFiles.Count)
             {
                 throw new ArgumentOutOfRangeException(nameof(pageIndex));
+            }
+
+            if (job.SourceFiles.Count <= 1)
+            {
+                throw new InvalidOperationException("至少保留 1 页作业。");
             }
 
             string sourceFile = job.SourceFiles[pageIndex];

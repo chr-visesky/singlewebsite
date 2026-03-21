@@ -48,6 +48,7 @@ internal static class HomeworkAppUiSmoke
             string outputDir = GetOption(args, "--output-dir") ??
                 Path.Combine(Environment.CurrentDirectory, "temp", "ui-smoke", "homework");
             string? explicitJobDir = GetOption(args, "--job-dir");
+            int existingProcessId = ParseIntOption(args, "--process-id");
             string? jobDir = explicitJobDir ?? FindLatestJobDirectory();
 
             report.AppPath = appPath;
@@ -78,9 +79,17 @@ internal static class HomeworkAppUiSmoke
                 File.Delete(pdfPath);
             }
 
-            KillProcessesByPath(appPath);
+            Process process;
+            if (existingProcessId > 0)
+            {
+                process = Process.GetProcessById(existingProcessId);
+            }
+            else
+            {
+                KillProcessesByPath(appPath);
+                process = StartHomeworkApp(appPath);
+            }
 
-            using var process = StartHomeworkApp(appPath);
             report.ProcessId = process.Id;
 
             RunSta(() =>
@@ -141,6 +150,12 @@ internal static class HomeworkAppUiSmoke
         }
 
         return null;
+    }
+
+    private static int ParseIntOption(string[] args, string name)
+    {
+        string? rawValue = GetOption(args, name);
+        return int.TryParse(rawValue, out int value) && value > 0 ? value : 0;
     }
 
     private static void ResetDirectory(string path)

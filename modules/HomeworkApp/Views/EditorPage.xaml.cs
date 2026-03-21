@@ -130,9 +130,16 @@ namespace HomeworkApp.Views
 
         private void LoadSelectedJob(JobSession job)
         {
-            FlushPendingChanges();
+            NavigateToJob(job);
+        }
 
-            // Navigate to new EditorPage with selected job
+        private void NavigateToJob(JobSession job, bool persistCurrentJob = true)
+        {
+            if (persistCurrentJob)
+            {
+                FlushPendingChanges();
+            }
+
             NavigationService?.Navigate(new EditorPage(job));
         }
 

@@ -4,6 +4,7 @@
       <view class="masthead__title">计划管理</view>
       <view class="masthead__actions">
         <view class="header-chip" hover-class="header-chip--active" bindtap="manualRefresh">刷新</view>
+        <view class="header-chip" hover-class="header-chip--active" bindtap="openAgentRequestsPage">智能体申请</view>
         <view class="header-icon" hover-class="header-chip--active" bindtap="openSystemPage">⚙</view>
       </view>
     </view>

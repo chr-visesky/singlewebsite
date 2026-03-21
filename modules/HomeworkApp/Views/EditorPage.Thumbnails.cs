@@ -15,6 +15,11 @@ namespace HomeworkApp.Views
 {
     public partial class EditorPage
     {
+        private bool CanDeleteCurrentThumbnailPage()
+        {
+            return EffectivePageCount() > 1;
+        }
+
         private async Task RefreshThumbnailStripAsync()
         {
             int pageCount = EffectivePageCount();
@@ -121,7 +126,7 @@ namespace HomeworkApp.Views
             }
 
             pageGrid.Children.Add(thumbnailImage);
-            if (EffectivePageCount() > 1)
+            if (CanDeleteCurrentThumbnailPage())
             {
                 var deleteButton = new Button
                 {
@@ -140,7 +145,6 @@ namespace HomeworkApp.Views
                     Tag = pageIndex
                 };
                 deleteButton.Click += ThumbnailDeleteButton_Click;
-                deleteButton.PreviewMouseLeftButtonDown += ThumbnailDeleteButton_PreviewMouseLeftButtonDown;
                 pageGrid.Children.Add(deleteButton);
             }
             pageGrid.Children.Add(new Border
@@ -184,6 +188,11 @@ namespace HomeworkApp.Views
             if (_thumbnailMutationInProgress)
             {
                 e.Handled = true;
+                return;
+            }
+
+            if (FindAncestor<Button>(e.OriginalSource as DependencyObject) != null)
+            {
                 return;
             }
 
@@ -253,14 +262,9 @@ namespace HomeworkApp.Views
             }
         }
 
-        private void ThumbnailDeleteButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            e.Handled = true;
-        }
-
         private async void ThumbnailDeleteButton_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button button || button.Tag is not int pageIndex || EffectivePageCount() <= 1)
+            if (sender is not Button button || button.Tag is not int pageIndex || !CanDeleteCurrentThumbnailPage())
             {
                 return;
             }
@@ -279,6 +283,7 @@ namespace HomeworkApp.Views
             try
             {
                 _thumbnailMutationInProgress = true;
+                StopPendingSaveDebounce();
                 SaveCurrentPageInk();
                 JobManager.DeletePage(_job, pageIndex);
                 _currentPageIndex = _job.CurrentPage;
@@ -294,6 +299,23 @@ namespace HomeworkApp.Views
             {
                 _thumbnailMutationInProgress = false;
             }
+        }
+
+        private static T? FindAncestor<T>(DependencyObject? source)
+            where T : DependencyObject
+        {
+            var current = source;
+            while (current != null)
+            {
+                if (current is T match)
+                {
+                    return match;
+                }
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return null;
         }
 
         private void SubjectImportMenuItem_Click(object? sender, RoutedEventArgs e)

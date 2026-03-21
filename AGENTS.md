@@ -6,4 +6,4 @@
 - When changing printing, schedule, navigation, or persistence code, run a real project build before finishing.
 - Do not change the home page layout. It must remain: left = module cards, center = calendar, right = today's plan.
 - Do not modify or report the navigation banner static asset unless the user explicitly asks for that resource.
-- For automated UI testing, use `npm run test:ui`. It runs a DOM/code-anchor smoke test for `StudyGate.exe` and a code-anchor C# smoke test for `HomeworkApp.exe`, including real PDF print verification.
+- For automated UI testing, use `npm run test:ui`. It runs a DOM/code-anchor smoke test for `StudyGate.exe`, a code-anchor C# smoke test for `HomeworkApp.exe` including real PDF print verification, and a homework interface smoke that creates and deletes homework through the API path.

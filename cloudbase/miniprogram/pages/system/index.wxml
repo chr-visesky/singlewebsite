@@ -102,6 +102,53 @@
   </view>
 
   <view wx:if="{{authorized}}" class="panel">
+    <view class="panel__title">智能体接入授权</view>
+    <view class="panel__subtitle">{{agentAccessUpdatedAtDisplay}}</view>
+
+    <view class="action-row">
+      <view class="tap-button tap-button--secondary" hover-class="tap-button--active" bindtap="reloadAgentAccessRequests">刷新列表</view>
+    </view>
+
+    <view wx:if="{{!hasAgentAccessRequests}}" class="empty-state">
+      <view class="empty-state__title">还没有智能体接入申请</view>
+      <view class="meta">学习助手第一次调用时会自动申请，批准后它就能自动拿到可用 token。</view>
+    </view>
+
+    <view wx:if="{{hasAgentAccessRequests}}" class="list-stack">
+      <view wx:for="{{agentAccessRequests}}" wx:key="id" class="list-card">
+        <view class="list-card__head">
+          <view class="grow">
+            <view class="list-card__title">{{item.label}}</view>
+            <view class="meta">{{item.summary}}</view>
+            <view class="meta meta--break">{{item.clientId}}</view>
+            <view class="meta">{{item.status === 'pending' ? '申请时间：' + item.requestedAtDisplay : '处理时间：' + item.reviewedAtDisplay}}</view>
+            <view wx:if="{{item.status === 'approved'}}" class="meta">令牌领取：{{item.issuedAtDisplay}}</view>
+          </view>
+          <view class="badge">{{item.statusLabel}}</view>
+        </view>
+
+        <view class="action-row">
+          <view
+            wx:if="{{item.status === 'pending'}}"
+            class="tap-button tap-button--primary"
+            hover-class="tap-button--active"
+            data-requestid="{{item.id}}"
+            bindtap="approveAgentAccessRequest"
+          >批准</view>
+          <view
+            wx:if="{{item.status === 'pending'}}"
+            class="tap-button tap-button--danger"
+            hover-class="tap-button--active"
+            data-requestid="{{item.id}}"
+            data-label="{{item.label}}"
+            bindtap="rejectAgentAccessRequest"
+          >驳回</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{authorized}}" class="panel">
     <view class="panel__title">管理员列表</view>
     <view class="panel__subtitle">{{adminUpdatedAtDisplay}}</view>
 

@@ -292,6 +292,7 @@ function createConfigRuntime(dependencies = {}) {
         scope: normalizePrefix(rawConfig.baiduNetdisk && rawConfig.baiduNetdisk.scope) || 'netdisk'
       },
       remoteSchedule: normalizeRemoteSchedule(rawConfig.remoteSchedule),
+      remoteHomework: normalizeRemoteSchedule(rawConfig.remoteHomework),
       reminders: {
         leadMinutes: reminderLeadMinutes.length ? reminderLeadMinutes : [...defaultReminderLeadMinutes]
       },

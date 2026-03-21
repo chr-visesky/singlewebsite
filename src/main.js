@@ -22,6 +22,7 @@ const { fileURLToPath } = require('url');
 const {
   listNativeModules,
   resolveNativeModule,
+  resolveNativeModuleExecutablePath,
   resolveNativeModuleTitle,
   nativeModuleTarget,
   nativeModuleTargetOptions,
@@ -146,6 +147,12 @@ const {
 const {
   createStudyTargetRuntime
 } = require('./study-target-runtime');
+const {
+  createHomeworkAgentRuntime
+} = require('./homework-agent-runtime');
+const {
+  createHomeworkRemoteRuntime
+} = require('./homework-remote-runtime');
 
 const CONFIG_FILE = 'config.json';
 const EMBEDDED_CONFIG_FILE = 'embedded-config.json';
@@ -565,6 +572,26 @@ const {
   studentDeviceCredentialPayload
 } = storageRuntime;
 scheduleSessionPersist = storageScheduleSessionPersist;
+const homeworkAgentRuntime = createHomeworkAgentRuntime({
+  fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
+  fs,
+  normalizePrefix,
+  getStudyToolsState,
+  pathModule: path,
+  resolveHomeworkExecutablePath: () =>
+    resolveNativeModuleExecutablePath('homework-module', {
+      executableDir: path.dirname(process.execPath),
+      projectRoot: path.resolve(__dirname, '..')
+    }),
+  saveStudyToolsState,
+  spawn
+});
+const homeworkRemoteRuntime = createHomeworkRemoteRuntime({
+  fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
+  getAppConfig: () => appConfig,
+  homeworkAgentRuntime,
+  normalizePrefix
+});
 const studyDataRuntime = createStudyDataRuntime({
   createEmptyRemoteScheduleStatus,
   createEmptyStudentDeviceAccessStatus,
@@ -600,6 +627,11 @@ const {
   syncStudentDeviceAccessStatus,
   syncRemoteStudySchedule
 } = studyDataRuntime;
+const {
+  startRemoteHomeworkPolling,
+  stopRemoteHomeworkPolling,
+  syncRemoteHomeworkRequests
+} = homeworkRemoteRuntime;
 const studyScheduleRuntime = createStudyScheduleRuntime({
   buildHomeUiModel,
   formatDisplayTime,
@@ -943,7 +975,10 @@ if (gotSingleInstanceLock) {
         throwOnError: false
       });
       appendStartupDebug('student-device-access-synced');
+      void syncRemoteHomeworkRequests();
+      appendStartupDebug('remote-homework-sync-started');
       startRemoteSchedulePolling();
+      startRemoteHomeworkPolling();
       appendStartupDebug('remote-polling-started');
       createMainWindow();
       appendStartupDebug('main-window-created');
@@ -996,6 +1031,7 @@ app.on('before-quit', () => {
   clearPendingNetdiskAuth();
   closeExitPasswordWindow();
   reminderPollingRuntime.stop();
+  stopRemoteHomeworkPolling();
   stopRemoteSchedulePolling();
   stopInternalServer();
   void persistSessionState();

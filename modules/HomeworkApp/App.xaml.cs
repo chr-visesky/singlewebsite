@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Windows;
+using HomeworkApp.Services;
 
 namespace HomeworkApp
 {
@@ -8,9 +9,19 @@ namespace HomeworkApp
     {
         protected override void OnStartup(StartupEventArgs e)
         {
-            base.OnStartup(e);
+            EnsureAppDirectories();
 
-            // Initialize application data directory
+            if (AgentHomeworkCommand.TryHandle(e.Args))
+            {
+                Shutdown(Environment.ExitCode);
+                return;
+            }
+
+            base.OnStartup(e);
+        }
+
+        private static void EnsureAppDirectories()
+        {
             string appDataPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "HomeworkApp");
@@ -20,7 +31,6 @@ namespace HomeworkApp
                 Directory.CreateDirectory(appDataPath);
             }
 
-            // Initialize jobs directory
             string jobsPath = Path.Combine(appDataPath, "Jobs");
             if (!Directory.Exists(jobsPath))
             {

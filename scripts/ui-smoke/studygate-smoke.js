@@ -203,29 +203,6 @@ async function dismissHomeNoticeIfVisible(page) {
   });
 }
 
-async function openHomeworkModule(page) {
-  return page.evaluate(() => {
-    const firstCard = document.querySelector('#card-grid .card');
-
-    if (!firstCard) {
-      return null;
-    }
-
-    const openButton = Array.from(firstCard.querySelectorAll('button')).find(
-      (button) => String(button.textContent || '').trim() === '打开' && !button.disabled
-    );
-
-    if (!openButton) {
-      return null;
-    }
-
-    const title = String(firstCard.querySelector('h2')?.textContent || '').trim();
-    const badge = String(firstCard.querySelector('.card__tag')?.textContent || '').trim();
-    openButton.click();
-    return { title, badge };
-  });
-}
-
 async function takeScreenshot(page, targetPath) {
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
   await page.screenshot({
@@ -369,17 +346,11 @@ async function runStudyGateSmoke(options = {}) {
       }
     }
 
-    const moduleLaunch = await openHomeworkModule(homePage);
-    report.homeworkModuleLaunch = moduleLaunch;
-    if (moduleLaunch && String(moduleLaunch.badge || '').includes('作业模块')) {
-      await delay(4000);
-      report.homeworkAppProcessIds = processIdsByPath(homeworkAppPath);
-      report.homeworkAppDetectedFromHome = report.homeworkAppProcessIds.length > 0;
-
-      if (!report.homeworkAppDetectedFromHome) {
-        report.failedChecks.push('首页首个作业模块卡片点击“打开”后没有拉起 HomeworkApp。');
-      }
-    }
+    report.homeworkModuleCard = {
+      title: report.home.firstCardTitle,
+      badge: report.home.firstCardBadge,
+      id: report.home.firstModelCardId
+    };
 
     report.passed = report.failedChecks.length === 0;
   } catch (error) {

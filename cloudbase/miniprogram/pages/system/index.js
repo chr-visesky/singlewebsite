@@ -1,6 +1,8 @@
 const {
   callAdmin,
+  callAgentAccessAdmin,
   decorateAdmins,
+  decorateAgentAccessRequests,
   decorateStudentDevices,
   formatCloudTimestamp
 } = require('../../utils/studygate-admin');
@@ -10,6 +12,8 @@ let adminsRequestSerial = 0;
 let adminsMutationSerial = 0;
 let devicesRequestSerial = 0;
 let devicesMutationSerial = 0;
+let agentAccessRequestSerial = 0;
+let agentAccessMutationSerial = 0;
 let controlRequestSerial = 0;
 let controlMutationSerial = 0;
 
@@ -26,6 +30,9 @@ Page({
     studentDevices: [],
     hasStudentDevices: false,
     studentDevicesUpdatedAtDisplay: '还没有桌面客户端申请记录。',
+    agentAccessRequests: [],
+    hasAgentAccessRequests: false,
+    agentAccessUpdatedAtDisplay: '还没有智能体接入申请。',
     hasExitPassword: false,
     exitPasswordUpdatedAtDisplay: '未设置',
     exitPasswordDraft: '',
@@ -58,7 +65,12 @@ Page({
     await this.refreshIdentity();
 
     if (this.data.authorized) {
-      await Promise.all([this.reloadAdmins(), this.reloadStudentDevices(), this.reloadControlSettings()]);
+      await Promise.all([
+        this.reloadAdmins(),
+        this.reloadStudentDevices(),
+        this.reloadAgentAccessRequests(),
+        this.reloadControlSettings()
+      ]);
       return;
     }
 
@@ -69,6 +81,9 @@ Page({
       studentDevices: [],
       hasStudentDevices: false,
       studentDevicesUpdatedAtDisplay: '还没有桌面客户端申请记录。',
+      agentAccessRequests: [],
+      hasAgentAccessRequests: false,
+      agentAccessUpdatedAtDisplay: '还没有智能体接入申请。',
       hasExitPassword: false,
       exitPasswordUpdatedAtDisplay: '未设置'
     });
@@ -183,6 +198,39 @@ Page({
 
       wx.showToast({
         title: error && error.message ? error.message : '客户端列表加载失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async reloadAgentAccessRequests() {
+    const requestSerial = ++agentAccessRequestSerial;
+    const mutationSerialAtStart = agentAccessMutationSerial;
+
+    try {
+      const result = await callAgentAccessAdmin('listAgentAccessRequests');
+
+      if (requestSerial !== agentAccessRequestSerial || mutationSerialAtStart !== agentAccessMutationSerial) {
+        return;
+      }
+
+      const agentAccessRequests = decorateAgentAccessRequests(result.items);
+
+      this.setData({
+        agentAccessRequests,
+        hasAgentAccessRequests: agentAccessRequests.length > 0,
+        agentAccessUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有智能体接入申请。'
+        })
+      });
+    } catch (error) {
+      if (requestSerial !== agentAccessRequestSerial) {
+        return;
+      }
+
+      wx.showToast({
+        title: error && error.message ? error.message : '智能体申请加载失败',
         icon: 'none'
       });
     }
@@ -467,6 +515,97 @@ Page({
     } catch (error) {
       wx.showToast({
         title: error && error.message ? error.message : '删除失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async approveAgentAccessRequest(event) {
+    const requestId = event.currentTarget.dataset.requestid;
+
+    if (!requestId) {
+      return;
+    }
+
+    try {
+      const mutationSerial = ++agentAccessMutationSerial;
+      const result = await callAgentAccessAdmin('approveAgentAccessRequest', {
+        requestId
+      });
+
+      if (mutationSerial !== agentAccessMutationSerial) {
+        return;
+      }
+
+      const agentAccessRequests = decorateAgentAccessRequests(result.items);
+
+      this.setData({
+        agentAccessRequests,
+        hasAgentAccessRequests: agentAccessRequests.length > 0,
+        agentAccessUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有智能体接入申请。'
+        })
+      });
+
+      wx.showToast({
+        title: '已批准',
+        icon: 'success'
+      });
+    } catch (error) {
+      wx.showToast({
+        title: error && error.message ? error.message : '批准失败',
+        icon: 'none'
+      });
+    }
+  },
+
+  async rejectAgentAccessRequest(event) {
+    const requestId = event.currentTarget.dataset.requestid;
+    const label = event.currentTarget.dataset.label || '学习助手';
+
+    if (!requestId) {
+      return;
+    }
+
+    const modalResult = await wx.showModal({
+      title: '驳回智能体接入',
+      content: `确认驳回这个智能体接入申请吗？\n${label}`,
+      confirmColor: '#a62020'
+    });
+
+    if (!modalResult.confirm) {
+      return;
+    }
+
+    try {
+      const mutationSerial = ++agentAccessMutationSerial;
+      const result = await callAgentAccessAdmin('rejectAgentAccessRequest', {
+        requestId
+      });
+
+      if (mutationSerial !== agentAccessMutationSerial) {
+        return;
+      }
+
+      const agentAccessRequests = decorateAgentAccessRequests(result.items);
+
+      this.setData({
+        agentAccessRequests,
+        hasAgentAccessRequests: agentAccessRequests.length > 0,
+        agentAccessUpdatedAtDisplay: formatCloudTimestamp(result.updatedAt, {
+          prefix: '最近更新：',
+          emptyText: '还没有智能体接入申请。'
+        })
+      });
+
+      wx.showToast({
+        title: '已驳回',
+        icon: 'success'
+      });
+    } catch (error) {
+      wx.showToast({
+        title: error && error.message ? error.message : '驳回失败',
         icon: 'none'
       });
     }

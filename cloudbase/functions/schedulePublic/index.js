@@ -2,6 +2,8 @@
 
 const crypto = require('crypto');
 const cloud = require('wx-server-sdk');
+const { createAgentPlanPublicRuntime } = require('./shared/agent-plan-public');
+const { createCollectionEnsurer } = require('./shared/ensure-collection');
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
@@ -12,6 +14,10 @@ const COLLECTION = process.env.SCHEDULE_COLLECTION || 'study_schedule';
 const STATE_DOC_ID = process.env.SCHEDULE_DOC_ID || 'main';
 const READ_TOKEN = (process.env.READ_TOKEN || '').trim();
 const STUDENT_WRITE_TOKEN = (process.env.STUDENT_WRITE_TOKEN || '').trim();
+const AGENT_WRITE_TOKEN = (process.env.AGENT_WRITE_TOKEN || '').trim();
+const AGENT_REQUEST_COLLECTION = process.env.AGENT_REQUEST_COLLECTION || 'study_agent_plan_requests';
+const AGENT_REQUEST_DOC_ID = process.env.AGENT_REQUEST_DOC_ID || 'main';
+const MAX_AGENT_PLAN_REQUESTS = 40;
 const DEFAULT_ONLINE_CLASSROOMS = [
   {
     id: 'english-course',
@@ -438,6 +444,32 @@ function combineItems(parentItems, studentItems) {
   return [...parentItems, ...studentItems];
 }
 
+const agentPlanRuntime = createAgentPlanPublicRuntime({
+  db,
+  scheduleCollection: COLLECTION,
+  scheduleDocId: STATE_DOC_ID,
+  agentRequestCollection: AGENT_REQUEST_COLLECTION,
+  agentRequestDocId: AGENT_REQUEST_DOC_ID,
+  ensureAgentRequestCollection: createCollectionEnsurer(AGENT_REQUEST_COLLECTION),
+  maxAgentPlanRequests: MAX_AGENT_PLAN_REQUESTS,
+  defaultOnlineClassrooms: DEFAULT_ONLINE_CLASSROOMS,
+  normalizePrefix,
+  normalizeId,
+  normalizeTime,
+  normalizeWeekdays,
+  normalizeSpecificDate,
+  normalizeDateList,
+  normalizeTarget,
+  normalizeSchedule,
+  normalizeOnlineClassrooms,
+  fallbackOnlineClassrooms,
+  normalizeContentLibraries,
+  normalizeLearningTools,
+  normalizeStudentDeviceAccess,
+  normalizeControlSettings,
+  createEmptyControlSettings,
+  combineItems
+});
 function jsonResponse(statusCode, payload) {
   return {
     statusCode,
@@ -745,7 +777,7 @@ exports.main = async (event = {}) => {
   }
 
   if (method === 'GET') {
-    if (!READ_TOKEN) {
+    if (!READ_TOKEN && !AGENT_WRITE_TOKEN) {
       return jsonResponse(500, {
         error: 'missing_read_token'
       });
@@ -753,7 +785,10 @@ exports.main = async (event = {}) => {
 
     const requestToken = headerTokenOnly(event);
 
-    if (requestToken !== READ_TOKEN) {
+    const canRead = (READ_TOKEN && requestToken === READ_TOKEN)
+      || (AGENT_WRITE_TOKEN && requestToken === AGENT_WRITE_TOKEN);
+
+    if (!canRead) {
       return jsonResponse(403, {
         error: 'forbidden'
       });
@@ -834,6 +869,59 @@ exports.main = async (event = {}) => {
         if (error && error.code === 'missing_device_credential') {
           return jsonResponse(400, {
             error: 'missing_device_credential'
+          });
+        }
+
+        throw error;
+      }
+    }
+
+    const agentPlanWriteActions = new Set([
+      'addAgentPlanItem',
+      'addAgentPlanItems',
+      'updateAgentPlanItem',
+      'updateAgentPlanItems',
+      'deleteAgentPlanItem',
+      'deleteAgentPlanItems',
+      'getAgentPlanRequestStatus',
+      'submitAgentPlanRequest'
+    ]);
+
+    if (agentPlanWriteActions.has(action)) {
+      if (!AGENT_WRITE_TOKEN) {
+        return jsonResponse(500, {
+          error: 'missing_agent_write_token'
+        });
+      }
+
+      if (requestToken !== AGENT_WRITE_TOKEN) {
+        return jsonResponse(403, {
+          error: 'forbidden'
+        });
+      }
+
+      try {
+        if (action === 'submitAgentPlanRequest') {
+          return jsonResponse(400, {
+            error: 'whole_replace_not_allowed'
+          });
+        }
+
+        if (action !== 'getAgentPlanRequestStatus') {
+          return jsonResponse(200, await agentPlanRuntime.submitRequest({
+            ...payload,
+            action
+          }));
+        }
+
+        return jsonResponse(200, {
+          ok: true,
+          request: await agentPlanRuntime.getRequestStatus(payload.requestId || payload.id)
+        });
+      } catch (error) {
+        if (error && error.code) {
+          return jsonResponse(400, {
+            error: error.code
           });
         }
 

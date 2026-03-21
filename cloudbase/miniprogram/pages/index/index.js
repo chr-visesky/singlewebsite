@@ -246,6 +246,12 @@ Page({
     });
   },
 
+  openAgentRequestsPage() {
+    wx.navigateTo({
+      url: '/pages/agent-requests/index'
+    });
+  },
+
   async boot() {
     await this.refreshIdentity();
 
