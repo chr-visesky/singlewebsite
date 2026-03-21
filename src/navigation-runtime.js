@@ -228,6 +228,11 @@ function createNavigationRuntime(dependencies = {}) {
         isMainFrame
       });
     });
+    contents.on('dom-ready', () => {
+      logNavigationDebug('classroom-view-dom-ready', {
+        url: contents.getURL()
+      });
+    });
     contents.on('did-redirect-navigation', (_event, url, isInPlace, isMainFrame) => {
       logNavigationDebug('classroom-view-did-redirect-navigation', {
         url,
@@ -281,6 +286,22 @@ function createNavigationRuntime(dependencies = {}) {
         errorDescription,
         validatedURL,
         isMainFrame
+      });
+    });
+    contents.on('audio-state-changed', (_event, audible) => {
+      logNavigationDebug('classroom-view-audio-state-changed', {
+        audible,
+        url: contents.getURL()
+      });
+    });
+    contents.on('unresponsive', () => {
+      logNavigationDebug('classroom-view-unresponsive', {
+        url: contents.getURL()
+      });
+    });
+    contents.on('responsive', () => {
+      logNavigationDebug('classroom-view-responsive', {
+        url: contents.getURL()
       });
     });
     contents.on('render-process-gone', (_event, details) => {

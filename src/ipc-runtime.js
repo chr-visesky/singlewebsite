@@ -14,6 +14,7 @@ function registerShellIpc(dependencies = {}) {
     isClassroomShellActive,
     getActiveClassroomShell,
     syncClassroomBrowserView,
+    logClassroomMediaDebug,
     logNavigationDebug,
     getAppConfig,
     syncRemoteStudySchedule,
@@ -62,7 +63,11 @@ function registerShellIpc(dependencies = {}) {
   });
 
   ipcMain.on('shell:log-classroom-media-event', (_event, payload = {}) => {
-    logNavigationDebug('classroom-media-runtime', payload && typeof payload === 'object' ? payload : {});
+    const safePayload = payload && typeof payload === 'object' ? payload : {};
+    logNavigationDebug('classroom-media-runtime', safePayload);
+    if (typeof logClassroomMediaDebug === 'function') {
+      logClassroomMediaDebug('renderer-media-runtime', safePayload);
+    }
   });
 
   ipcMain.handle('shell:reset-course-site-state', async () => {

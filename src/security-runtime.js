@@ -20,6 +20,95 @@ function createSecurityRuntime(dependencies = {}) {
     webFrameMain
   } = dependencies;
 
+  function safeCloneForLog(value) {
+    const seen = new WeakSet();
+
+    try {
+      return JSON.parse(
+        JSON.stringify(value, (_key, currentValue) => {
+          if (typeof currentValue === 'function') {
+            return '[function]';
+          }
+
+          if (typeof currentValue === 'undefined') {
+            return '[undefined]';
+          }
+
+          if (!currentValue || typeof currentValue !== 'object') {
+            return currentValue;
+          }
+
+          if (seen.has(currentValue)) {
+            return '[circular]';
+          }
+
+          seen.add(currentValue);
+          return currentValue;
+        })
+      );
+    } catch {
+      return '[unserializable]';
+    }
+  }
+
+  function describeError(error) {
+    if (!error) {
+      return {};
+    }
+
+    return {
+      name: typeof error.name === 'string' ? error.name : '',
+      message: typeof error.message === 'string' ? error.message : '',
+      code: typeof error.code === 'string' || typeof error.code === 'number' ? error.code : '',
+      stack:
+        typeof error.stack === 'string'
+          ? error.stack.split('\n').slice(0, 6).join('\n')
+          : '',
+      serialized: safeCloneForLog(error)
+    };
+  }
+
+  function shouldWriteDebugLogs() {
+    const appConfig = getAppConfig();
+    return Boolean(appConfig && appConfig.logBlockedRequests);
+  }
+
+  function writeStructuredDebugLog(logPathFactory, eventName, payload = {}) {
+    if (!shouldWriteDebugLogs()) {
+      return;
+    }
+
+    let logPath = '';
+
+    try {
+      logPath = typeof logPathFactory === 'function' ? logPathFactory() : '';
+    } catch {
+      logPath = '';
+    }
+
+    if (!logPath) {
+      return;
+    }
+
+    const mainWindow = getMainWindow();
+    const currentUrl =
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents
+        ? (payload && payload.currentUrl) || (mainWindow.webContents.getURL() || '')
+        : '';
+    const logLine = JSON.stringify({
+      at: new Date().toISOString(),
+      event: eventName,
+      currentUrl,
+      ...payload
+    });
+
+    try {
+      fs.appendFileSync(logPath, `${logLine}${os.EOL}`, 'utf8');
+    } catch {
+      // Ignore logging failures.
+    }
+  }
+
   function isLocalAppFile(urlObject) {
     if (!urlObject || urlObject.protocol !== 'file:') {
       return false;
@@ -281,29 +370,11 @@ function createSecurityRuntime(dependencies = {}) {
   }
 
   function logNavigationDebug(eventName, payload = {}) {
-    const appConfig = getAppConfig();
+    writeStructuredDebugLog(() => runtimePaths.navigationDebugLogPath(), eventName, payload);
+  }
 
-    if (!appConfig || !appConfig.logBlockedRequests) {
-      return;
-    }
-
-    const mainWindow = getMainWindow();
-    const currentUrl =
-      mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents
-        ? (payload && payload.currentUrl) || (mainWindow.webContents.getURL() || '')
-        : '';
-    const logLine = JSON.stringify({
-      at: new Date().toISOString(),
-      event: eventName,
-      currentUrl,
-      ...payload
-    });
-
-    try {
-      fs.appendFileSync(runtimePaths.navigationDebugLogPath(), `${logLine}${os.EOL}`, 'utf8');
-    } catch {
-      // Ignore logging failures.
-    }
+  function logClassroomMediaDebug(eventName, payload = {}) {
+    writeStructuredDebugLog(() => runtimePaths.classroomMediaDebugLogPath(), eventName, payload);
   }
 
   function logReminderDebug(eventName, payload = {}) {
@@ -415,10 +486,23 @@ function createSecurityRuntime(dependencies = {}) {
       return;
     }
 
+    logClassroomMediaDebug('compatibility-patch-start', {
+      target: 'main-frame',
+      url: currentUrl
+    });
+
     try {
       await webContents.executeJavaScript(legacyMediaCompatibilityScript, true);
-    } catch {
-      // Ignore compatibility injection failures.
+      logClassroomMediaDebug('compatibility-patch-success', {
+        target: 'main-frame',
+        url: currentUrl
+      });
+    } catch (error) {
+      logClassroomMediaDebug('compatibility-patch-fail', {
+        target: 'main-frame',
+        url: currentUrl,
+        error: describeError(error)
+      });
     }
   }
 
@@ -446,10 +530,29 @@ function createSecurityRuntime(dependencies = {}) {
       return;
     }
 
+    logClassroomMediaDebug('compatibility-patch-start', {
+      target: 'sub-frame',
+      frameProcessId,
+      frameRoutingId,
+      frameUrl
+    });
+
     try {
       await frame.executeJavaScript(legacyMediaCompatibilityScript, true);
-    } catch {
-      // Ignore compatibility injection failures for nested frames.
+      logClassroomMediaDebug('compatibility-patch-success', {
+        target: 'sub-frame',
+        frameProcessId,
+        frameRoutingId,
+        frameUrl
+      });
+    } catch (error) {
+      logClassroomMediaDebug('compatibility-patch-fail', {
+        target: 'sub-frame',
+        frameProcessId,
+        frameRoutingId,
+        frameUrl,
+        error: describeError(error)
+      });
     }
   }
 
@@ -460,6 +563,7 @@ function createSecurityRuntime(dependencies = {}) {
     isAllowedTopLevel,
     isCourseEcosystemOrigin,
     isExitShortcut,
+    logClassroomMediaDebug,
     logBlockedRequest,
     logNavigationDebug,
     logReminderDebug,

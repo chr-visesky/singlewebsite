@@ -45,6 +45,81 @@ function safeSerialize(value) {
   }
 }
 
+function safeCloneForLog(value) {
+  try {
+    return JSON.parse(safeSerialize(value));
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+function safeRead(getter, fallback = '') {
+  try {
+    return getter();
+  } catch {
+    return fallback;
+  }
+}
+
+function summarizeError(error) {
+  if (!error) {
+    return {};
+  }
+
+  return {
+    name: typeof error.name === 'string' ? error.name : '',
+    message: typeof error.message === 'string' ? error.message : '',
+    constraint: typeof error.constraint === 'string' ? error.constraint : '',
+    code: typeof error.code === 'string' || typeof error.code === 'number' ? error.code : '',
+    stack:
+      typeof error.stack === 'string'
+        ? error.stack.split('\n').slice(0, 6).join('\n')
+        : '',
+    serialized: safeCloneForLog(error)
+  };
+}
+
+function frameSnapshot(windowObject) {
+  return {
+    href: safeRead(() => windowObject.location.href),
+    hostname: safeRead(() => windowObject.location.hostname),
+    origin: safeRead(() => windowObject.location.origin),
+    protocol: safeRead(() => windowObject.location.protocol),
+    isTopFrame: safeRead(() => windowObject.top === windowObject, false),
+    parentHref:
+      safeRead(() => (windowObject.parent && windowObject.parent !== windowObject ? windowObject.parent.location.href : '')) || '',
+    topHref: safeRead(() => windowObject.top.location.href),
+    referrer: safeRead(() => windowObject.document.referrer),
+    ancestorOrigins: safeRead(() => Array.from(windowObject.location.ancestorOrigins || []), [])
+  };
+}
+
+function summarizeDevice(device) {
+  return {
+    kind: device && typeof device.kind === 'string' ? device.kind : '',
+    label: device && typeof device.label === 'string' ? device.label : '',
+    deviceIdPresent: Boolean(device && device.deviceId),
+    groupIdPresent: Boolean(device && device.groupId)
+  };
+}
+
+function summarizeTrack(track) {
+  if (!track) {
+    return {};
+  }
+
+  return {
+    kind: typeof track.kind === 'string' ? track.kind : '',
+    label: typeof track.label === 'string' ? track.label : '',
+    enabled: track.enabled !== false,
+    muted: track.muted === true,
+    readyState: typeof track.readyState === 'string' ? track.readyState : '',
+    settings: safeRead(() => safeCloneForLog(track.getSettings()), {}),
+    constraints: safeRead(() => safeCloneForLog(track.getConstraints()), {}),
+    capabilities: safeRead(() => safeCloneForLog(track.getCapabilities()), {})
+  };
+}
+
 function createMediaLogger(windowObject, consoleObject, sendLog) {
   return function logMediaEvent(eventName, payload = {}) {
     if (!isCourseEcosystemPage(windowObject)) {
@@ -54,7 +129,8 @@ function createMediaLogger(windowObject, consoleObject, sendLog) {
     const logPayload = {
       at: new Date().toISOString(),
       event: eventName,
-      href: windowObject.location.href,
+      href: safeRead(() => windowObject.location.href),
+      frame: frameSnapshot(windowObject),
       ...payload
     };
 
@@ -173,16 +249,28 @@ function installCompatibilityShims(windowObject, logMediaEvent) {
     return streamPromise.then(
       (stream) => {
         logMediaEvent('getUserMedia-success', {
-          audioTracks: stream.getAudioTracks().map((track) => track.label),
-          videoTracks: stream.getVideoTracks().map((track) => track.label)
+          streamIdPresent: Boolean(stream.id),
+          audioTracks: stream.getAudioTracks().map(summarizeTrack),
+          videoTracks: stream.getVideoTracks().map(summarizeTrack)
         });
+
+        for (const track of [...stream.getAudioTracks(), ...stream.getVideoTracks()]) {
+          for (const eventName of ['ended', 'mute', 'unmute']) {
+            track.addEventListener(eventName, () => {
+              logMediaEvent('media-track-event', {
+                eventName,
+                track: summarizeTrack(track)
+              });
+            });
+          }
+        }
+
         return stream;
       },
       (error) => {
         logMediaEvent('getUserMedia-fail', {
           normalizedConstraints,
-          name: error && error.name ? error.name : '',
-          message: error && error.message ? error.message : ''
+          error: summarizeError(error)
         });
         throw error;
       }
@@ -265,6 +353,167 @@ function installCompatibilityShims(windowObject, logMediaEvent) {
   }
 }
 
+function installMediaDeviceDiagnostics(windowObject, logMediaEvent) {
+  if (!isCourseEcosystemPage(windowObject) || !windowObject.navigator) {
+    return;
+  }
+
+  const navigatorObject = windowObject.navigator;
+  const mediaDevices = navigatorObject.mediaDevices;
+
+  if (mediaDevices && typeof mediaDevices.enumerateDevices === 'function') {
+    const nativeEnumerateDevices = mediaDevices.enumerateDevices.bind(mediaDevices);
+
+    mediaDevices.enumerateDevices = () => {
+      logMediaEvent('enumerateDevices-call', {});
+      return nativeEnumerateDevices().then(
+        (devices) => {
+          logMediaEvent('enumerateDevices-success', {
+            devices: Array.isArray(devices) ? devices.map(summarizeDevice) : []
+          });
+          return devices;
+        },
+        (error) => {
+          logMediaEvent('enumerateDevices-fail', {
+            error: summarizeError(error)
+          });
+          throw error;
+        }
+      );
+    };
+
+    if (typeof mediaDevices.addEventListener === 'function') {
+      mediaDevices.addEventListener('devicechange', async () => {
+        try {
+          const devices = await nativeEnumerateDevices();
+          logMediaEvent('devicechange', {
+            devices: Array.isArray(devices) ? devices.map(summarizeDevice) : []
+          });
+        } catch (error) {
+          logMediaEvent('devicechange-enumerate-fail', {
+            error: summarizeError(error)
+          });
+        }
+      });
+    }
+  }
+
+  if (mediaDevices && typeof mediaDevices.selectAudioOutput === 'function') {
+    const nativeSelectAudioOutput = mediaDevices.selectAudioOutput.bind(mediaDevices);
+
+    mediaDevices.selectAudioOutput = (...args) => {
+      logMediaEvent('selectAudioOutput-call', {
+        argumentsLength: args.length
+      });
+      return nativeSelectAudioOutput(...args).then(
+        (deviceInfo) => {
+          logMediaEvent('selectAudioOutput-success', {
+            device: summarizeDevice(deviceInfo)
+          });
+          return deviceInfo;
+        },
+        (error) => {
+          logMediaEvent('selectAudioOutput-fail', {
+            error: summarizeError(error)
+          });
+          throw error;
+        }
+      );
+    };
+  }
+
+  if (navigatorObject.permissions && typeof navigatorObject.permissions.query === 'function') {
+    const nativePermissionsQuery = navigatorObject.permissions.query.bind(navigatorObject.permissions);
+
+    navigatorObject.permissions.query = (descriptor) => {
+      logMediaEvent('permissions-query-call', {
+        descriptor: safeCloneForLog(descriptor)
+      });
+      return nativePermissionsQuery(descriptor).then(
+        (result) => {
+          logMediaEvent('permissions-query-success', {
+            descriptor: safeCloneForLog(descriptor),
+            state: result && result.state ? result.state : ''
+          });
+          return result;
+        },
+        (error) => {
+          logMediaEvent('permissions-query-fail', {
+            descriptor: safeCloneForLog(descriptor),
+            error: summarizeError(error)
+          });
+          throw error;
+        }
+      );
+    };
+  }
+}
+
+function installGlobalDiagnostics(windowObject, logMediaEvent) {
+  if (!isCourseEcosystemPage(windowObject)) {
+    return;
+  }
+
+  windowObject.addEventListener('error', (event) => {
+    logMediaEvent('window-error', {
+      message: typeof event.message === 'string' ? event.message : '',
+      filename: typeof event.filename === 'string' ? event.filename : '',
+      lineno: Number(event.lineno) || 0,
+      colno: Number(event.colno) || 0,
+      error: summarizeError(event.error)
+    });
+  });
+
+  windowObject.addEventListener('unhandledrejection', (event) => {
+    logMediaEvent('window-unhandledrejection', {
+      reason: summarizeError(event.reason)
+    });
+  });
+
+  if (windowObject.document) {
+    windowObject.document.addEventListener('visibilitychange', () => {
+      logMediaEvent('document-visibilitychange', {
+        visibilityState: windowObject.document.visibilityState
+      });
+    });
+
+    for (const eventName of ['loadedmetadata', 'play', 'pause', 'error']) {
+      windowObject.document.addEventListener(
+        eventName,
+        (event) => {
+          const target = event.target;
+
+          if (
+            typeof windowObject.HTMLMediaElement === 'undefined' ||
+            !(target instanceof windowObject.HTMLMediaElement)
+          ) {
+            return;
+          }
+
+          logMediaEvent('media-element-event', {
+            eventName,
+            tagName: target.tagName,
+            currentSrc: typeof target.currentSrc === 'string' ? target.currentSrc : '',
+            sinkId: typeof target.sinkId === 'string' ? target.sinkId : '',
+            muted: target.muted === true,
+            autoplay: target.autoplay === true,
+            paused: target.paused === true,
+            readyState: Number(target.readyState) || 0,
+            networkState: Number(target.networkState) || 0,
+            error: target.error
+              ? {
+                  code: Number(target.error.code) || 0,
+                  message: typeof target.error.message === 'string' ? target.error.message : ''
+                }
+              : {}
+          });
+        },
+        true
+      );
+    }
+  }
+}
+
 function scheduleMediaDiagnostics(windowObject, logMediaEvent) {
   if (!isCourseEcosystemPage(windowObject) || !windowObject.navigator || !windowObject.navigator.mediaDevices) {
     return;
@@ -272,6 +521,9 @@ function scheduleMediaDiagnostics(windowObject, logMediaEvent) {
 
   const runDiagnostics = async () => {
     const permissions = {};
+    const permissionsPolicy =
+      windowObject.document &&
+      (windowObject.document.permissionsPolicy || windowObject.document.featurePolicy);
 
     for (const name of ['camera', 'microphone', 'speaker-selection']) {
       try {
@@ -295,6 +547,26 @@ function scheduleMediaDiagnostics(windowObject, logMediaEvent) {
     logMediaEvent('media-diagnostics', {
       title: windowObject.document ? windowObject.document.title : '',
       isSecureContext: windowObject.isSecureContext,
+      userAgent: safeRead(() => windowObject.navigator.userAgent),
+      platform: safeRead(() => windowObject.navigator.platform),
+      featurePolicy: safeRead(() => ({
+        camera:
+          permissionsPolicy && typeof permissionsPolicy.allowsFeature === 'function'
+            ? permissionsPolicy.allowsFeature('camera')
+            : '[unsupported]',
+        microphone:
+          permissionsPolicy && typeof permissionsPolicy.allowsFeature === 'function'
+            ? permissionsPolicy.allowsFeature('microphone')
+            : '[unsupported]',
+        speakerSelection:
+          permissionsPolicy && typeof permissionsPolicy.allowsFeature === 'function'
+            ? permissionsPolicy.allowsFeature('speaker-selection')
+            : '[unsupported]'
+      }), {}),
+      supportedConstraints:
+        windowObject.navigator.mediaDevices && typeof windowObject.navigator.mediaDevices.getSupportedConstraints === 'function'
+          ? safeCloneForLog(windowObject.navigator.mediaDevices.getSupportedConstraints())
+          : {},
       permissions,
       hasMediaDevices: Boolean(windowObject.navigator.mediaDevices),
       hasGetUserMedia: Boolean(windowObject.navigator.mediaDevices && windowObject.navigator.mediaDevices.getUserMedia),
@@ -327,7 +599,14 @@ function scheduleMediaDiagnostics(windowObject, logMediaEvent) {
 
 function bootstrapClassroomMediaRuntime({ windowObject, consoleObject, sendLog }) {
   const logMediaEvent = createMediaLogger(windowObject, consoleObject, sendLog);
+  logMediaEvent('media-runtime-bootstrap', {
+    title: windowObject.document ? windowObject.document.title : '',
+    readyState: windowObject.document ? windowObject.document.readyState : '',
+    isSecureContext: windowObject.isSecureContext
+  });
   installCompatibilityShims(windowObject, logMediaEvent);
+  installMediaDeviceDiagnostics(windowObject, logMediaEvent);
+  installGlobalDiagnostics(windowObject, logMediaEvent);
   scheduleMediaDiagnostics(windowObject, logMediaEvent);
 }
 

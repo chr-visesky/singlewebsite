@@ -276,6 +276,7 @@ const {
   isAllowedTopLevel,
   isCourseEcosystemOrigin,
   isExitShortcut,
+  logClassroomMediaDebug,
   logBlockedRequest,
   logNavigationDebug,
   logReminderDebug,
@@ -743,14 +744,46 @@ function applyWindowZoomFactor(factor, options = {}) {
 }
 function configureSessionGuards() {
   const ses = session.fromPartition(SESSION_PARTITION);
+  const summarizePermissionDetails = (details = {}) => ({
+    detailsKeys: details && typeof details === 'object' ? Object.keys(details).sort() : [],
+    mediaTypes: Array.isArray(details.mediaTypes) ? details.mediaTypes : [],
+    requestingUrl: normalizePrefix(details.requestingUrl),
+    securityOrigin: normalizePrefix(details.securityOrigin),
+    externalURL: normalizePrefix(details.externalURL),
+    isMainFrame: details.isMainFrame === true
+  });
+  const shouldLogMediaPermission = (permission) => ALLOWED_MEDIA_PERMISSIONS.has(permission);
 
   ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    callback(shouldGrantPermission(webContents, permission, null, details));
+    const allowed = shouldGrantPermission(webContents, permission, null, details);
+
+    if (shouldLogMediaPermission(permission)) {
+      logClassroomMediaDebug('session-permission-request', {
+        permission,
+        allowed,
+        currentUrl: webContents && !webContents.isDestroyed() ? webContents.getURL() : '',
+        ...summarizePermissionDetails(details)
+      });
+    }
+
+    callback(allowed);
   });
 
-  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
-    shouldGrantPermission(webContents, permission, requestingOrigin, details)
-  );
+  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    const allowed = shouldGrantPermission(webContents, permission, requestingOrigin, details);
+
+    if (shouldLogMediaPermission(permission)) {
+      logClassroomMediaDebug('session-permission-check', {
+        permission,
+        allowed,
+        requestingOrigin: normalizePrefix(requestingOrigin),
+        currentUrl: webContents && !webContents.isDestroyed() ? webContents.getURL() : '',
+        ...summarizePermissionDetails(details)
+      });
+    }
+
+    return allowed;
+  });
 
   ses.on('will-download', (event) => {
     event.preventDefault();
@@ -810,6 +843,7 @@ if (gotSingleInstanceLock) {
         isClassroomShellActive,
         getActiveClassroomShell,
         syncClassroomBrowserView,
+        logClassroomMediaDebug,
         logNavigationDebug,
         getAppConfig: () => appConfig,
         syncRemoteStudySchedule,

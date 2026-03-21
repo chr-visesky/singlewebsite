@@ -78,6 +78,9 @@ function createStatePathHelpers(getStateDir) {
   };
 
   return {
+    classroomMediaDebugLogPath() {
+      return path.join(resolveStateDir(), 'classroom-media-debug.log');
+    },
     navigationDebugLogPath() {
       return path.join(resolveStateDir(), 'navigation-debug.log');
     },
