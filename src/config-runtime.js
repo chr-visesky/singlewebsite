@@ -17,6 +17,7 @@ function createConfigRuntime(dependencies = {}) {
     normalizeLibraries,
     normalizeLearningTools,
     normalizeOnlineClassrooms,
+    normalizeAutoUpdateConfig,
     normalizePrefix,
     normalizeReminderLeadMinutes,
     normalizeRemoteSchedule,
@@ -292,7 +293,10 @@ function createConfigRuntime(dependencies = {}) {
         scope: normalizePrefix(rawConfig.baiduNetdisk && rawConfig.baiduNetdisk.scope) || 'netdisk'
       },
       remoteSchedule: normalizeRemoteSchedule(rawConfig.remoteSchedule),
+      remoteDictation: normalizeRemoteSchedule(rawConfig.remoteDictation),
       remoteHomework: normalizeRemoteSchedule(rawConfig.remoteHomework),
+      remoteRecitation: normalizeRemoteSchedule(rawConfig.remoteRecitation),
+      autoUpdate: normalizeAutoUpdateConfig(rawConfig.autoUpdate),
       reminders: {
         leadMinutes: reminderLeadMinutes.length ? reminderLeadMinutes : [...defaultReminderLeadMinutes]
       },

@@ -6,7 +6,7 @@ const path = require('path');
 
 const SKILL_SLUG = 'study-helper';
 const SKILL_DISPLAY_NAME = '学习助手';
-const SKILL_VERSION = '1.2.6';
+const SKILL_VERSION = '1.3.0';
 const SKILL_FILE_NAME = 'study-helper.zip';
 const SKILL_DOWNLOAD_TOKEN = (process.env.SKILL_DOWNLOAD_TOKEN || '').trim();
 const SKILL_PUBLIC_PATH = (process.env.SKILL_PUBLIC_PATH || '/api/skill').trim() || '/api/skill';
@@ -183,7 +183,13 @@ function metadataPayload(event = {}) {
         '创建作业',
         '批量创建作业',
         '查询作业',
-        '作业状态'
+        '作业状态',
+        '创建听写',
+        '查询听写',
+        '听写状态',
+        '创建背诵',
+        '查询背诵',
+        '背诵状态'
       ]
     }
   };

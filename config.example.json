@@ -52,6 +52,28 @@
     "authToken": "replace-with-your-read-token",
     "refreshMinutes": 3
   },
+  "remoteHomework": {
+    "url": "https://your-cloudbase-domain/api/homework",
+    "authToken": "replace-with-your-read-token",
+    "refreshMinutes": 3
+  },
+  "remoteDictation": {
+    "url": "https://your-cloudbase-domain/api/dictation",
+    "authToken": "replace-with-your-read-token",
+    "refreshMinutes": 3
+  },
+  "remoteRecitation": {
+    "url": "https://your-cloudbase-domain/api/recitation",
+    "authToken": "replace-with-your-read-token",
+    "refreshMinutes": 3
+  },
+  "autoUpdate": {
+    "enabled": true,
+    "url": "https://your-static-domain/studygate-updates/latest",
+    "channel": "latest",
+    "checkOnLaunch": true,
+    "intervalMinutes": 180
+  },
   "contentLibraries": [
     {
       "id": "great-chinese",

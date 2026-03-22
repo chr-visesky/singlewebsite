@@ -14,6 +14,7 @@ let layoutAdjustObserver = null;
 let lastReportedToolbarHeight = -1;
 
 let zoomShortcutBound = false;
+let updateDialogRuntime = null;
 
 function readStorageArea(storageArea) {
   const snapshot = {};
@@ -284,7 +285,208 @@ function bootstrapBrowserPreloadRuntime() {
   bootstrapZoomShortcuts();
 }
 
-function dispatchToolbarAction(actionId) {
+function createUpdateDialogRuntime() {
+  let pollTimer = null;
+
+  function clearPollTimer() {
+    if (pollTimer) {
+      window.clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function getToolbarShadowRoot() {
+    const host = document.getElementById(TOOLBAR_HOST_ID);
+    return host ? host.shadowRoot : null;
+  }
+
+  function normalizeSnapshot(rawSnapshot = {}) {
+    const snapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : {};
+    return {
+      currentVersion: typeof snapshot.currentVersion === 'string' ? snapshot.currentVersion : '',
+      latestVersion: typeof snapshot.latestVersion === 'string' ? snapshot.latestVersion : '',
+      hasUpdate: Boolean(snapshot.hasUpdate),
+      enabled: snapshot.enabled !== false,
+      state: typeof snapshot.state === 'string' ? snapshot.state : 'idle',
+      percent: Number(snapshot.percent) || 0,
+      message: typeof snapshot.message === 'string' ? snapshot.message : ''
+    };
+  }
+
+  function ensureDialog() {
+    const shadowRoot = getToolbarShadowRoot();
+
+    if (!shadowRoot) {
+      return null;
+    }
+
+    let overlay = shadowRoot.querySelector('.update-overlay');
+
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'update-overlay';
+      overlay.setAttribute('data-visible', 'false');
+      overlay.innerHTML = `
+        <section class="update-dialog">
+          <header class="update-dialog__header">
+            <div>
+              <p class="update-dialog__eyebrow">客户端更新</p>
+              <h2 class="update-dialog__title">检查更新</h2>
+            </div>
+            <button type="button" class="update-dialog__close" data-role="close" aria-label="关闭">×</button>
+          </header>
+          <div class="update-dialog__versions">
+            <div class="update-dialog__version-row"><span>当前版本</span><strong data-role="current-version">-</strong></div>
+            <div class="update-dialog__version-row"><span>最新版本</span><strong data-role="latest-version">-</strong></div>
+          </div>
+          <p class="update-dialog__status" data-role="status-text"></p>
+          <div class="update-dialog__actions">
+            <button type="button" class="update-dialog__button update-dialog__button--secondary" data-role="dismiss">关闭</button>
+            <button type="button" class="update-dialog__button update-dialog__button--primary" data-role="primary" hidden></button>
+          </div>
+        </section>
+      `;
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+          closeDialog();
+        }
+      });
+      shadowRoot.append(overlay);
+      overlay.querySelector('[data-role="close"]').addEventListener('click', closeDialog);
+      overlay.querySelector('[data-role="dismiss"]').addEventListener('click', closeDialog);
+    }
+
+    return {
+      overlay,
+      currentVersionNode: overlay.querySelector('[data-role="current-version"]'),
+      latestVersionNode: overlay.querySelector('[data-role="latest-version"]'),
+      statusNode: overlay.querySelector('[data-role="status-text"]'),
+      primaryButton: overlay.querySelector('[data-role="primary"]')
+    };
+  }
+
+  function renderSnapshot(snapshot) {
+    const elements = ensureDialog();
+
+    if (!elements) {
+      return;
+    }
+
+    let statusText = '当前已经是最新版本。';
+    let primaryLabel = '';
+    let primaryDisabled = false;
+    let primaryAction = null;
+
+    if (!snapshot.enabled) {
+      statusText = '当前客户端没有启用自动升级，或更新源还未配置完成。';
+    } else if (snapshot.state === 'checking') {
+      statusText = '正在检查更新…';
+      primaryLabel = '检查中';
+      primaryDisabled = true;
+    } else if (snapshot.state === 'downloading') {
+      statusText = snapshot.percent > 0
+        ? `正在下载更新… ${Math.round(snapshot.percent)}%`
+        : '正在下载更新…';
+      primaryLabel = '下载中';
+      primaryDisabled = true;
+    } else if (snapshot.state === 'downloaded' && snapshot.hasUpdate) {
+      statusText = '更新已经下载完成。点击“立即升级”会退出客户端并安装新版本。';
+      primaryLabel = '立即升级';
+      primaryAction = () => ipcRenderer.invoke('shell:install-downloaded-update');
+    } else if (snapshot.state === 'available' && snapshot.hasUpdate) {
+      statusText = '检测到新版本。点击“升级”开始下载，下载完成后退出客户端会自动安装。';
+      primaryLabel = '升级';
+      primaryAction = async () => {
+        await ipcRenderer.invoke('shell:download-available-update');
+        await refreshSnapshot();
+      };
+    } else if (snapshot.state === 'error') {
+      statusText = snapshot.message || '检查更新失败。';
+    }
+
+    elements.currentVersionNode.textContent = snapshot.currentVersion || '-';
+    elements.latestVersionNode.textContent = snapshot.latestVersion || snapshot.currentVersion || '-';
+    elements.statusNode.textContent = statusText;
+    elements.primaryButton.hidden = !primaryLabel;
+    elements.primaryButton.disabled = primaryDisabled;
+    elements.primaryButton.textContent = primaryLabel;
+    elements.primaryButton.onclick = primaryAction;
+  }
+
+  async function fetchSnapshot() {
+    return normalizeSnapshot(await ipcRenderer.invoke('shell:get-auto-update-status'));
+  }
+
+  async function refreshSnapshot() {
+    const snapshot = await fetchSnapshot();
+    renderSnapshot(snapshot);
+    clearPollTimer();
+
+    if (snapshot.state === 'checking' || snapshot.state === 'downloading') {
+      pollTimer = window.setTimeout(() => {
+        void refreshSnapshot();
+      }, 1000);
+    }
+
+    return snapshot;
+  }
+
+  function closeDialog() {
+    const elements = ensureDialog();
+
+    if (!elements) {
+      return;
+    }
+
+    clearPollTimer();
+    elements.overlay.setAttribute('data-visible', 'false');
+  }
+
+  async function openDialog() {
+    const elements = ensureDialog();
+
+    if (!elements) {
+      return;
+    }
+
+    elements.overlay.setAttribute('data-visible', 'true');
+    renderSnapshot({
+      currentVersion: '',
+      latestVersion: '',
+      hasUpdate: false,
+      enabled: true,
+      state: 'checking',
+      percent: 0,
+      message: ''
+    });
+
+    const initialSnapshot = await fetchSnapshot();
+
+    if (['available', 'downloaded', 'downloading'].includes(initialSnapshot.state)) {
+      renderSnapshot(initialSnapshot);
+      if (initialSnapshot.state === 'downloading') {
+        await refreshSnapshot();
+      }
+      return;
+    }
+
+    renderSnapshot(normalizeSnapshot(await ipcRenderer.invoke('shell:check-for-updates')));
+    await refreshSnapshot();
+  }
+
+  return { openDialog };
+}
+
+async function dispatchToolbarAction(actionId) {
+  if (actionId === 'check-update') {
+    if (!updateDialogRuntime) {
+      updateDialogRuntime = createUpdateDialogRuntime();
+    }
+
+    await updateDialogRuntime.openDialog();
+    return;
+  }
+
   window.dispatchEvent(
     new CustomEvent('studygate:toolbar-action', {
       detail: { actionId }
@@ -825,10 +1027,13 @@ async function refreshToolbar() {
   (Array.isArray(model.actions) ? model.actions : []).forEach((action) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'nav-button nav-button--soft';
-    button.textContent = action.label;
+    button.className = `nav-button nav-button--soft${action.compact ? ' nav-button--icon-only' : ''}`;
+    button.textContent = action.compact ? (action.icon || '•') : action.label;
+    button.title = action.label;
+    button.setAttribute('aria-label', action.label);
+    button.dataset.actionId = action.id;
     button.addEventListener('click', () => {
-      dispatchToolbarAction(action.id);
+      void dispatchToolbarAction(action.id);
     });
     elements.actions.append(button);
   });

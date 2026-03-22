@@ -119,6 +119,12 @@ async function runSkillZipSmoke({ rootDir, outputDir }) {
     failedChecks.push('skillPublic asset zip still contains removed homework delete commands.');
   }
 
+  for (const commandName of expectedCommands) {
+    if (!assetSkillMarkdown.includes(commandName)) {
+      failedChecks.push(`skillPublic asset zip is missing command: ${commandName}`);
+    }
+  }
+
   let remote = null;
   const remoteUrl = process.env.STUDYGATE_SKILL_DOWNLOAD_URL || '';
 

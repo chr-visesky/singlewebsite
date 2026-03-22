@@ -26,6 +26,15 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+.nav-button--icon-only {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .nav-button[disabled] {
   opacity: 0.38;
   cursor: default;
@@ -95,6 +104,131 @@
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 8, 15, 0.46);
+  backdrop-filter: blur(8px);
+  z-index: 2147483647;
+}
+
+.update-overlay[data-visible="true"] {
+  display: flex;
+}
+
+.update-dialog {
+  width: min(420px, calc(100vw - 32px));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 211, 124, 0.16), transparent 32%),
+    linear-gradient(160deg, rgba(9, 17, 28, 0.97), rgba(15, 24, 37, 0.97));
+  color: #f4f7fb;
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.34);
+}
+
+.update-dialog__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: start;
+}
+
+.update-dialog__eyebrow {
+  margin: 0;
+  color: #ffd37c;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.update-dialog__title {
+  margin: 2px 0 0;
+  font-size: 22px;
+  line-height: 1.08;
+}
+
+.update-dialog__close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+}
+
+.update-dialog__versions {
+  margin-top: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.update-dialog__version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.update-dialog__version-row span {
+  color: rgba(244, 247, 251, 0.72);
+}
+
+.update-dialog__version-row strong {
+  color: #f4f7fb;
+}
+
+.update-dialog__status {
+  margin: 14px 0 0;
+  color: rgba(244, 247, 251, 0.82);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.update-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.update-dialog__button {
+  min-width: 92px;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 16px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.update-dialog__button--secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f7fb;
+}
+
+.update-dialog__button--primary {
+  background: #ffd37c;
+  color: #111824;
+}
+
+.update-dialog__button[disabled] {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .reminder {

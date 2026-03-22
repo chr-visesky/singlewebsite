@@ -1,0 +1,64 @@
+<Window x:Class="RecitationApp.Views.TaskEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="编辑背诵任务"
+        Width="720"
+        Height="760"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="任务标题" FontWeight="SemiBold" />
+            <TextBox x:Name="TitleTextBox" Margin="0,8,0,0" Height="38" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,18,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,12,0">
+                <TextBlock Text="课内/课外" FontWeight="SemiBold" />
+                <ComboBox x:Name="BucketComboBox" Margin="0,8,0,0" SelectedIndex="0">
+                    <ComboBoxItem Content="课内" />
+                    <ComboBoxItem Content="课外" />
+                </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="日期" FontWeight="SemiBold" />
+                <DatePicker x:Name="TargetDatePicker" Margin="0,8,0,0" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Margin="0,18,0,0">
+            <TextBlock Text="原文" FontWeight="SemiBold" />
+            <TextBox x:Name="SourceTextBox"
+                     Margin="0,8,0,0"
+                     AcceptsReturn="True"
+                     VerticalScrollBarVisibility="Auto"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3"
+                    Margin="0,24,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button MinWidth="120"
+                    Margin="0,0,12,0"
+                    Padding="18,12"
+                    Click="SaveButton_OnClick"
+                    Content="保存" />
+            <Button MinWidth="120"
+                    Padding="18,12"
+                    Click="CancelButton_OnClick"
+                    Content="取消" />
+        </StackPanel>
+    </Grid>
+</Window>

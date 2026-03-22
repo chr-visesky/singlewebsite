@@ -1,0 +1,7 @@
+{
+  "name": "recitation-admin",
+  "private": true,
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

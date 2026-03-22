@@ -5,6 +5,21 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  buildDictationCreatePayload,
+  buildDictationQueryPayload,
+  buildDictationStatusPayload
+} = require('./study-helper-dictation');
+const {
+  buildHomeworkCreatePayload,
+  buildHomeworkQueryPayload,
+  buildHomeworkStatusPayload
+} = require('./study-helper-homework');
+const {
+  buildRecitationCreatePayload,
+  buildRecitationQueryPayload,
+  buildRecitationStatusPayload
+} = require('./study-helper-recitation');
+const {
   buildScheduleCreatePayload,
   buildScheduleDeletePayload,
   buildScheduleUpdatePayload
@@ -27,12 +42,22 @@ function canonicalizeCommand(command) {
     '提交计划': 'schedule-submit-disabled',
     '计划状态': 'schedule-status',
     '查询计划状态': 'schedule-status',
+    '创建听写': 'dictation-create',
+    '新增听写': 'dictation-create',
+    '查询听写': 'dictation-query',
+    '查看听写': 'dictation-query',
+    '听写状态': 'dictation-status',
     '创建作业': 'homework-create',
     '查询作业': 'homework-query',
     '查看作业': 'homework-query',
     '查作业': 'homework-query',
     '作业状态': 'homework-status',
-    '查询作业状态': 'homework-status'
+    '查询作业状态': 'homework-status',
+    '创建背诵': 'recitation-create',
+    '新增背诵': 'recitation-create',
+    '查询背诵': 'recitation-query',
+    '查看背诵': 'recitation-query',
+    '背诵状态': 'recitation-status'
   };
 
   return commandMap[normalized] || normalized;
@@ -64,9 +89,15 @@ Usage:
   node ./scripts/study-helper.js 修改计划 --载荷文件 <文件>
   node ./scripts/study-helper.js 删除计划 --载荷文件 <文件>
   node ./scripts/study-helper.js 计划状态 --请求编号 <编号>
+  node ./scripts/study-helper.js 创建听写 --载荷文件 <文件>
+  node ./scripts/study-helper.js 查询听写 --载荷文件 <文件>
+  node ./scripts/study-helper.js 听写状态 --请求编号 <编号>
   node ./scripts/study-helper.js 创建作业 --载荷文件 <文件>
   node ./scripts/study-helper.js 查询作业 --载荷文件 <文件>
   node ./scripts/study-helper.js 作业状态 --请求编号 <编号>
+  node ./scripts/study-helper.js 创建背诵 --载荷文件 <文件>
+  node ./scripts/study-helper.js 查询背诵 --载荷文件 <文件>
+  node ./scripts/study-helper.js 背诵状态 --请求编号 <编号>
 
 参数:
   --载荷文件 <文件>  从文件读取 JSON 请求体
@@ -276,6 +307,24 @@ function resolveHomeworkEndpoint(options = {}) {
   return normalizeUrl(process.env.STUDYGATE_HOMEWORK_PUBLIC_URL) || deriveApiUrl(resolveScheduleEndpoint(options), '/api/homework');
 }
 
+function resolveDictationEndpoint(options = {}) {
+  if (normalizeText(options.url)) {
+    return normalizeUrl(options.url);
+  }
+
+  return normalizeUrl(process.env.STUDYGATE_DICTATION_PUBLIC_URL)
+    || deriveApiUrl(resolveScheduleEndpoint(options), '/api/dictation');
+}
+
+function resolveRecitationEndpoint(options = {}) {
+  if (normalizeText(options.url)) {
+    return normalizeUrl(options.url);
+  }
+
+  return normalizeUrl(process.env.STUDYGATE_RECITATION_PUBLIC_URL)
+    || deriveApiUrl(resolveScheduleEndpoint(options), '/api/recitation');
+}
+
 function resolveAgentAccessEndpoint(options = {}) {
   if (normalizeText(options.url)) {
     return normalizeUrl(options.url);
@@ -293,6 +342,14 @@ function resolveEndpoint(command, options) {
 
   if (command.startsWith('homework-')) {
     return resolveHomeworkEndpoint(options);
+  }
+
+  if (command.startsWith('dictation-')) {
+    return resolveDictationEndpoint(options);
+  }
+
+  if (command.startsWith('recitation-')) {
+    return resolveRecitationEndpoint(options);
   }
 
   if (command.startsWith('agent-access-')) {
@@ -319,332 +376,24 @@ function resolveConfiguredToken(command, options) {
     );
   }
 
+  if (command.startsWith('dictation-')) {
+    return normalizeText(
+      process.env.STUDYGATE_DICTATION_AGENT_WRITE_TOKEN || process.env.STUDYGATE_AGENT_WRITE_TOKEN
+    );
+  }
+
+  if (command.startsWith('recitation-')) {
+    return normalizeText(
+      process.env.STUDYGATE_RECITATION_AGENT_WRITE_TOKEN || process.env.STUDYGATE_AGENT_WRITE_TOKEN
+    );
+  }
+
   return '';
 }
 
 function requestTimeoutMs(options) {
   const numeric = Number(options['timeout-ms']);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 30000;
-}
-
-function ensureObjectPayload(payload, command) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error(`${command} 需要一个 JSON 对象作为请求体。`);
-  }
-
-  return payload;
-}
-
-function normalizeHomeworkSourceUrls(sourceUrls) {
-  const items = Array.isArray(sourceUrls) ? sourceUrls : [];
-  const seen = new Set();
-  const normalized = [];
-
-  for (const item of items) {
-    const url = normalizeUrl(item);
-
-    if (!url || seen.has(url)) {
-      continue;
-    }
-
-    seen.add(url);
-    normalized.push(url);
-  }
-
-  return normalized;
-}
-
-function extensionFromPathLike(value) {
-  const matched = String(value || '').trim().toLowerCase().match(/\.([a-z0-9]{2,5})$/i);
-  return matched ? `.${matched[1]}` : '';
-}
-
-function fileKindFromExtension(extension) {
-  const normalized = String(extension || '').trim().toLowerCase();
-
-  if (normalized === '.pdf') {
-    return 'pdf';
-  }
-
-  if (['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'].includes(normalized)) {
-    return 'image';
-  }
-
-  return '';
-}
-
-function contentTypeFromExtension(extension) {
-  const normalized = String(extension || '').trim().toLowerCase();
-
-  if (normalized === '.pdf') {
-    return 'application/pdf';
-  }
-
-  if (normalized === '.jpg' || normalized === '.jpeg') {
-    return 'image/jpeg';
-  }
-
-  if (normalized === '.png') {
-    return 'image/png';
-  }
-
-  if (normalized === '.bmp') {
-    return 'image/bmp';
-  }
-
-  if (normalized === '.gif') {
-    return 'image/gif';
-  }
-
-  if (normalized === '.webp') {
-    return 'image/webp';
-  }
-
-  return '';
-}
-
-function fileKindFromUrl(url) {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase();
-
-    if (pathname.endsWith('.pdf')) {
-      return 'pdf';
-    }
-
-    if (/\.(jpg|jpeg|png|bmp|gif)$/i.test(pathname)) {
-      return 'image';
-    }
-  } catch {
-    return '';
-  }
-
-  return '';
-}
-
-function fileKindFromInlineSource(source) {
-  const item = source && typeof source === 'object' ? source : {};
-  const contentType = normalizeText(item.contentType || item.mimeType).toLowerCase();
-
-  if (contentType.includes('pdf')) {
-    return 'pdf';
-  }
-
-  if (contentType.startsWith('image/')) {
-    return 'image';
-  }
-
-  const base64Text = normalizeText(item.base64 || item.data || item.content);
-  const dataUrlMatch = base64Text.match(/^data:([^;,]+);base64,/i);
-
-  if (dataUrlMatch) {
-    const dataUrlContentType = normalizeText(dataUrlMatch[1]).toLowerCase();
-
-    if (dataUrlContentType.includes('pdf')) {
-      return 'pdf';
-    }
-
-    if (dataUrlContentType.startsWith('image/')) {
-      return 'image';
-    }
-  }
-
-  return fileKindFromExtension(extensionFromPathLike(item.fileName || item.name));
-}
-
-function validateHomeworkSources(sourceUrls, inlineSources) {
-  const kinds = [
-    ...sourceUrls.map(fileKindFromUrl).filter(Boolean),
-    ...inlineSources.map(fileKindFromInlineSource).filter(Boolean)
-  ];
-  const pdfCount = kinds.filter((kind) => kind === 'pdf').length;
-  const imageCount = kinds.filter((kind) => kind === 'image').length;
-
-  if (pdfCount > 1) {
-    throw new Error('一次作业请求只允许 1 个 PDF。');
-  }
-
-  if (pdfCount > 0 && imageCount > 0) {
-    throw new Error('一次作业请求里不能混用 PDF 和图片。');
-  }
-}
-
-async function inlineSourcesFromLocalFiles(sourceFiles) {
-  const items = Array.isArray(sourceFiles) ? sourceFiles : [];
-  const normalized = [];
-
-  for (const rawItem of items) {
-    const item = rawItem && typeof rawItem === 'object' ? rawItem : {
-      path: rawItem
-    };
-    const filePath = normalizeText(item.path || item.filePath);
-
-    if (!filePath) {
-      continue;
-    }
-
-    const absolutePath = path.resolve(filePath);
-    const stat = await fs.promises.stat(absolutePath);
-
-    if (!stat.isFile()) {
-      throw new Error(`作业源文件不是普通文件：${absolutePath}`);
-    }
-
-    const extension = extensionFromPathLike(item.fileName || absolutePath);
-    const fileKind = fileKindFromExtension(extension);
-
-    if (!fileKind) {
-      throw new Error(`作业源文件只支持 PDF 或图片：${absolutePath}`);
-    }
-
-    const buffer = await fs.promises.readFile(absolutePath);
-
-    normalized.push({
-      fileName: normalizeText(item.fileName || item.name) || path.basename(absolutePath),
-      contentType: normalizeText(item.contentType || item.mimeType) || contentTypeFromExtension(extension),
-      base64: buffer.toString('base64')
-    });
-  }
-
-  return normalized;
-}
-
-function normalizeInlineSourcesPayload(inlineSources) {
-  const source = Array.isArray(inlineSources) ? inlineSources : [];
-  const normalized = [];
-
-  for (const rawItem of source) {
-    const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
-    const base64 = normalizeText(item.base64 || item.data || item.content);
-
-    if (!base64) {
-      continue;
-    }
-
-    normalized.push({
-      fileName: normalizeText(item.fileName || item.name) || 'source',
-      contentType: normalizeText(item.contentType || item.mimeType),
-      base64
-    });
-  }
-
-  return normalized;
-}
-
-function normalizeSourceItemsPayload(sourceItems) {
-  const items = Array.isArray(sourceItems) ? sourceItems : [];
-  const normalized = [];
-
-  for (const rawItem of items) {
-    const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
-    const sourceType = normalizeText(item.sourceType || item.kind || item.type).toLowerCase() === 'storage'
-      ? 'storage'
-      : 'url';
-    const normalizedItem = {
-      sourceType,
-      fileId: normalizeText(item.fileId || item.fileID),
-      cloudPath: normalizeText(item.cloudPath),
-      url: normalizeUrl(item.url || item.sourceUrl || item.href),
-      fileName: normalizeText(item.fileName || item.name) || 'source',
-      contentType: normalizeText(item.contentType || item.mimeType),
-      fileKind: normalizeText(item.fileKind),
-      size: Math.max(0, Number(item.size) || 0)
-    };
-
-    if (normalizedItem.sourceType === 'storage') {
-      if (!normalizedItem.fileId && !normalizedItem.cloudPath) {
-        continue;
-      }
-    } else if (!normalizedItem.url) {
-      continue;
-    }
-
-    normalized.push(normalizedItem);
-  }
-
-  return normalized;
-}
-
-async function uploadHomeworkSources(endpoint, token, payload, timeoutMs) {
-  const response = await invokeJsonRequest(
-    endpoint,
-    token,
-    'POST',
-    {
-      action: 'uploadAgentHomeworkSources',
-      requestId: payload.requestId,
-      sourceUrls: payload.sourceUrls,
-      inlineSources: payload.inlineSources
-    },
-    timeoutMs
-  );
-
-  return normalizeSourceItemsPayload(response && response.sourceItems);
-}
-
-async function buildHomeworkCreateRequest(endpoint, token, timeoutMs, payload, index = 0) {
-  const nextPayload = ensureObjectPayload(payload, 'homework-create');
-  const {
-    sourceFiles: _sourceFiles,
-    inlineSources: _rawInlineSources,
-    sourceUrls: _rawSourceUrls,
-    sourceItems: _rawSourceItems,
-    requests: _rawRequests,
-    items: _rawItems,
-    ...requestBody
-  } = nextPayload;
-  const sourceUrls = normalizeHomeworkSourceUrls(nextPayload.sourceUrls);
-  const inlineSources = [
-    ...normalizeInlineSourcesPayload(nextPayload.inlineSources),
-    ...await inlineSourcesFromLocalFiles(nextPayload.sourceFiles)
-  ];
-  validateHomeworkSources(sourceUrls, inlineSources);
-  const requestId = normalizeText(nextPayload.requestId) || makeRequestId(`openclaw-homework-${index + 1}`);
-  let sourceItems = normalizeSourceItemsPayload(nextPayload.sourceItems);
-
-  if (!sourceItems.length && inlineSources.length) {
-    sourceItems = await uploadHomeworkSources(
-      endpoint,
-      token,
-      {
-        requestId,
-        sourceUrls,
-        inlineSources
-      },
-      timeoutMs
-    );
-  }
-
-  return {
-    ...requestBody,
-    requestId,
-    agentId: normalizeText(nextPayload.agentId) || 'openclaw',
-    label: normalizeText(nextPayload.label) || 'OpenClaw',
-    sourceUrls,
-    sourceItems
-  };
-}
-
-async function buildHomeworkCreatePayload(endpoint, token, timeoutMs, payload) {
-  const nextPayload = ensureObjectPayload(payload, 'homework-create');
-  const requests = Array.isArray(nextPayload.requests)
-    ? nextPayload.requests
-    : Array.isArray(nextPayload.items)
-      ? nextPayload.items
-      : null;
-
-  if (requests) {
-    return {
-      action: 'submitAgentHomeworkRequests',
-      requests: await Promise.all(
-        requests.map((item, index) => buildHomeworkCreateRequest(endpoint, token, timeoutMs, item, index))
-      )
-    };
-  }
-
-  return {
-    action: 'submitAgentHomeworkRequest',
-    ...(await buildHomeworkCreateRequest(endpoint, token, timeoutMs, nextPayload))
-  };
 }
 
 function buildStatusPayload(action, requestId) {
@@ -658,70 +407,6 @@ function buildStatusPayload(action, requestId) {
     action,
     requestId: normalizedId
   };
-}
-
-function buildHomeworkStatusPayload(payload, requestIdOption) {
-  const nextPayload = payload && typeof payload === 'object' ? payload : {};
-  const requestIds = Array.isArray(nextPayload.requestIds)
-    ? nextPayload.requestIds.filter((item) => normalizeText(item))
-    : Array.isArray(nextPayload.ids)
-      ? nextPayload.ids.filter((item) => normalizeText(item))
-      : [];
-
-  if (requestIds.length) {
-    return {
-      action: 'getAgentHomeworkRequestStatuses',
-      requestIds
-    };
-  }
-
-  return buildStatusPayload(
-    'getAgentHomeworkRequestStatus',
-    requestIdOption || nextPayload.requestId || nextPayload.id
-  );
-}
-
-function buildHomeworkQueryPayload(payload) {
-  const nextPayload = payload && typeof payload === 'object' ? payload : {};
-  const query = {
-    action: 'queryAgentHomeworkRequests'
-  };
-
-  if (normalizeText(nextPayload.targetDate)) {
-    query.targetDate = normalizeText(nextPayload.targetDate);
-  }
-
-  if (Array.isArray(nextPayload.targetDates)) {
-    query.targetDates = nextPayload.targetDates.filter((item) => normalizeText(item));
-  } else if (Array.isArray(nextPayload.dates)) {
-    query.targetDates = nextPayload.dates.filter((item) => normalizeText(item));
-  }
-
-  if (normalizeText(nextPayload.subject)) {
-    query.subject = normalizeText(nextPayload.subject);
-  }
-
-  if (Array.isArray(nextPayload.subjects)) {
-    query.subjects = nextPayload.subjects.filter((item) => normalizeText(item));
-  }
-
-  if (normalizeText(nextPayload.bucket)) {
-    query.bucket = normalizeText(nextPayload.bucket);
-  }
-
-  if (normalizeText(nextPayload.status)) {
-    query.status = normalizeText(nextPayload.status);
-  }
-
-  if (Array.isArray(nextPayload.statuses)) {
-    query.statuses = nextPayload.statuses.filter((item) => normalizeText(item));
-  }
-
-  if (Number.isFinite(Number(nextPayload.limit))) {
-    query.limit = Number(nextPayload.limit);
-  }
-
-  return query;
 }
 
 async function invokeJsonRequest(url, token, method, payload, timeoutMs, options = {}) {
@@ -901,7 +586,10 @@ async function main() {
   const endpoint = resolveEndpoint(command, options);
   const timeoutMs = requestTimeoutMs(options);
   const payload = await readJsonPayload(options);
-  const token = command.startsWith('schedule-') || command.startsWith('homework-')
+  const token = command.startsWith('schedule-')
+    || command.startsWith('homework-')
+    || command.startsWith('dictation-')
+    || command.startsWith('recitation-')
     ? await ensureAgentToken(command, options, timeoutMs)
     : '';
   let result;
@@ -961,12 +649,39 @@ async function main() {
         timeoutMs
       );
       break;
+    case 'dictation-create':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildDictationCreatePayload(payload),
+        timeoutMs
+      );
+      break;
+    case 'dictation-query':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildDictationQueryPayload(payload),
+        timeoutMs
+      );
+      break;
+    case 'dictation-status':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildDictationStatusPayload(payload, options['request-id']),
+        timeoutMs
+      );
+      break;
     case 'homework-create':
       result = await invokeJsonRequest(
         endpoint,
         token,
         'POST',
-        await buildHomeworkCreatePayload(endpoint, token, timeoutMs, payload),
+        await buildHomeworkCreatePayload(invokeJsonRequest, endpoint, token, timeoutMs, payload, makeRequestId),
         timeoutMs
       );
       break;
@@ -985,6 +700,33 @@ async function main() {
         token,
         'POST',
         buildHomeworkStatusPayload(payload, options['request-id']),
+        timeoutMs
+      );
+      break;
+    case 'recitation-create':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildRecitationCreatePayload(payload),
+        timeoutMs
+      );
+      break;
+    case 'recitation-query':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildRecitationQueryPayload(payload),
+        timeoutMs
+      );
+      break;
+    case 'recitation-status':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildRecitationStatusPayload(payload, options['request-id']),
         timeoutMs
       );
       break;

@@ -442,9 +442,17 @@ function createStorageRuntime(dependencies = {}) {
       const rawState = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       studyToolsState = {
         classMarks: rawState.classMarks && typeof rawState.classMarks === 'object' ? rawState.classMarks : {},
+        agentDictationRequestMarks:
+          rawState.agentDictationRequestMarks && typeof rawState.agentDictationRequestMarks === 'object'
+            ? rawState.agentDictationRequestMarks
+            : {},
         agentHomeworkRequestMarks:
           rawState.agentHomeworkRequestMarks && typeof rawState.agentHomeworkRequestMarks === 'object'
             ? rawState.agentHomeworkRequestMarks
+            : {},
+        agentRecitationRequestMarks:
+          rawState.agentRecitationRequestMarks && typeof rawState.agentRecitationRequestMarks === 'object'
+            ? rawState.agentRecitationRequestMarks
             : {},
         mobileToken: normalizePrefix(rawState.mobileToken) || crypto.randomBytes(12).toString('hex'),
         uiZoomFactor: normalizeUiZoomFactor(rawState.uiZoomFactor),
@@ -507,32 +515,51 @@ function createStorageRuntime(dependencies = {}) {
       }
     }
 
-    const homeworkCutoff = new Date();
-    homeworkCutoff.setDate(homeworkCutoff.getDate() - 120);
-    const homeworkCutoffIso = homeworkCutoff.toISOString();
-    const homeworkMarks =
-      studyToolsState.agentHomeworkRequestMarks && typeof studyToolsState.agentHomeworkRequestMarks === 'object'
-        ? studyToolsState.agentHomeworkRequestMarks
-        : {};
-    const sortedHomeworkMarks = Object.entries(homeworkMarks)
-      .filter(([, mark]) => mark && typeof mark === 'object')
-      .sort((left, right) =>
-        normalizePrefix(right[1] && right[1].updatedAt).localeCompare(normalizePrefix(left[1] && left[1].updatedAt))
-      );
-    const nextHomeworkMarks = {};
+    function pruneAgentRequestMarks(rawMarks, serializer) {
+      const requestCutoff = new Date();
+      requestCutoff.setDate(requestCutoff.getDate() - 120);
+      const requestCutoffIso = requestCutoff.toISOString();
+      const marks = rawMarks && typeof rawMarks === 'object' ? rawMarks : {};
+      const sortedMarks = Object.entries(marks)
+        .filter(([, mark]) => mark && typeof mark === 'object')
+        .sort((left, right) =>
+          normalizePrefix(right[1] && right[1].updatedAt).localeCompare(normalizePrefix(left[1] && left[1].updatedAt))
+        );
+      const nextMarks = {};
 
-    for (const [requestId, mark] of sortedHomeworkMarks) {
-      const updatedAt = normalizePrefix(mark.updatedAt || mark.completedAt || mark.createdAt);
+      for (const [requestId, mark] of sortedMarks) {
+        const updatedAt = normalizePrefix(mark.updatedAt || mark.completedAt || mark.createdAt);
 
-      if (!updatedAt || updatedAt < homeworkCutoffIso) {
-        continue;
+        if (!updatedAt || updatedAt < requestCutoffIso) {
+          continue;
+        }
+
+        if (Object.keys(nextMarks).length >= 120) {
+          continue;
+        }
+
+        nextMarks[requestId] = serializer(mark, updatedAt);
       }
 
-      if (Object.keys(nextHomeworkMarks).length >= 120) {
-        continue;
-      }
+      return nextMarks;
+    }
 
-      nextHomeworkMarks[requestId] = {
+    studyToolsState.agentDictationRequestMarks = pruneAgentRequestMarks(
+      studyToolsState.agentDictationRequestMarks,
+      (mark, updatedAt) => ({
+        status: normalizePrefix(mark.status),
+        taskId: normalizePrefix(mark.taskId),
+        itemCount: Number(mark.itemCount) || 0,
+        subject: normalizePrefix(mark.subject),
+        bucket: normalizePrefix(mark.bucket),
+        targetDate: normalizePrefix(mark.targetDate),
+        updatedAt
+      })
+    );
+
+    studyToolsState.agentHomeworkRequestMarks = pruneAgentRequestMarks(
+      studyToolsState.agentHomeworkRequestMarks,
+      (mark, updatedAt) => ({
         status: normalizePrefix(mark.status),
         jobId: normalizePrefix(mark.jobId),
         subject: normalizePrefix(mark.subject),
@@ -540,10 +567,20 @@ function createStorageRuntime(dependencies = {}) {
         targetDate: normalizePrefix(mark.targetDate),
         updatedAt,
         totalPages: Number(mark.totalPages) || 0
-      };
-    }
+      })
+    );
 
-    studyToolsState.agentHomeworkRequestMarks = nextHomeworkMarks;
+    studyToolsState.agentRecitationRequestMarks = pruneAgentRequestMarks(
+      studyToolsState.agentRecitationRequestMarks,
+      (mark, updatedAt) => ({
+        status: normalizePrefix(mark.status),
+        taskId: normalizePrefix(mark.taskId),
+        subject: normalizePrefix(mark.subject),
+        bucket: normalizePrefix(mark.bucket),
+        targetDate: normalizePrefix(mark.targetDate),
+        updatedAt
+      })
+    );
   }
 
   function saveStudyToolsState() {

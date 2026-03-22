@@ -12,6 +12,7 @@ const {
   shell: electronShell,
   webFrameMain
 } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -107,6 +108,9 @@ const {
   createStatePathHelpers
 } = require('./runtime-paths');
 const {
+  normalizeAutoUpdateConfig
+} = require('./auto-update-config');
+const {
   createConfigRuntime
 } = require('./config-runtime');
 const {
@@ -146,14 +150,35 @@ const {
   createSecurityRuntime
 } = require('./security-runtime');
 const {
+  createSessionGuardRuntime
+} = require('./session-guard-runtime');
+const {
+  createStartupDebugRuntime
+} = require('./startup-debug-runtime');
+const {
   createStudyTargetRuntime
 } = require('./study-target-runtime');
+const {
+  createAutoUpdateRuntime
+} = require('./auto-update-runtime');
+const {
+  createDictationAgentRuntime
+} = require('./dictation-agent-runtime');
+const {
+  createDictationRemoteRuntime
+} = require('./dictation-remote-runtime');
 const {
   createHomeworkAgentRuntime
 } = require('./homework-agent-runtime');
 const {
   createHomeworkRemoteRuntime
 } = require('./homework-remote-runtime');
+const {
+  createRecitationAgentRuntime
+} = require('./recitation-agent-runtime');
+const {
+  createRecitationRemoteRuntime
+} = require('./recitation-remote-runtime');
 const {
   LEGACY_MEDIA_COMPATIBILITY_SCRIPT,
   configureClassroomSecurityBootstrap
@@ -215,6 +240,7 @@ const configRuntime = createConfigRuntime({
   normalizeLibraries,
   normalizeLearningTools,
   normalizeOnlineClassrooms,
+  normalizeAutoUpdateConfig,
   normalizePrefix,
   normalizeReminderLeadMinutes,
   normalizeRemoteSchedule,
@@ -228,6 +254,11 @@ const configRuntime = createConfigRuntime({
   stableUserDataDir: STABLE_USER_DATA_DIR
 });
 const runtimePaths = createStatePathHelpers(() => appConfig && appConfig.stateDir);
+const startupDebugRuntime = createStartupDebugRuntime({
+  fs,
+  logPath: STARTUP_DEBUG_LOG,
+  os
+});
 let navigationRuntime = null;
 const exitRuntime = createExitRuntime({
   BrowserWindow,
@@ -434,6 +465,37 @@ const {
   studentDeviceCredentialPayload
 } = storageRuntime;
 scheduleSessionPersist = storageScheduleSessionPersist;
+const sessionGuardRuntime = createSessionGuardRuntime({
+  allowedMediaPermissions: ALLOWED_MEDIA_PERMISSIONS,
+  logBlockedRequest,
+  logClassroomMediaDebug,
+  normalizePrefix,
+  scheduleSessionPersist: () => scheduleSessionPersist(),
+  session,
+  sessionPartition: SESSION_PARTITION,
+  shouldAllowRequest,
+  shouldGrantPermission
+});
+const dictationAgentRuntime = createDictationAgentRuntime({
+  fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
+  fs,
+  normalizePrefix,
+  getStudyToolsState,
+  pathModule: path,
+  resolveDictationExecutablePath: () =>
+    resolveNativeModuleExecutablePath('dictation-module', {
+      executableDir: path.dirname(process.execPath),
+      projectRoot: path.resolve(__dirname, '..')
+    }),
+  saveStudyToolsState,
+  spawn
+});
+const dictationRemoteRuntime = createDictationRemoteRuntime({
+  fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
+  getAppConfig: () => appConfig,
+  dictationAgentRuntime,
+  normalizePrefix
+});
 const homeworkAgentRuntime = createHomeworkAgentRuntime({
   fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
   fs,
@@ -453,6 +515,26 @@ const homeworkRemoteRuntime = createHomeworkRemoteRuntime({
   getAppConfig: () => appConfig,
   homeworkAgentRuntime,
   normalizePrefix
+});
+const recitationAgentRuntime = createRecitationAgentRuntime({
+  fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
+  fs,
+  normalizePrefix,
+  getStudyToolsState,
+  pathModule: path,
+  resolveRecitationExecutablePath: () =>
+    resolveNativeModuleExecutablePath('recitation-module', {
+      executableDir: path.dirname(process.execPath),
+      projectRoot: path.resolve(__dirname, '..')
+    }),
+  saveStudyToolsState,
+  spawn
+});
+const recitationRemoteRuntime = createRecitationRemoteRuntime({
+  fetchJson: (...args) => internalServiceRuntime.fetchJson(...args),
+  getAppConfig: () => appConfig,
+  normalizePrefix,
+  recitationAgentRuntime
 });
 const studyDataRuntime = createStudyDataRuntime({
   createEmptyRemoteScheduleStatus,
@@ -490,10 +572,20 @@ const {
   syncRemoteStudySchedule
 } = studyDataRuntime;
 const {
+  startRemoteDictationPolling,
+  stopRemoteDictationPolling,
+  syncRemoteDictationRequests
+} = dictationRemoteRuntime;
+const {
   startRemoteHomeworkPolling,
   stopRemoteHomeworkPolling,
   syncRemoteHomeworkRequests
 } = homeworkRemoteRuntime;
+const {
+  startRemoteRecitationPolling,
+  stopRemoteRecitationPolling,
+  syncRemoteRecitationRequests
+} = recitationRemoteRuntime;
 const studyScheduleRuntime = createStudyScheduleRuntime({
   buildHomeUiModel,
   formatDisplayTime,
@@ -604,6 +696,16 @@ const {
   loadNetdiskState,
   proxyNetdiskMedia
 } = netdiskRuntime;
+const autoUpdateRuntime = createAutoUpdateRuntime({
+  Notification,
+  app,
+  autoUpdater,
+  fs,
+  getAppConfig: () => appConfig,
+  logNavigationDebug,
+  normalizePrefix,
+  runtimePaths
+});
 internalServiceRuntime = createInternalServiceRuntime({
   createConfigError,
   ensureMobileToken,
@@ -633,19 +735,7 @@ const {
 } = internalServiceRuntime;
 let allowAppQuit = false;
 let currentWindowZoomFactor = DEFAULT_UI_ZOOM_FACTOR;
-
-function appendStartupDebug(message, details) {
-  try {
-    const suffix = details === undefined ? '' : ` ${JSON.stringify(details)}`;
-    fs.appendFileSync(
-      STARTUP_DEBUG_LOG,
-      `[${new Date().toISOString()}] ${message}${suffix}${os.EOL}`,
-      'utf8'
-    );
-  } catch {
-    // Ignore startup debug logging failures.
-  }
-}
+const appendStartupDebug = (...args) => startupDebugRuntime.append(...args);
 
 appendStartupDebug('process-start', {
   pid: process.pid,
@@ -742,67 +832,6 @@ function applyWindowZoomFactor(factor, options = {}) {
 
   return currentWindowZoomFactor;
 }
-function configureSessionGuards() {
-  const ses = session.fromPartition(SESSION_PARTITION);
-  const summarizePermissionDetails = (details = {}) => ({
-    detailsKeys: details && typeof details === 'object' ? Object.keys(details).sort() : [],
-    mediaTypes: Array.isArray(details.mediaTypes) ? details.mediaTypes : [],
-    requestingUrl: normalizePrefix(details.requestingUrl),
-    securityOrigin: normalizePrefix(details.securityOrigin),
-    externalURL: normalizePrefix(details.externalURL),
-    isMainFrame: details.isMainFrame === true
-  });
-  const shouldLogMediaPermission = (permission) => ALLOWED_MEDIA_PERMISSIONS.has(permission);
-
-  ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    const allowed = shouldGrantPermission(webContents, permission, null, details);
-
-    if (shouldLogMediaPermission(permission)) {
-      logClassroomMediaDebug('session-permission-request', {
-        permission,
-        allowed,
-        currentUrl: webContents && !webContents.isDestroyed() ? webContents.getURL() : '',
-        ...summarizePermissionDetails(details)
-      });
-    }
-
-    callback(allowed);
-  });
-
-  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
-    const allowed = shouldGrantPermission(webContents, permission, requestingOrigin, details);
-
-    if (shouldLogMediaPermission(permission)) {
-      logClassroomMediaDebug('session-permission-check', {
-        permission,
-        allowed,
-        requestingOrigin: normalizePrefix(requestingOrigin),
-        currentUrl: webContents && !webContents.isDestroyed() ? webContents.getURL() : '',
-        ...summarizePermissionDetails(details)
-      });
-    }
-
-    return allowed;
-  });
-
-  ses.on('will-download', (event) => {
-    event.preventDefault();
-  });
-
-  ses.cookies.on('changed', () => {
-    scheduleSessionPersist();
-  });
-
-  ses.webRequest.onBeforeRequest((details, callback) => {
-    const allowed = shouldAllowRequest(details);
-
-    if (!allowed) {
-      logBlockedRequest(details, 'BLOCK_REQ');
-    }
-
-    callback({ cancel: !allowed });
-  });
-}
 
 if (gotSingleInstanceLock) {
   app.whenReady().then(async () => {
@@ -828,7 +857,7 @@ if (gotSingleInstanceLock) {
       await startInternalServer();
       appendStartupDebug('internal-server-started');
       app.setName(appConfig.appTitle);
-      configureSessionGuards();
+      sessionGuardRuntime.configure();
       appendStartupDebug('session-guards-configured');
       registerShellIpc({
         app,
@@ -862,6 +891,10 @@ if (gotSingleInstanceLock) {
         getMainWindow: () => mainWindow,
         getCurrentWindowZoomFactor: () => currentWindowZoomFactor,
         applyWindowZoomFactor,
+        getAutoUpdateStatus: () => autoUpdateRuntime.getManualCheckSnapshot(),
+        checkForUpdates: (options) => autoUpdateRuntime.checkForUpdates(options),
+        downloadAvailableUpdate: () => autoUpdateRuntime.downloadAvailableUpdate(),
+        installDownloadedUpdate: () => autoUpdateRuntime.installDownloadedUpdate(),
         navigateMainWindow,
         updateClassroomShellTopHeight,
         exitVerificationModel,
@@ -881,13 +914,21 @@ if (gotSingleInstanceLock) {
         throwOnError: false
       });
       appendStartupDebug('student-device-access-synced');
+      void syncRemoteDictationRequests();
+      appendStartupDebug('remote-dictation-sync-started');
       void syncRemoteHomeworkRequests();
       appendStartupDebug('remote-homework-sync-started');
+      void syncRemoteRecitationRequests();
+      appendStartupDebug('remote-recitation-sync-started');
       startRemoteSchedulePolling();
+      startRemoteDictationPolling();
       startRemoteHomeworkPolling();
+      startRemoteRecitationPolling();
       appendStartupDebug('remote-polling-started');
       createMainWindow();
       appendStartupDebug('main-window-created');
+      autoUpdateRuntime.start();
+      appendStartupDebug('auto-update-started');
       reminderPollingRuntime.start();
       appendStartupDebug('reminder-polling-started');
     } catch (error) {
@@ -937,7 +978,10 @@ app.on('before-quit', () => {
   clearPendingNetdiskAuth();
   closeExitPasswordWindow();
   reminderPollingRuntime.stop();
+  autoUpdateRuntime.stop();
+  stopRemoteRecitationPolling();
   stopRemoteHomeworkPolling();
+  stopRemoteDictationPolling();
   stopRemoteSchedulePolling();
   stopInternalServer();
   void persistSessionState();

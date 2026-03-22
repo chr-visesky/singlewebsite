@@ -1,0 +1,7 @@
+{
+  "name": "dictation-admin",
+  "private": true,
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

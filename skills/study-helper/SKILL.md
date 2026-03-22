@@ -1,7 +1,7 @@
 ---
-version: "1.2.6"
+version: "1.3.0"
 name: study-helper
-description: 学习助手 / Study Helper。用于让 OpenClaw 通过已部署的 schedulePublic 和 homeworkPublic 管理 StudyGate 的计划与作业，包括读取计划、创建计划、修改计划、删除计划、查询计划状态、创建作业、查询作业、查询作业状态，并支持把本地图片或 PDF 先上传到云存储/COS，再作为作业来源创建。
+description: 学习助手 / Study Helper。用于让 OpenClaw 通过已部署的 schedulePublic、homeworkPublic、dictationPublic、recitationPublic 管理 StudyGate 的计划、作业、听写、背诵，包括读取计划、创建计划、修改计划、删除计划、查询计划状态、创建作业、查询作业、查询作业状态、创建听写、查询听写、听写状态、创建背诵、查询背诵、背诵状态，并支持把本地图片或 PDF 先上传到云存储/COS，再作为作业来源创建。
 author: StudyGate
 homepage: https://github.com/chr-visesky/singlewebsite/tree/main/skills/study-helper
 source: https://github.com/chr-visesky/singlewebsite
@@ -28,6 +28,12 @@ metadata: {"openclaw":{"skillKey":"study-helper","emoji":"📚","homepage":"http
 - 创建作业
 - 查询作业
 - 查询作业状态
+- 创建听写
+- 查询听写
+- 听写状态
+- 创建背诵
+- 查询背诵
+- 背诵状态
 - 用图片创建作业
 - 批量创建作业
 - 批量查询作业状态
@@ -41,14 +47,20 @@ metadata: {"openclaw":{"skillKey":"study-helper","emoji":"📚","homepage":"http
 可选覆盖：
 
 - `STUDYGATE_HOMEWORK_PUBLIC_URL`
+- `STUDYGATE_DICTATION_PUBLIC_URL`
+- `STUDYGATE_RECITATION_PUBLIC_URL`
 - `STUDYGATE_AGENT_ACCESS_URL`
 - `STUDYGATE_AGENT_WRITE_TOKEN`
 - `STUDYGATE_SCHEDULE_AGENT_WRITE_TOKEN`
 - `STUDYGATE_HOMEWORK_AGENT_WRITE_TOKEN`
+- `STUDYGATE_DICTATION_AGENT_WRITE_TOKEN`
+- `STUDYGATE_RECITATION_AGENT_WRITE_TOKEN`
 
 默认只配 `STUDYGATE_SCHEDULE_PUBLIC_URL` 也可以。脚本会自动推导：
 
 - `homeworkPublic` 为同域的 `/api/homework`
+- `dictationPublic` 为同域的 `/api/dictation`
+- `recitationPublic` 为同域的 `/api/recitation`
 - `agentAccessPublic` 为同域的 `/api/agent-access`
 
 如果你已经给 skill 手动配过 `STUDYGATE_AGENT_WRITE_TOKEN`，脚本会直接用；如果没配，脚本会自动发起“学习助手接入申请”，等家长在管理端批准后，把 token 缓存在本机。
@@ -69,6 +81,12 @@ node {baseDir}/scripts/study-helper.js 计划状态 --请求编号 openclaw-plan
 node {baseDir}/scripts/study-helper.js 创建作业 --载荷文件 /tmp/homework.json
 node {baseDir}/scripts/study-helper.js 查询作业 --载荷文件 /tmp/homework-query.json
 node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-homework-123
+node {baseDir}/scripts/study-helper.js 创建听写 --载荷文件 /tmp/dictation.json
+node {baseDir}/scripts/study-helper.js 查询听写 --载荷文件 /tmp/dictation-query.json
+node {baseDir}/scripts/study-helper.js 听写状态 --请求编号 openclaw-dictation-123
+node {baseDir}/scripts/study-helper.js 创建背诵 --载荷文件 /tmp/recitation.json
+node {baseDir}/scripts/study-helper.js 查询背诵 --载荷文件 /tmp/recitation-query.json
+node {baseDir}/scripts/study-helper.js 背诵状态 --请求编号 openclaw-recitation-123
 ```
 
 脚本会把 JSON 输出到标准输出；如果校验失败或 HTTP 调用失败，会以非零退出码结束。
@@ -230,6 +248,61 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 
 - 智能体作业删除接口已移除，不要尝试删除作业。
 
+## 听写流程
+
+“创建听写”支持单条和批量：
+
+- 单条：直接传 `title`、`subject`、`bucket`、`targetDate`、`language`、`items`
+- 批量：传 `requests`
+
+最小听写创建请求体示例：
+
+```json
+{
+  "subject": "英语",
+  "bucket": "课外",
+  "targetDate": "2026-03-22",
+  "language": "英语",
+  "items": ["apple", "banana", "orange"]
+}
+```
+
+“查询听写”支持这些过滤条件：
+
+- `targetDate`
+- `subject`
+- `bucket`
+- `status`
+
+如果用户只说“查今天的英语听写”“查课外听写”，优先使用“查询听写”，不要先要求 `requestId`。
+
+## 背诵流程
+
+“创建背诵”支持单条和批量：
+
+- 单条：直接传 `title`、`subject`、`bucket`、`targetDate`、`sourceText`
+- 批量：传 `requests`
+
+最小背诵创建请求体示例：
+
+```json
+{
+  "subject": "语文",
+  "bucket": "课内",
+  "targetDate": "2026-03-23",
+  "sourceText": "床前明月光，疑是地上霜。"
+}
+```
+
+“查询背诵”支持这些过滤条件：
+
+- `targetDate`
+- `subject`
+- `bucket`
+- `status`
+
+如果用户只说“查今天的背诵”“查课内语文背诵”，优先使用“查询背诵”，不要先要求 `requestId`。
+
 ## 结果解释
 
 结果要这样理解：
@@ -237,6 +310,9 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 - 计划提交返回 `status: "applied"`，表示后端已经直接接受并生效。
 - 计划提交返回 `status: "pending"`，表示这次修改需要人工确认。
 - 作业创建返回 `status: "pending"`，表示请求已经进入桌面端同步队列。
+- 听写创建返回 `status: "pending"`，表示请求已经进入桌面端同步队列。
+- 背诵创建返回 `status: "pending"`，表示请求已经进入桌面端同步队列。
 - 查询作业状态时如果 `request.status: "completed"`，表示桌面端已经完成了动作。
+- 查询听写或背诵状态时如果 `request.status: "completed"`，表示桌面端已经完成了动作。
 
 如果 API 返回了 `error` 字段，就直接把错误告诉上层，不要自己编造兜底逻辑。

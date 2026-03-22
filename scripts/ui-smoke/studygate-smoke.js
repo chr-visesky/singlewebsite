@@ -36,7 +36,11 @@ Get-CimInstance Win32_Process |
     try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
   }
 `;
-  runPowerShell(command, { stdio: 'ignore' });
+  try {
+    runPowerShell(command, { stdio: 'ignore' });
+  } catch {
+    // Ignore cleanup failures so smoke results reflect app behavior, not CIM availability.
+  }
 }
 
 function processIdsByPath(exePath) {
@@ -48,7 +52,14 @@ $rows = Get-CimInstance Win32_Process |
   Select-Object -ExpandProperty ProcessId
 ($rows | ForEach-Object { $_.ToString() }) -join ','
 `;
-  const output = runPowerShell(command).trim();
+  let output = '';
+
+  try {
+    output = runPowerShell(command).trim();
+  } catch {
+    return [];
+  }
+
   return output
     ? output
         .split(',')
@@ -107,7 +118,12 @@ async function clickToolbarAction(page, actionLabel) {
     }
 
     const buttons = Array.from(shadowRoot.querySelectorAll('.toolbar-actions button'));
-    const target = buttons.find((button) => String(button.textContent || '').trim() === label);
+    const target = buttons.find((button) => {
+      const text = String(button.textContent || '').trim();
+      const title = String(button.getAttribute('title') || '').trim();
+      const ariaLabel = String(button.getAttribute('aria-label') || '').trim();
+      return text === label || title === label || ariaLabel === label;
+    });
 
     if (!target) {
       return false;
@@ -144,7 +160,7 @@ async function openInternalLibrary(page) {
       return false;
     }
 
-    await window.studyGate.navigate('internal:library');
+    window.studyGate.navigate('internal:library');
     return true;
   });
 }
@@ -157,6 +173,13 @@ async function summarizeHome(page) {
     const homeNoticeNode = document.getElementById('home-notice');
     const firstCard = document.querySelector('#card-grid .card');
     const model = window.studyGate ? await window.studyGate.getHomeModel({ syncRemote: false }) : null;
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const updateButton = shadowRoot
+      ? Array.from(shadowRoot.querySelectorAll('.toolbar-actions button')).find((button) =>
+          String(button.getAttribute('title') || button.getAttribute('aria-label') || button.textContent || '').trim() === '检查更新'
+        )
+      : null;
 
     return {
       layoutOrder,
@@ -164,9 +187,68 @@ async function summarizeHome(page) {
       firstCardTitle: firstCard ? String(firstCard.querySelector('h2')?.textContent || '').trim() : '',
       firstCardBadge: firstCard ? String(firstCard.querySelector('.card__tag')?.textContent || '').trim() : '',
       firstModelCardId: model && Array.isArray(model.cards) && model.cards[0] ? String(model.cards[0].id || '') : '',
-      homeNoticeVisible: Boolean(homeNoticeNode && homeNoticeNode.hidden === false)
+      homeNoticeVisible: Boolean(homeNoticeNode && homeNoticeNode.hidden === false),
+      updateButtonCompact: Boolean(updateButton && updateButton.classList.contains('nav-button--icon-only')),
+      toolbarActions: shadowRoot
+        ? Array.from(shadowRoot.querySelectorAll('.toolbar-actions button')).map((button) =>
+            String(button.getAttribute('title') || button.getAttribute('aria-label') || button.textContent || '').trim()
+          )
+        : []
     };
   });
+}
+
+async function openUpdateDialogAndSummarize(page) {
+  const opened = await clickToolbarAction(page, '检查更新');
+
+  if (!opened) {
+    return { opened: false };
+  }
+
+  await page.waitForFunction(() => {
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const overlay = shadowRoot && shadowRoot.querySelector('.update-overlay[data-visible="true"]');
+    const statusNode = overlay && overlay.querySelector('[data-role="status-text"]');
+    return Boolean(overlay && statusNode && String(statusNode.textContent || '').trim().length > 0);
+  }, null, { timeout: 10000 });
+
+  const summary = await page.evaluate(() => {
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const overlay = shadowRoot && shadowRoot.querySelector('.update-overlay[data-visible="true"]');
+
+    if (!overlay) {
+      return { opened: false };
+    }
+
+    return {
+      opened: true,
+      currentVersion: String(overlay.querySelector('[data-role="current-version"]')?.textContent || '').trim(),
+      latestVersion: String(overlay.querySelector('[data-role="latest-version"]')?.textContent || '').trim(),
+      statusText: String(overlay.querySelector('[data-role="status-text"]')?.textContent || '').trim(),
+      hasPrimaryButton: Boolean(overlay.querySelector('[data-role="primary"]:not([hidden])'))
+    };
+  });
+
+  await page.evaluate(() => {
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const closeButton = shadowRoot && shadowRoot.querySelector('.update-dialog__close');
+
+    if (closeButton) {
+      closeButton.click();
+    }
+  });
+
+  await page.waitForFunction(() => {
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const overlay = shadowRoot && shadowRoot.querySelector('.update-overlay');
+    return Boolean(!overlay || overlay.getAttribute('data-visible') === 'false');
+  }, null, { timeout: 5000 });
+
+  return summary;
 }
 
 async function summarizeLibrary(page) {
@@ -187,6 +269,36 @@ async function summarizeLibrary(page) {
       playerTop: pageRect && playerRect ? Math.round(playerRect.top - pageRect.top) : null
     };
   });
+}
+
+async function waitForHomeReady(page) {
+  await page.waitForFunction(() => {
+    const cardGrid = document.getElementById('card-grid');
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const actionCount = shadowRoot ? shadowRoot.querySelectorAll('.toolbar-actions button').length : 0;
+    return Boolean(window.studyGate && cardGrid && cardGrid.children.length > 0 && actionCount > 0);
+  }, null, { timeout: 10000 });
+}
+
+async function waitForStudentPlanReady(page) {
+  await page.waitForFunction(() => {
+    const statusNode = document.getElementById('access-status');
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const actionCount = shadowRoot ? shadowRoot.querySelectorAll('.toolbar-actions button').length : 0;
+    return Boolean(statusNode && actionCount > 0);
+  }, null, { timeout: 10000 });
+}
+
+async function waitForLibraryReady(page) {
+  await page.waitForFunction(() => {
+    const titleNode = document.getElementById('library-title');
+    const host = document.getElementById('studygate-nav-host');
+    const shadowRoot = host && host.shadowRoot;
+    const actionCount = shadowRoot ? shadowRoot.querySelectorAll('.toolbar-actions button').length : 0;
+    return Boolean(titleNode && titleNode.textContent && actionCount > 0);
+  }, null, { timeout: 10000 });
 }
 
 async function dismissHomeNoticeIfVisible(page) {
@@ -251,6 +363,7 @@ async function runStudyGateSmoke(options = {}) {
 
     await homePage.waitForLoadState('domcontentloaded');
     await homePage.setViewportSize({ width: 1440, height: 960 });
+    await waitForHomeReady(homePage);
 
     report.screenshots.home = path.join(outputDir, 'home.png');
     await takeScreenshot(homePage, report.screenshots.home);
@@ -280,11 +393,36 @@ async function runStudyGateSmoke(options = {}) {
       }
     }
 
+    if (!report.home.toolbarActions.includes('检查更新')) {
+      report.failedChecks.push('首页共享工具栏缺少“检查更新”按钮。');
+    }
+
+    if (!report.home.updateButtonCompact) {
+      report.failedChecks.push('首页“检查更新”按钮不是图标按钮。');
+    }
+
+    report.updateDialog = await openUpdateDialogAndSummarize(homePage);
+    if (!report.updateDialog.opened) {
+      report.failedChecks.push('首页未能打开自定义检查更新弹框。');
+    } else {
+      report.screenshots.updateDialog = path.join(outputDir, 'update-dialog.png');
+      await takeScreenshot(homePage, report.screenshots.updateDialog);
+
+      if (!report.updateDialog.currentVersion) {
+        report.failedChecks.push('检查更新弹框没有显示当前版本。');
+      }
+
+      if (!report.updateDialog.latestVersion) {
+        report.failedChecks.push('检查更新弹框没有显示最新版本。');
+      }
+    }
+
     const openedStudentPlan = await clickToolbarAction(homePage, '学生计划');
     if (!openedStudentPlan) {
       report.failedChecks.push('首页工具栏未找到“学生计划”按钮。');
     } else {
       await homePage.waitForFunction(() => /student-plan\.html$/i.test(window.location.href));
+      await waitForStudentPlanReady(homePage);
       report.studentPlanUrl = homePage.url();
       report.screenshots.studentPlan = path.join(outputDir, 'student-plan.png');
       await takeScreenshot(homePage, report.screenshots.studentPlan);
@@ -297,7 +435,9 @@ async function runStudyGateSmoke(options = {}) {
           const host = document.getElementById('studygate-nav-host');
           const shadowRoot = host && host.shadowRoot;
           return shadowRoot
-            ? Array.from(shadowRoot.querySelectorAll('.toolbar-actions button')).map((button) => String(button.textContent || '').trim())
+            ? Array.from(shadowRoot.querySelectorAll('.toolbar-actions button')).map((button) =>
+                String(button.getAttribute('title') || button.getAttribute('aria-label') || button.textContent || '').trim()
+              )
             : [];
         })()
       }));
@@ -310,11 +450,16 @@ async function runStudyGateSmoke(options = {}) {
         report.failedChecks.push('学生计划页的共享 banner 丢失了“刷新”按钮。');
       }
 
+      if (!report.studentPlan.toolbarActions.includes('检查更新')) {
+        report.failedChecks.push('学生计划页的共享 banner 缺少“检查更新”按钮。');
+      }
+
       const returnedHome = await clickToolbarHome(homePage);
       if (!returnedHome) {
         report.failedChecks.push('学生计划页没有通过共享工具栏提供返回首页入口。');
       } else {
         await homePage.waitForFunction(() => /home\.html$/i.test(window.location.href));
+        await waitForHomeReady(homePage);
         report.screenshots.homeAfterBack = path.join(outputDir, 'home-after-back.png');
         await takeScreenshot(homePage, report.screenshots.homeAfterBack);
       }
@@ -325,6 +470,7 @@ async function runStudyGateSmoke(options = {}) {
       report.failedChecks.push('未能通过内置导航打开百度网盘页。');
     } else {
       await homePage.waitForFunction(() => /library\.html/i.test(window.location.href));
+      await waitForLibraryReady(homePage);
       report.libraryUrl = homePage.url();
       report.screenshots.library = path.join(outputDir, 'library.png');
       await takeScreenshot(homePage, report.screenshots.library);
@@ -343,6 +489,7 @@ async function runStudyGateSmoke(options = {}) {
         report.failedChecks.push('百度网盘页没有通过共享工具栏提供返回首页入口。');
       } else {
         await homePage.waitForFunction(() => /home\.html$/i.test(window.location.href));
+        await waitForHomeReady(homePage);
       }
     }
 

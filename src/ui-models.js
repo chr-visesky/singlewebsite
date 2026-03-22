@@ -10,7 +10,8 @@ function buildHomeUiModel(options = {}) {
       id: moduleDefinition.id,
       title: moduleDefinition.title,
       tone: moduleDefinition.tone,
-      badge: '作业模块',
+      badge: moduleDefinition.badge || '学习模块',
+      order: Number(moduleDefinition.order) || 999,
       target: options.nativeModuleTarget(moduleDefinition.id),
       scheduleTargetId: moduleDefinition.id,
       libraryId: '',
@@ -50,15 +51,7 @@ function buildHomeUiModel(options = {}) {
   ];
 
   cards.sort((left, right) => {
-    if (left.id === 'homework-module') {
-      return -1;
-    }
-
-    if (right.id === 'homework-module') {
-      return 1;
-    }
-
-    return 0;
+    return (Number(left.order) || 999) - (Number(right.order) || 999);
   });
 
   return {
@@ -89,7 +82,8 @@ function buildNavigationUiModel(options = {}) {
     model.isHome = true;
     model.actions = [
       { id: 'refresh-home', label: '刷新' },
-      { id: 'student-plan', label: '学生计划' }
+      { id: 'student-plan', label: '学生计划' },
+      { id: 'check-update', label: '检查更新', icon: '↑', compact: true }
     ];
     return model;
   }
@@ -99,6 +93,7 @@ function buildNavigationUiModel(options = {}) {
 
     if (fileName === 'library.html') {
       const library = options.resolveLibrary(parsed.searchParams.get('library'));
+      model.actions = [{ id: 'check-update', label: '检查更新', icon: '↑', compact: true }];
       model.crumbs = [
         { label: '首页', target: 'internal:home', current: false },
         {
@@ -111,7 +106,10 @@ function buildNavigationUiModel(options = {}) {
     }
 
     if (fileName === 'student-plan.html') {
-      model.actions = [{ id: 'refresh-student-plan', label: '刷新' }];
+      model.actions = [
+        { id: 'refresh-student-plan', label: '刷新' },
+        { id: 'check-update', label: '检查更新', icon: '↑', compact: true }
+      ];
       model.crumbs = [
         { label: '首页', target: 'internal:home', current: false },
         { label: '学生计划', target: options.studentPlanTarget, current: true }
@@ -123,7 +121,8 @@ function buildNavigationUiModel(options = {}) {
     model.isHome = true;
     model.actions = [
       { id: 'refresh-home', label: '刷新' },
-      { id: 'student-plan', label: '学生计划' }
+      { id: 'student-plan', label: '学生计划' },
+      { id: 'check-update', label: '检查更新', icon: '↑', compact: true }
     ];
     return model;
   }
@@ -158,7 +157,8 @@ function buildClassroomNavigationUiModel(options = {}) {
     showStateReset: true,
     actions: [
       { id: 'refresh-classroom', label: '刷新' },
-      { id: 'student-plan', label: '学生计划' }
+      { id: 'student-plan', label: '学生计划' },
+      { id: 'check-update', label: '检查更新', icon: '↑', compact: true }
     ],
     crumbs: [
       { label: '首页', target: 'internal:home', current: false },

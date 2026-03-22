@@ -93,6 +93,9 @@ function createStatePathHelpers(getStateDir) {
     reminderDebugLogPath() {
       return path.join(resolveStateDir(), 'reminder-debug.log');
     },
+    updateDebugLogPath() {
+      return path.join(resolveStateDir(), 'update-debug.log');
+    },
     remoteScheduleCachePath() {
       return path.join(resolveStateDir(), 'study-schedule-cache.json');
     },

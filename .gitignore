@@ -25,4 +25,13 @@ modules/HomeworkApp/obj/
 tools/**/bin/
 tools/**/obj/
 .dotnet-home/
+.dotnet-cli/
+.nuget/
+.nuget-local-feed/
 project.private.config.json
+modules/StudyModules.Shared/bin/
+modules/StudyModules.Shared/obj/
+modules/DictationApp/bin/
+modules/DictationApp/obj/
+modules/RecitationApp/bin/
+modules/RecitationApp/obj/

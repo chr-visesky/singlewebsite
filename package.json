@@ -8,11 +8,12 @@
   "scripts": {
     "start": "electron .",
     "build": "node scripts/package-app.js",
+    "publish:updates:cos": "node scripts/publish-cos-release.js",
     "server": "node server/server.js",
     "cloudbase:token": "node scripts/generate-cloudbase-token.js",
     "test:ui": "node scripts/ui-smoke/run.js",
     "skill:pack:study-helper": "node scripts/build-study-helper-zip.js",
-    "skill:publish:study-helper": "npx clawhub publish skills/study-helper --slug study-helper --name \"学习助手\" --version 1.2.6 --changelog \"学习助手更新：创建作业时会先把本地作业图片上传到云存储/COS，再创建请求；同时支持按日期、科目、课内课外查询作业。\" --tags latest"
+    "skill:publish:study-helper": "npx clawhub publish skills/study-helper --slug study-helper --name \"学习助手\" --version 1.3.0 --changelog \"学习助手更新：新增听写/背诵创建与查询；创建作业继续先把本地图片上传到云存储/COS，再创建请求；作业查询支持按日期、科目、课内课外过滤。\" --tags latest"
   },
   "singleWebsite": {
     "productName": "StudyGate",
@@ -20,6 +21,11 @@
   },
   "devDependencies": {
     "electron": "^41.0.0",
+    "electron-builder": "^26.8.1",
     "playwright-core": "^1.58.2"
+  },
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "^2.15.4",
+    "electron-updater": "^6.8.3"
   }
 }

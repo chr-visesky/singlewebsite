@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const BUILTIN_NATIVE_MODULES = Object.freeze([
   Object.freeze({
     id: 'homework-module',
+    order: 10,
     title: '作业',
     description: '打开独立作业模块。',
     tone: 'coral',
@@ -17,6 +18,34 @@ const BUILTIN_NATIVE_MODULES = Object.freeze([
       path.join('modules', 'HomeworkApp', 'bin', 'Release', 'studygate-publish', 'HomeworkApp.exe'),
       path.join('modules', 'HomeworkApp', 'bin', 'Debug', 'net10.0-windows', 'HomeworkApp.exe'),
       path.join('modules', 'HomeworkApp', 'bin', 'Debug', 'net8.0-windows', 'HomeworkApp.exe')
+    ])
+  }),
+  Object.freeze({
+    id: 'dictation-module',
+    order: 20,
+    title: '听写',
+    description: '打开独立听写模块。',
+    tone: 'teal',
+    badge: '听写模块',
+    entryLabel: '打开听写',
+    packagedExecutableRelativePath: path.join('modules', 'dictation', 'DictationApp.exe'),
+    developmentExecutableRelativePaths: Object.freeze([
+      path.join('modules', 'DictationApp', 'bin', 'Release', 'studygate-publish', 'DictationApp.exe'),
+      path.join('modules', 'DictationApp', 'bin', 'Debug', 'net10.0-windows', 'DictationApp.exe')
+    ])
+  }),
+  Object.freeze({
+    id: 'recitation-module',
+    order: 30,
+    title: '背诵',
+    description: '打开独立背诵模块。',
+    tone: 'amber',
+    badge: '背诵模块',
+    entryLabel: '打开背诵',
+    packagedExecutableRelativePath: path.join('modules', 'recitation', 'RecitationApp.exe'),
+    developmentExecutableRelativePaths: Object.freeze([
+      path.join('modules', 'RecitationApp', 'bin', 'Release', 'studygate-publish', 'RecitationApp.exe'),
+      path.join('modules', 'RecitationApp', 'bin', 'Debug', 'net10.0-windows', 'RecitationApp.exe')
     ])
   })
 ]);

@@ -6,8 +6,11 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Ink;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using HomeworkApp;
 using HomeworkApp.Models;
 using HomeworkApp.Services;
 using HomeworkApp.Views;
@@ -22,7 +25,7 @@ var json = System.Text.Json.JsonSerializer.Serialize(report, new JsonSerializerO
 Console.WriteLine(json);
 Environment.ExitCode = report.Passed ? 0 : 1;
 
-internal static class HomeworkAppUiSmoke
+internal static partial class HomeworkAppUiSmoke
 {
     public static async Task<SmokeReport> RunAsync(string[] args)
     {
@@ -42,6 +45,7 @@ internal static class HomeworkAppUiSmoke
     private static async Task<SmokeReport> RunPrintSmokeAsync(string[] args)
     {
         var report = new SmokeReport();
+        string createdSmokeJobId = string.Empty;
 
         try
         {
@@ -63,13 +67,15 @@ internal static class HomeworkAppUiSmoke
                 return report;
             }
 
+            ResetDirectory(outputDir);
+
             if (string.IsNullOrWhiteSpace(jobDir) || !Directory.Exists(jobDir))
             {
-                report.FailedChecks.Add("HomeworkApp 当前没有可继续的旧作业数据。");
-                return report;
+                var smokeJob = CreateSmokePrintJob(outputDir);
+                createdSmokeJobId = smokeJob.JobId;
+                jobDir = smokeJob.JobDirectory;
+                report.JobDirectory = smokeJob.JobDirectory;
             }
-
-            ResetDirectory(outputDir);
 
             string pdfPath = Path.Combine(outputDir, "manual-print.pdf");
             report.PrintedPdfPath = pdfPath;
@@ -135,6 +141,18 @@ internal static class HomeworkAppUiSmoke
             if (!string.IsNullOrWhiteSpace(report.AppPath))
             {
                 KillProcessesByPath(report.AppPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(createdSmokeJobId))
+            {
+                try
+                {
+                    JobManager.DeleteJob(createdSmokeJobId);
+                }
+                catch
+                {
+                    // Ignore smoke cleanup failures.
+                }
             }
         }
 
@@ -248,6 +266,35 @@ internal static class HomeworkAppUiSmoke
         }
 
         Directory.CreateDirectory(path);
+    }
+
+    private static JobSession CreateSmokePrintJob(string outputDir)
+    {
+        var job = JobManager.CreateBlankJob(
+            $"打印冒烟-{DateTime.Now:HHmmssfff}",
+            DateTime.Today,
+            "课内");
+        var stroke = new Stroke(new StylusPointCollection(new[]
+        {
+            new StylusPoint(86, 140),
+            new StylusPoint(220, 168),
+            new StylusPoint(356, 152),
+            new StylusPoint(492, 194),
+            new StylusPoint(628, 182)
+        }))
+        {
+            DrawingAttributes = new DrawingAttributes
+            {
+                Color = Colors.DarkBlue,
+                Width = 4,
+                Height = 4,
+                FitToCurve = false
+            }
+        };
+        var strokes = new StrokeCollection { stroke };
+        InkService.SaveInk(strokes, job.GetInkFilePath(0));
+        JobManager.SaveJob(job);
+        return job;
     }
 
     private static Process StartHomeworkApp(string appPath)
@@ -428,124 +475,6 @@ internal static class HomeworkAppUiSmoke
                 new PropertyCondition(AutomationElement.NameProperty, name)));
 
         return matches.Cast<AutomationElement>().FirstOrDefault();
-    }
-
-    private static IntPtr WaitForSaveDialogHandle(TimeSpan timeout)
-    {
-        DateTime deadline = DateTime.UtcNow.Add(timeout);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            foreach (IntPtr handle in EnumerateTopLevelWindows())
-            {
-                string title = GetWindowText(handle);
-                if (title.Contains("将打印输出另存为", StringComparison.OrdinalIgnoreCase) ||
-                    title.Contains("Save Print Output", StringComparison.OrdinalIgnoreCase))
-                {
-                    return handle;
-                }
-            }
-
-            Thread.Sleep(250);
-        }
-
-        throw new TimeoutException("打印保存对话框没有出现。");
-    }
-
-    private static IntPtr WaitForDialogHandle(IEnumerable<string> titleHints, TimeSpan timeout)
-    {
-        string[] hints = titleHints.Where((item) => !string.IsNullOrWhiteSpace(item)).ToArray();
-        DateTime deadline = DateTime.UtcNow.Add(timeout);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            foreach (IntPtr handle in EnumerateTopLevelWindows())
-            {
-                string title = GetWindowText(handle);
-                if (hints.Any((hint) => title.Contains(hint, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return handle;
-                }
-            }
-
-            Thread.Sleep(200);
-        }
-
-        throw new TimeoutException("确认对话框没有出现。");
-    }
-
-    private static void SetSaveDialogFileName(IntPtr dialogHandle, string filePath)
-    {
-        NativeMethods.SetForegroundWindow(dialogHandle);
-        Thread.Sleep(250);
-
-        IntPtr editHandle = EnumerateChildWindows(dialogHandle)
-            .Where((handle) => NativeMethods.IsWindowVisible(handle))
-            .Where((handle) => string.Equals(GetClassName(handle), "Edit", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending((handle) => GetWindowRect(handle).Top)
-            .ThenByDescending((handle) => GetWindowRect(handle).Right - GetWindowRect(handle).Left)
-            .FirstOrDefault();
-
-        if (editHandle == IntPtr.Zero)
-        {
-            throw new InvalidOperationException($"没有找到“文件名”输入框。现有窗口标题: {GetWindowText(dialogHandle)}");
-        }
-
-        if (NativeMethods.SendMessage(editHandle, NativeMethods.WmSetText, IntPtr.Zero, filePath) == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("无法给保存框写入文件名。");
-        }
-    }
-
-    private static void ClickSaveDialogButton(IntPtr dialogHandle)
-    {
-        IntPtr buttonHandle = EnumerateChildWindows(dialogHandle)
-            .Where((handle) => NativeMethods.IsWindowVisible(handle))
-            .Where((handle) => string.Equals(GetClassName(handle), "Button", StringComparison.OrdinalIgnoreCase))
-            .FirstOrDefault((handle) =>
-            {
-                string title = GetWindowText(handle);
-                return title.Contains("保存", StringComparison.OrdinalIgnoreCase) ||
-                    title.Contains("Save", StringComparison.OrdinalIgnoreCase);
-            });
-
-        if (buttonHandle == IntPtr.Zero)
-        {
-            throw new InvalidOperationException($"没有找到保存按钮。现有窗口标题: {GetWindowText(dialogHandle)}");
-        }
-
-        _ = NativeMethods.SendMessage(buttonHandle, NativeMethods.BmClick, IntPtr.Zero, IntPtr.Zero);
-    }
-
-    private static void ClickDialogButton(IntPtr dialogHandle, IEnumerable<string> buttonTitles)
-    {
-        string[] titles = buttonTitles.Where((item) => !string.IsNullOrWhiteSpace(item)).ToArray();
-        IntPtr buttonHandle = EnumerateChildWindows(dialogHandle)
-            .Where((handle) => NativeMethods.IsWindowVisible(handle))
-            .Where((handle) => string.Equals(GetClassName(handle), "Button", StringComparison.OrdinalIgnoreCase))
-            .FirstOrDefault((handle) =>
-            {
-                string title = GetWindowText(handle);
-                return titles.Any((candidate) => title.Contains(candidate, StringComparison.OrdinalIgnoreCase));
-            });
-
-        if (buttonHandle == IntPtr.Zero)
-        {
-            throw new InvalidOperationException($"没有找到确认按钮。现有窗口标题: {GetWindowText(dialogHandle)}");
-        }
-
-        _ = NativeMethods.SendMessage(buttonHandle, NativeMethods.BmClick, IntPtr.Zero, IntPtr.Zero);
-    }
-
-    private static void SetElementValue(AutomationElement element, string value)
-    {
-        if (element.TryGetCurrentPattern(ValuePattern.Pattern, out object valuePattern))
-        {
-            ((ValuePattern)valuePattern).SetValue(value);
-            return;
-        }
-
-        throw new InvalidOperationException("文件名输入框不支持 ValuePattern。");
     }
 
     private static async Task WaitForFileAsync(string path, TimeSpan timeout)
@@ -798,107 +727,6 @@ internal static class HomeworkAppUiSmoke
     private static bool IsNearlyWhite(byte blue, byte green, byte red)
     {
         return red >= 245 && green >= 245 && blue >= 245;
-    }
-
-    private static string DumpControls(AutomationElement root)
-    {
-        var descendants = root.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
-        return string.Join(
-            " | ",
-            descendants.Cast<AutomationElement>()
-                .Take(20)
-                .Select((element) =>
-                    $"{element.Current.ControlType.ProgrammaticName}:{element.Current.AutomationId}:{element.Current.Name}"));
-    }
-
-    private static IEnumerable<IntPtr> EnumerateTopLevelWindows()
-    {
-        var handles = new List<IntPtr>();
-        NativeMethods.EnumWindows((handle, _) =>
-        {
-            if (NativeMethods.IsWindowVisible(handle))
-            {
-                handles.Add(handle);
-            }
-
-            return true;
-        }, IntPtr.Zero);
-        return handles;
-    }
-
-    private static IEnumerable<IntPtr> EnumerateChildWindows(IntPtr parentHandle)
-    {
-        var handles = new List<IntPtr>();
-        NativeMethods.EnumChildWindows(parentHandle, (handle, _) =>
-        {
-            handles.Add(handle);
-            return true;
-        }, IntPtr.Zero);
-        return handles;
-    }
-
-    private static string GetWindowText(IntPtr handle)
-    {
-        var builder = new StringBuilder(256);
-        _ = NativeMethods.GetWindowText(handle, builder, builder.Capacity);
-        return builder.ToString();
-    }
-
-    private static string GetClassName(IntPtr handle)
-    {
-        var builder = new StringBuilder(256);
-        _ = NativeMethods.GetClassName(handle, builder, builder.Capacity);
-        return builder.ToString();
-    }
-
-    private static NativeMethods.Rect GetWindowRect(IntPtr handle)
-    {
-        _ = NativeMethods.GetWindowRect(handle, out NativeMethods.Rect rect);
-        return rect;
-    }
-
-    private static class NativeMethods
-    {
-        public const uint WmSetText = 0x000C;
-        public const uint BmClick = 0x00F5;
-
-        public delegate bool EnumWindowProc(IntPtr handle, IntPtr lParam);
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct Rect
-        {
-            public int Left;
-            public int Top;
-            public int Right;
-            public int Bottom;
-        }
-
-        [DllImport("user32.dll")]
-        public static extern bool EnumWindows(EnumWindowProc callback, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        public static extern bool EnumChildWindows(IntPtr parentHandle, EnumWindowProc callback, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        public static extern bool IsWindowVisible(IntPtr handle);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        public static extern int GetWindowText(IntPtr handle, StringBuilder builder, int maxCount);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        public static extern int GetClassName(IntPtr handle, StringBuilder builder, int maxCount);
-
-        [DllImport("user32.dll")]
-        public static extern bool GetWindowRect(IntPtr handle, out Rect rect);
-
-        [DllImport("user32.dll")]
-        public static extern bool SetForegroundWindow(IntPtr handle);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        public static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, string lParam);
-
-        [DllImport("user32.dll")]
-        public static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
     }
 
     private static void RunSta(Action action)

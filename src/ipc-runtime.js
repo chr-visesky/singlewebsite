@@ -35,6 +35,10 @@ function registerShellIpc(dependencies = {}) {
     applyWindowZoomFactor,
     navigateMainWindow,
     updateClassroomShellTopHeight,
+    getAutoUpdateStatus,
+    checkForUpdates,
+    downloadAvailableUpdate,
+    installDownloadedUpdate,
     exitVerificationModel,
     hasConfiguredExitPassword,
     verifyExitPassword,
@@ -188,6 +192,18 @@ function registerShellIpc(dependencies = {}) {
   ipcMain.handle('shell:get-window-zoom', async () => ({
     zoomFactor: getCurrentWindowZoomFactor()
   }));
+
+  ipcMain.handle('shell:get-auto-update-status', async () => getAutoUpdateStatus());
+  ipcMain.handle('shell:check-for-updates', async () =>
+    checkForUpdates({
+      reason: 'manual',
+      autoDownload: false
+    }));
+  ipcMain.handle('shell:download-available-update', async () => downloadAvailableUpdate());
+  ipcMain.handle('shell:install-downloaded-update', async () => {
+    installDownloadedUpdate();
+    return { ok: true };
+  });
 
   ipcMain.handle('shell:adjust-window-zoom', async (_event, payload = {}) => {
     const delta = Number(payload.delta) || 0;

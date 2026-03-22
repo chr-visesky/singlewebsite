@@ -6,7 +6,10 @@ const { execFileSync } = require('node:child_process');
 const { runHomeworkInterfaceSmoke } = require('./homework-interface-smoke');
 const { runSkillZipSmoke } = require('./skill-zip-smoke');
 const { runStudyHelperSmoke } = require('./study-helper-smoke');
+const { runStudyHelperLearningSmoke } = require('./study-helper-learning-smoke');
 const { runStudyGateSmoke } = require('./studygate-smoke');
+const { runStudyModulesSmoke } = require('./study-modules-smoke');
+const { runUpdateArtifactSmoke } = require('./update-artifact-smoke');
 
 function resolveDotnetPath() {
   const candidates = [
@@ -26,17 +29,27 @@ function resolveDotnetPath() {
 }
 
 function createDotnetEnvironment(dotnetPath) {
+  const rootDir = path.resolve(__dirname, '..', '..');
+  const userProfile = path.join(rootDir, '.dotnet-profile', 'User');
+  const appData = path.join(rootDir, '.dotnet-profile', 'AppData', 'Roaming');
+  const environment = {
+    ...process.env,
+    APPDATA: appData,
+    USERPROFILE: userProfile,
+    HOME: userProfile,
+    DOTNET_CLI_HOME: path.join(rootDir, '.dotnet-cli'),
+    NUGET_PACKAGES: path.join(rootDir, '.nuget', 'packages')
+  };
+
   if (!path.isAbsolute(dotnetPath)) {
-    return { ...process.env };
+    return environment;
   }
 
   const dotnetRoot = path.dirname(dotnetPath);
 
-  return {
-    ...process.env,
-    DOTNET_ROOT: process.env.DOTNET_ROOT || dotnetRoot,
-    DOTNET_ROOT_X64: process.env.DOTNET_ROOT_X64 || dotnetRoot
-  };
+  environment.DOTNET_ROOT = process.env.DOTNET_ROOT || dotnetRoot;
+  environment.DOTNET_ROOT_X64 = process.env.DOTNET_ROOT_X64 || dotnetRoot;
+  return environment;
 }
 
 function escapePowerShellSingleQuoted(value) {
@@ -53,13 +66,17 @@ Get-CimInstance Win32_Process |
   }
 `;
 
-  execFileSync(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
-    {
-      stdio: 'ignore'
-    }
-  );
+  try {
+    execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      {
+        stdio: 'ignore'
+      }
+    );
+  } catch {
+    // Ignore cleanup failures so smoke results are not masked by CIM issues.
+  }
 }
 
 function runHomeworkSmoke(rootDir, outputDir, options = {}) {
@@ -160,9 +177,20 @@ async function main() {
       rootDir,
       outputDir: path.join(outputDir, 'study-helper')
     });
+    const studyHelperLearning = await runStudyHelperLearningSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'study-helper-learning')
+    });
+    const studyModules = await runStudyModulesSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'study-modules')
+    });
     const skillZip = await runSkillZipSmoke({
       rootDir,
       outputDir: path.join(outputDir, 'skill-zip')
+    });
+    const updateArtifacts = await runUpdateArtifactSmoke({
+      rootDir
     });
     const report = {
       generatedAt: new Date().toISOString(),
@@ -170,7 +198,10 @@ async function main() {
       homework,
       homeworkInterface,
       studyHelper,
-      skillZip
+      studyHelperLearning,
+      studyModules,
+      skillZip,
+      updateArtifacts
     };
 
     report.failedChecks = [
@@ -178,7 +209,10 @@ async function main() {
       ...homework.failedChecks,
       ...(Array.isArray(homeworkInterface.failedChecks) ? homeworkInterface.failedChecks : []),
       ...(Array.isArray(studyHelper.failedChecks) ? studyHelper.failedChecks : []),
-      ...(Array.isArray(skillZip.failedChecks) ? skillZip.failedChecks : [])
+      ...(Array.isArray(studyHelperLearning.failedChecks) ? studyHelperLearning.failedChecks : []),
+      ...(Array.isArray(studyModules.failedChecks) ? studyModules.failedChecks : []),
+      ...(Array.isArray(skillZip.failedChecks) ? skillZip.failedChecks : []),
+      ...(Array.isArray(updateArtifacts.failedChecks) ? updateArtifacts.failedChecks : [])
     ];
     report.passed = report.failedChecks.length === 0;
 
