@@ -12,6 +12,11 @@ function parseVersionFromSkillMarkdown(content) {
   return matched ? matched[1] : '';
 }
 
+function parseSkillPublicVersion(content) {
+  const matched = String(content || '').match(/const\s+SKILL_VERSION\s*=\s*'([^']+)'/);
+  return matched ? matched[1] : '';
+}
+
 function extractCommands(content) {
   const commandsSection = String(content || '').match(/commands:\s*\[([\s\S]*?)\]/m);
 
@@ -90,9 +95,10 @@ async function runSkillZipSmoke({ rootDir, outputDir }) {
   const localSkillMarkdownPath = path.join(rootDir, 'skills', 'study-helper', 'SKILL.md');
   const localSkillMarkdown = await fsPromises.readFile(localSkillMarkdownPath, 'utf8');
   const expectedVersion = parseVersionFromSkillMarkdown(localSkillMarkdown);
-  const expectedCommands = extractCommands(
-    await fsPromises.readFile(path.join(rootDir, 'cloudbase', 'functions', 'skillPublic', 'index.js'), 'utf8')
-  );
+  const skillPublicIndexPath = path.join(rootDir, 'cloudbase', 'functions', 'skillPublic', 'index.js');
+  const skillPublicIndexContent = await fsPromises.readFile(skillPublicIndexPath, 'utf8');
+  const skillPublicVersion = parseSkillPublicVersion(skillPublicIndexContent);
+  const expectedCommands = extractCommands(skillPublicIndexContent);
   const localAssetZipPath = path.join(rootDir, 'cloudbase', 'functions', 'skillPublic', 'assets', 'study-helper.zip');
   const assetSkillMarkdown = readZipEntry(localAssetZipPath, 'study-helper/SKILL.md');
   const assetVersion = parseVersionFromSkillMarkdown(assetSkillMarkdown);
@@ -103,6 +109,10 @@ async function runSkillZipSmoke({ rootDir, outputDir }) {
 
   if (assetVersion !== expectedVersion) {
     failedChecks.push(`skillPublic asset zip version mismatch: expected ${expectedVersion}, got ${assetVersion || '[missing]'}.`);
+  }
+
+  if (skillPublicVersion !== expectedVersion) {
+    failedChecks.push(`skillPublic metadata version mismatch: expected ${expectedVersion}, got ${skillPublicVersion || '[missing]'}.`);
   }
 
   if (hasRemovedDeleteCommand(assetSkillMarkdown)) {
@@ -136,6 +146,7 @@ async function runSkillZipSmoke({ rootDir, outputDir }) {
     passed: failedChecks.length === 0,
     failedChecks,
     expectedVersion,
+    skillPublicVersion,
     assetVersion,
     localAssetZipPath,
     remote

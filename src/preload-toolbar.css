@@ -1,0 +1,145 @@
+.bar {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 62px;
+  padding: 0 14px;
+  background: rgba(8, 15, 25, 0.88);
+  color: #f4f7fb;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  font: 13px/1.2 "Microsoft YaHei UI", "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+
+.nav-button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.nav-button--soft {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nav-button[disabled] {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 0;
+}
+
+.crumbs {
+  display: none;
+}
+
+.crumb {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumb[data-current="true"] {
+  color: #ffd37c;
+  cursor: default;
+  font-weight: 700;
+}
+
+.sep {
+  color: rgba(255, 255, 255, 0.36);
+  flex: 0 0 auto;
+}
+
+.banner {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.banner[data-empty="true"] {
+  display: none;
+}
+
+.banner__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center center;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.reminder {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: min(360px, calc(100vw - 28px));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  padding: 16px 16px 14px;
+  background: rgba(12, 18, 28, 0.94);
+  color: #f4f7fb;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+  display: none;
+}
+
+.reminder[data-visible="true"] {
+  display: block;
+}
+
+.reminder__time {
+  margin: 0 0 8px;
+  color: #ffd37c;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.reminder__title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.08;
+}
+
+.reminder__message {
+  margin: 10px 0 0;
+  color: rgba(244, 247, 251, 0.8);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.reminder__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
