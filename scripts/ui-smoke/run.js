@@ -4,6 +4,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { runHomeworkInterfaceSmoke } = require('./homework-interface-smoke');
+const { runSkillZipSmoke } = require('./skill-zip-smoke');
+const { runStudyHelperSmoke } = require('./study-helper-smoke');
 const { runStudyGateSmoke } = require('./studygate-smoke');
 
 function resolveDotnetPath() {
@@ -154,17 +156,29 @@ async function main() {
       rootDir,
       outputDir: path.join(outputDir, 'homework-interface')
     });
+    const studyHelper = await runStudyHelperSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'study-helper')
+    });
+    const skillZip = await runSkillZipSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'skill-zip')
+    });
     const report = {
       generatedAt: new Date().toISOString(),
       studyGate,
       homework,
-      homeworkInterface
+      homeworkInterface,
+      studyHelper,
+      skillZip
     };
 
     report.failedChecks = [
       ...studyGate.failedChecks,
       ...homework.failedChecks,
-      ...(Array.isArray(homeworkInterface.failedChecks) ? homeworkInterface.failedChecks : [])
+      ...(Array.isArray(homeworkInterface.failedChecks) ? homeworkInterface.failedChecks : []),
+      ...(Array.isArray(studyHelper.failedChecks) ? studyHelper.failedChecks : []),
+      ...(Array.isArray(skillZip.failedChecks) ? skillZip.failedChecks : [])
     ];
     report.passed = report.failedChecks.length === 0;
 

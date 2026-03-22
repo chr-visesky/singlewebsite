@@ -28,6 +28,9 @@ function canonicalizeCommand(command) {
     '计划状态': 'schedule-status',
     '查询计划状态': 'schedule-status',
     '创建作业': 'homework-create',
+    '查询作业': 'homework-query',
+    '查看作业': 'homework-query',
+    '查作业': 'homework-query',
     '作业状态': 'homework-status',
     '查询作业状态': 'homework-status'
   };
@@ -62,6 +65,7 @@ Usage:
   node ./scripts/study-helper.js 删除计划 --载荷文件 <文件>
   node ./scripts/study-helper.js 计划状态 --请求编号 <编号>
   node ./scripts/study-helper.js 创建作业 --载荷文件 <文件>
+  node ./scripts/study-helper.js 查询作业 --载荷文件 <文件>
   node ./scripts/study-helper.js 作业状态 --请求编号 <编号>
 
 参数:
@@ -526,26 +530,101 @@ function normalizeInlineSourcesPayload(inlineSources) {
   return normalized;
 }
 
-async function buildHomeworkCreateRequest(payload, index = 0) {
+function normalizeSourceItemsPayload(sourceItems) {
+  const items = Array.isArray(sourceItems) ? sourceItems : [];
+  const normalized = [];
+
+  for (const rawItem of items) {
+    const item = rawItem && typeof rawItem === 'object' ? rawItem : {};
+    const sourceType = normalizeText(item.sourceType || item.kind || item.type).toLowerCase() === 'storage'
+      ? 'storage'
+      : 'url';
+    const normalizedItem = {
+      sourceType,
+      fileId: normalizeText(item.fileId || item.fileID),
+      cloudPath: normalizeText(item.cloudPath),
+      url: normalizeUrl(item.url || item.sourceUrl || item.href),
+      fileName: normalizeText(item.fileName || item.name) || 'source',
+      contentType: normalizeText(item.contentType || item.mimeType),
+      fileKind: normalizeText(item.fileKind),
+      size: Math.max(0, Number(item.size) || 0)
+    };
+
+    if (normalizedItem.sourceType === 'storage') {
+      if (!normalizedItem.fileId && !normalizedItem.cloudPath) {
+        continue;
+      }
+    } else if (!normalizedItem.url) {
+      continue;
+    }
+
+    normalized.push(normalizedItem);
+  }
+
+  return normalized;
+}
+
+async function uploadHomeworkSources(endpoint, token, payload, timeoutMs) {
+  const response = await invokeJsonRequest(
+    endpoint,
+    token,
+    'POST',
+    {
+      action: 'uploadAgentHomeworkSources',
+      requestId: payload.requestId,
+      sourceUrls: payload.sourceUrls,
+      inlineSources: payload.inlineSources
+    },
+    timeoutMs
+  );
+
+  return normalizeSourceItemsPayload(response && response.sourceItems);
+}
+
+async function buildHomeworkCreateRequest(endpoint, token, timeoutMs, payload, index = 0) {
   const nextPayload = ensureObjectPayload(payload, 'homework-create');
+  const {
+    sourceFiles: _sourceFiles,
+    inlineSources: _rawInlineSources,
+    sourceUrls: _rawSourceUrls,
+    sourceItems: _rawSourceItems,
+    requests: _rawRequests,
+    items: _rawItems,
+    ...requestBody
+  } = nextPayload;
   const sourceUrls = normalizeHomeworkSourceUrls(nextPayload.sourceUrls);
   const inlineSources = [
     ...normalizeInlineSourcesPayload(nextPayload.inlineSources),
     ...await inlineSourcesFromLocalFiles(nextPayload.sourceFiles)
   ];
   validateHomeworkSources(sourceUrls, inlineSources);
+  const requestId = normalizeText(nextPayload.requestId) || makeRequestId(`openclaw-homework-${index + 1}`);
+  let sourceItems = normalizeSourceItemsPayload(nextPayload.sourceItems);
+
+  if (!sourceItems.length && inlineSources.length) {
+    sourceItems = await uploadHomeworkSources(
+      endpoint,
+      token,
+      {
+        requestId,
+        sourceUrls,
+        inlineSources
+      },
+      timeoutMs
+    );
+  }
 
   return {
-    ...nextPayload,
-    requestId: normalizeText(nextPayload.requestId) || makeRequestId(`openclaw-homework-${index + 1}`),
+    ...requestBody,
+    requestId,
     agentId: normalizeText(nextPayload.agentId) || 'openclaw',
     label: normalizeText(nextPayload.label) || 'OpenClaw',
     sourceUrls,
-    inlineSources
+    sourceItems
   };
 }
 
-async function buildHomeworkCreatePayload(payload) {
+async function buildHomeworkCreatePayload(endpoint, token, timeoutMs, payload) {
   const nextPayload = ensureObjectPayload(payload, 'homework-create');
   const requests = Array.isArray(nextPayload.requests)
     ? nextPayload.requests
@@ -556,13 +635,15 @@ async function buildHomeworkCreatePayload(payload) {
   if (requests) {
     return {
       action: 'submitAgentHomeworkRequests',
-      requests: await Promise.all(requests.map((item, index) => buildHomeworkCreateRequest(item, index)))
+      requests: await Promise.all(
+        requests.map((item, index) => buildHomeworkCreateRequest(endpoint, token, timeoutMs, item, index))
+      )
     };
   }
 
   return {
     action: 'submitAgentHomeworkRequest',
-    ...(await buildHomeworkCreateRequest(nextPayload))
+    ...(await buildHomeworkCreateRequest(endpoint, token, timeoutMs, nextPayload))
   };
 }
 
@@ -598,6 +679,49 @@ function buildHomeworkStatusPayload(payload, requestIdOption) {
     'getAgentHomeworkRequestStatus',
     requestIdOption || nextPayload.requestId || nextPayload.id
   );
+}
+
+function buildHomeworkQueryPayload(payload) {
+  const nextPayload = payload && typeof payload === 'object' ? payload : {};
+  const query = {
+    action: 'queryAgentHomeworkRequests'
+  };
+
+  if (normalizeText(nextPayload.targetDate)) {
+    query.targetDate = normalizeText(nextPayload.targetDate);
+  }
+
+  if (Array.isArray(nextPayload.targetDates)) {
+    query.targetDates = nextPayload.targetDates.filter((item) => normalizeText(item));
+  } else if (Array.isArray(nextPayload.dates)) {
+    query.targetDates = nextPayload.dates.filter((item) => normalizeText(item));
+  }
+
+  if (normalizeText(nextPayload.subject)) {
+    query.subject = normalizeText(nextPayload.subject);
+  }
+
+  if (Array.isArray(nextPayload.subjects)) {
+    query.subjects = nextPayload.subjects.filter((item) => normalizeText(item));
+  }
+
+  if (normalizeText(nextPayload.bucket)) {
+    query.bucket = normalizeText(nextPayload.bucket);
+  }
+
+  if (normalizeText(nextPayload.status)) {
+    query.status = normalizeText(nextPayload.status);
+  }
+
+  if (Array.isArray(nextPayload.statuses)) {
+    query.statuses = nextPayload.statuses.filter((item) => normalizeText(item));
+  }
+
+  if (Number.isFinite(Number(nextPayload.limit))) {
+    query.limit = Number(nextPayload.limit);
+  }
+
+  return query;
 }
 
 async function invokeJsonRequest(url, token, method, payload, timeoutMs, options = {}) {
@@ -842,7 +966,16 @@ async function main() {
         endpoint,
         token,
         'POST',
-        await buildHomeworkCreatePayload(payload),
+        await buildHomeworkCreatePayload(endpoint, token, timeoutMs, payload),
+        timeoutMs
+      );
+      break;
+    case 'homework-query':
+      result = await invokeJsonRequest(
+        endpoint,
+        token,
+        'POST',
+        buildHomeworkQueryPayload(payload),
         timeoutMs
       );
       break;

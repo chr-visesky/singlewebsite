@@ -20,6 +20,10 @@ function normalizeSubject(value) {
   return String(value || '').trim().slice(0, 40) || '作业';
 }
 
+function normalizeQueryText(value) {
+  return String(value || '').trim().slice(0, 40).toLowerCase();
+}
+
 function normalizeSummary(value, fallback) {
   const summary = String(value || '').trim().slice(0, 240);
   return summary || fallback;
@@ -511,6 +515,113 @@ function createAgentHomeworkRuntime(options = {}) {
     return [...openItems, ...closedItems.slice(0, Math.max(0, maxRequests - openItems.length))];
   }
 
+  function normalizeQueryFilters(rawFilters = {}) {
+    const filters = rawFilters && typeof rawFilters === 'object' ? rawFilters : {};
+    const dateCandidates = [];
+
+    if (typeof filters.targetDate === 'string') {
+      dateCandidates.push(filters.targetDate);
+    }
+
+    if (Array.isArray(filters.targetDates)) {
+      dateCandidates.push(...filters.targetDates);
+    }
+
+    if (Array.isArray(filters.dates)) {
+      dateCandidates.push(...filters.dates);
+    }
+
+    const targetDates = Array.from(new Set(
+      dateCandidates
+        .map((item) => normalizeDate(item, ''))
+        .filter(Boolean)
+    ));
+
+    const subjectCandidates = [];
+
+    if (typeof filters.subject === 'string') {
+      subjectCandidates.push(filters.subject);
+    }
+
+    if (Array.isArray(filters.subjects)) {
+      subjectCandidates.push(...filters.subjects);
+    }
+
+    const subjects = Array.from(new Set(
+      subjectCandidates
+        .map((item) => normalizeQueryText(item))
+        .filter(Boolean)
+    ));
+
+    const rawBucket = normalizePrefix(filters.bucket);
+    const bucket = rawBucket ? normalizeBucket(rawBucket) : '';
+    const statusCandidates = [];
+
+    if (typeof filters.status === 'string') {
+      statusCandidates.push(filters.status);
+    }
+
+    if (Array.isArray(filters.statuses)) {
+      statusCandidates.push(...filters.statuses);
+    }
+
+    const statuses = Array.from(new Set(
+      statusCandidates
+        .map((item) => normalizePrefix(item).toLowerCase())
+        .filter((item) => ['pending', 'completed', 'approved', 'rejected'].includes(item))
+    ));
+
+    const numericLimit = Number(filters.limit);
+    const limit = Number.isFinite(numericLimit)
+      ? Math.min(maxRequests, Math.max(1, Math.trunc(numericLimit)))
+      : Math.min(maxRequests, 20);
+
+    return {
+      targetDates,
+      subjects,
+      bucket,
+      statuses,
+      limit
+    };
+  }
+
+  function matchesSubjectFilter(itemSubject, subjects) {
+    if (!subjects.length) {
+      return true;
+    }
+
+    const normalizedItemSubject = normalizeQueryText(itemSubject);
+    return subjects.some((subject) =>
+      normalizedItemSubject === subject
+      || normalizedItemSubject.includes(subject)
+      || subject.includes(normalizedItemSubject)
+    );
+  }
+
+  function matchesQueryFilters(item, filters) {
+    if (!item || item.operation !== 'create') {
+      return false;
+    }
+
+    if (filters.targetDates.length && !filters.targetDates.includes(item.targetDate)) {
+      return false;
+    }
+
+    if (!matchesSubjectFilter(item.subject, filters.subjects)) {
+      return false;
+    }
+
+    if (filters.bucket && item.bucket !== filters.bucket) {
+      return false;
+    }
+
+    if (filters.statuses.length && !filters.statuses.includes(normalizePrefix(item.status).toLowerCase())) {
+      return false;
+    }
+
+    return true;
+  }
+
   async function readState(reader) {
     try {
       const result = await reader.collection(collectionName).doc(docId).get();
@@ -541,6 +652,12 @@ function createAgentHomeworkRuntime(options = {}) {
   }
 
   async function buildSourceItems(payload = {}, requestId) {
+    const uploadedSourceItems = normalizeStoredSourceItems(
+      payload.sourceItems,
+      [],
+      normalizePrefix
+    );
+
     const directSourceItems = normalizeSourceUrls(payload.sourceUrls).map((url) => ({
       sourceType: 'url',
       url,
@@ -563,12 +680,28 @@ function createAgentHomeworkRuntime(options = {}) {
     }
 
     const sourceItems = normalizeStoredSourceItems(
-      [...directSourceItems, ...storedSourceItems],
+      [...uploadedSourceItems, ...directSourceItems, ...storedSourceItems],
       [],
       normalizePrefix
     );
     validateSourceItems(sourceItems);
     return sourceItems;
+  }
+
+  async function uploadSources(payload = {}, requestId = '') {
+    const normalizedRequestId = normalizeId(requestId || payload.requestId || payload.id, '') || createRequestId();
+    const sourceItems = await buildSourceItems(payload, normalizedRequestId);
+
+    return sourceItems.map((item) => ({
+      sourceType: item.sourceType,
+      fileId: item.fileId || '',
+      cloudPath: item.cloudPath || '',
+      url: item.url || '',
+      fileName: item.fileName,
+      contentType: item.contentType,
+      fileKind: item.fileKind,
+      size: item.size
+    }));
   }
 
   async function createRequest(payload = {}, now) {
@@ -685,6 +818,16 @@ function createAgentHomeworkRuntime(options = {}) {
   async function listRequests() {
     const state = await readState(db);
     return serializeRequests(state.items);
+  }
+
+  async function queryRequests(rawFilters = {}, options = {}) {
+    const filters = normalizeQueryFilters(rawFilters);
+    const state = await readState(db);
+    const matchedItems = sortRequests(state.items)
+      .filter((item) => matchesQueryFilters(item, filters))
+      .slice(0, filters.limit);
+
+    return serializeRequests(matchedItems, options);
   }
 
   async function getRequestStatus(requestId, options = {}) {
@@ -872,8 +1015,10 @@ function createAgentHomeworkRuntime(options = {}) {
     getRequestStatuses,
     listRequests,
     listPendingRequests,
+    queryRequests,
     submitRequest,
-    submitRequests
+    submitRequests,
+    uploadSources
   };
 }
 

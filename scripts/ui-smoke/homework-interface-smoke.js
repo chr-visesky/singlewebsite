@@ -124,7 +124,7 @@ async function callHomeworkInterface(publicRuntime, method, token, payload) {
 
 function createTestImageBuffer() {
   return Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII=',
+    'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAxElEQVR4nO3YwQmAMBAAQVf673lXIAjBzDKMNiKz7YQZE12rL7M4n8M1w6PNrT0PgJ8EaANoA2gDaANoA2gDaANoA2j7P6s3kYxN0m5m3r1j8X+WJ2vLx3+Xw0Q1l1Qx5R2Q3iU7g4E3x2I9jG6+uKAgICAwP8Jv4Z0m3+fcl4dQBtAG0AbQBtAG0AbQBtAG0AbQBtAG0AbQBtAG0AbQBtAG0A7QBV/Qk0E12aT0AAAAASUVORK5CYII=',
     'base64'
   );
 }
@@ -216,6 +216,10 @@ async function runHomeworkInterfaceSmoke(options = {}) {
     singleCreateStatusBeforeSync: '',
     batchCreateStatusesBeforeSync: [],
     createStatusesAfterSync: [],
+    queryByDateCount: 0,
+    queryByBucketCount: 0,
+    queryBySubjectCount: 0,
+    queryByCombinedCount: 0,
     deleteSingleBlocked: false,
     deleteBatchBlocked: false,
     createdSourceFileCounts: [],
@@ -397,6 +401,60 @@ async function runHomeworkInterfaceSmoke(options = {}) {
     report.createStatusesAfterSync = collectStatuses(createStatusesAfter.body.requests);
 
     if (!ensureStatuses(report, report.createStatusesAfterSync, 'completed', '创建作业同步后')) {
+      return report;
+    }
+
+    const queryByDateResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'queryAgentHomeworkRequests',
+      targetDate: '2026-03-21'
+    });
+    report.queryByDateCount = Array.isArray(queryByDateResponse.body.requests)
+      ? queryByDateResponse.body.requests.length
+      : 0;
+
+    if (report.queryByDateCount !== 3) {
+      report.failedChecks.push(`按日期查询作业数量不对：${report.queryByDateCount}`);
+      return report;
+    }
+
+    const queryByBucketResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'queryAgentHomeworkRequests',
+      bucket: '课内'
+    });
+    report.queryByBucketCount = Array.isArray(queryByBucketResponse.body.requests)
+      ? queryByBucketResponse.body.requests.length
+      : 0;
+
+    if (report.queryByBucketCount !== 1) {
+      report.failedChecks.push(`按校内校外查询作业数量不对：${report.queryByBucketCount}`);
+      return report;
+    }
+
+    const queryBySubjectResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'queryAgentHomeworkRequests',
+      subject: '接口作业测试-单条'
+    });
+    report.queryBySubjectCount = Array.isArray(queryBySubjectResponse.body.requests)
+      ? queryBySubjectResponse.body.requests.length
+      : 0;
+
+    if (report.queryBySubjectCount !== 1) {
+      report.failedChecks.push(`按科目查询作业数量不对：${report.queryBySubjectCount}`);
+      return report;
+    }
+
+    const queryByCombinedResponse = await callHomeworkInterface(publicRuntime, 'POST', agentWriteToken, {
+      action: 'queryAgentHomeworkRequests',
+      targetDate: '2026-03-21',
+      subject: '接口作业测试-单条',
+      bucket: '课外'
+    });
+    report.queryByCombinedCount = Array.isArray(queryByCombinedResponse.body.requests)
+      ? queryByCombinedResponse.body.requests.length
+      : 0;
+
+    if (report.queryByCombinedCount !== 1) {
+      report.failedChecks.push(`按日期+科目+校内校外组合查询数量不对：${report.queryByCombinedCount}`);
       return report;
     }
 

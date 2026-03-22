@@ -368,7 +368,8 @@ homeNoticeDismiss.addEventListener('click', () => {
   hideHomeNotice();
 });
 
-refreshHomeModel().catch(() => {
+refreshHomeModel().catch((error) => {
+  console.error('home-refresh-failed', error);
   cardGrid.textContent = '本地首页加载失败。';
 });
 

@@ -352,7 +352,7 @@ function createStudyScheduleRuntime(dependencies = {}) {
   }
 
   function buildHomeModel() {
-    const config = appConfig();
+    const config = appConfig() || {};
 
     return buildHomeUiModel({
       appTitle: config.appTitle,
@@ -436,7 +436,7 @@ function createStudyScheduleRuntime(dependencies = {}) {
   }
 
   function buildStudentPlanModel(options = {}) {
-    const config = appConfig();
+    const config = appConfig() || {};
     const selectedDateKey = normalizeSpecificDate(options.selectedDate) || formatLocalDateKey(new Date());
     const monthDate = parseMonthKey(options.monthKey || selectedDateKey.slice(0, 7)) || new Date();
     const monthKey = monthKeyFromDate(monthDate);

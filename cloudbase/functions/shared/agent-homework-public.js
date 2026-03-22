@@ -78,6 +78,13 @@ function createAgentHomeworkPublicRuntime(options = {}) {
   }
 
   async function handleAgentAction(action, payload) {
+    if (action === 'uploadAgentHomeworkSources') {
+      return {
+        ok: true,
+        sourceItems: await agentHomeworkRuntime.uploadSources(payload, payload.requestId || payload.id)
+      };
+    }
+
     if (action === 'submitAgentHomeworkRequest') {
       return {
         ok: true,
@@ -108,6 +115,13 @@ function createAgentHomeworkPublicRuntime(options = {}) {
       return {
         ok: true,
         requests: await agentHomeworkRuntime.getRequestStatuses(requestIdList(payload))
+      };
+    }
+
+    if (action === 'queryAgentHomeworkRequests') {
+      return {
+        ok: true,
+        requests: await agentHomeworkRuntime.queryRequests(payload)
       };
     }
 
@@ -156,10 +170,12 @@ function createAgentHomeworkPublicRuntime(options = {}) {
       const action = normalizePrefix(payload.action);
       const requestToken = bearerToken(event.headers);
       const agentActions = new Set([
+        'uploadAgentHomeworkSources',
         'submitAgentHomeworkRequest',
         'submitAgentHomeworkRequests',
         'getAgentHomeworkRequestStatus',
-        'getAgentHomeworkRequestStatuses'
+        'getAgentHomeworkRequestStatuses',
+        'queryAgentHomeworkRequests'
       ]);
 
       if (agentActions.has(action)) {

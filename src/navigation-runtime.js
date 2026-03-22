@@ -355,7 +355,7 @@ function createNavigationRuntime(dependencies = {}) {
         nodeIntegration: false,
         devTools: false,
         spellcheck: false,
-        preload: pathModule.join(__dirname, 'preload.js'),
+        preload: pathModule.join(__dirname, 'classroom-preload.js'),
         partition: sessionPartition
       }
     });

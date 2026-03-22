@@ -1,7 +1,7 @@
 ---
-version: "1.2.4"
+version: "1.2.6"
 name: study-helper
-description: 学习助手 / Study Helper。用于让 OpenClaw 通过已部署的 schedulePublic 和 homeworkPublic 管理 StudyGate 的计划与作业，包括读取计划、创建计划、修改计划、删除计划、查询计划状态、创建作业、查询作业状态，并支持把本地图片或 PDF 直接上传成作业来源。
+description: 学习助手 / Study Helper。用于让 OpenClaw 通过已部署的 schedulePublic 和 homeworkPublic 管理 StudyGate 的计划与作业，包括读取计划、创建计划、修改计划、删除计划、查询计划状态、创建作业、查询作业、查询作业状态，并支持把本地图片或 PDF 先上传到云存储/COS，再作为作业来源创建。
 author: StudyGate
 homepage: https://github.com/chr-visesky/singlewebsite/tree/main/skills/study-helper
 source: https://github.com/chr-visesky/singlewebsite
@@ -26,6 +26,7 @@ metadata: {"openclaw":{"skillKey":"study-helper","emoji":"📚","homepage":"http
 - 删除计划
 - 查询计划状态
 - 创建作业
+- 查询作业
 - 查询作业状态
 - 用图片创建作业
 - 批量创建作业
@@ -66,6 +67,7 @@ node {baseDir}/scripts/study-helper.js 修改计划 --载荷文件 /tmp/plan-upd
 node {baseDir}/scripts/study-helper.js 删除计划 --载荷文件 /tmp/plan-delete.json
 node {baseDir}/scripts/study-helper.js 计划状态 --请求编号 openclaw-plan-123
 node {baseDir}/scripts/study-helper.js 创建作业 --载荷文件 /tmp/homework.json
+node {baseDir}/scripts/study-helper.js 查询作业 --载荷文件 /tmp/homework-query.json
 node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-homework-123
 ```
 
@@ -163,6 +165,13 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 
 不要把老师的聊天文字截图本身当作业图片上传；应把聊天里真正附带的作业图片作为 `sourceFiles` 或 `inlineSources` 提交。
 
+如果当前对话里已经有作业图片：
+
+- 禁止回退成“空白作业”。
+- 优先把这些图片落成本地临时文件，然后用 `sourceFiles` 提交。
+- `sourceFiles` 是本地 helper 读取后，先上传到云存储/COS，再把返回的云端文件引用提交给作业接口；不要因为“云端访问不到本地路径”就放弃图片创建。
+- 如果当前拿不到图片原始文件或本地临时文件，只能明确告诉上层“现在拿不到图片文件，暂时不能创建带图作业”，不要偷偷创建空白作业。
+
 “创建作业”支持三种来源模式：
 
 - 空白作业：不传 `sourceUrls`
@@ -173,7 +182,7 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 规则：
 
 - `sourceUrls`、`sourceFiles`、`inlineSources` 可以混合使用，但整次请求里仍然只能是“单个 PDF”或“多张图片”。
-- `sourceFiles` 适合 OpenClaw 已经拿到本地临时图片文件时直接上传，不需要先做公网地址。
+- `sourceFiles` 适合 OpenClaw 已经拿到本地临时图片文件时直接上传。学习助手会先把这些文件上传到云存储/COS，再创建作业请求，不需要先做公网地址。
 - `inlineSources` 适合上层已经拿到 base64 文件内容的情况。
 - 对话里如果附了很多张同一份作业图片，默认要作为同一份作业的多页图片一起提交，不要拆成很多份单页作业。
 - `requests` 数组可用于批量创建、批量删除和批量查询状态。
@@ -197,6 +206,25 @@ node {baseDir}/scripts/study-helper.js 作业状态 --请求编号 openclaw-home
 2. 创建作业会直接进入桌面端同步队列。
 3. 告诉用户：要等桌面端同步后，状态才会变成 `completed`。
 4. 用户追问进度时，用“作业状态”查询。
+
+“查询作业”是给人正常使用的，不要求 `requestId`。默认按最近记录查询，并支持这些过滤条件：
+
+- `targetDate`
+- `subject`
+- `bucket`，值只能是 `课内` 或 `课外`
+- `status`
+
+典型查询示例：
+
+```json
+{
+  "targetDate": "2026-03-21",
+  "subject": "数学",
+  "bucket": "课内"
+}
+```
+
+如果用户只说“查一下今天的作业”“查数学作业”“查课外作业”，应优先使用“查询作业”，不要先要求 `requestId`。
 
 注意：
 

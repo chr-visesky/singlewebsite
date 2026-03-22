@@ -5,5 +5,6 @@
 - Prefer low-risk refactors that preserve behavior: move code first, then simplify.
 - When changing printing, schedule, navigation, or persistence code, run a real project build before finishing.
 - Do not change the home page layout. It must remain: left = module cards, center = calendar, right = today's plan.
+- Keep module-specific logic inside its own module. Do not place online-classroom, homework, home-page, schedule, or other module behavior into unrelated modules; if something is truly shared, extract a dedicated shared runtime instead.
 - Do not modify or report the navigation banner static asset unless the user explicitly asks for that resource.
 - For automated UI testing, use `npm run test:ui`. It runs a DOM/code-anchor smoke test for `StudyGate.exe`, a code-anchor C# smoke test for `HomeworkApp.exe` including real PDF print verification, and a homework interface smoke that creates and deletes homework through the API path.
