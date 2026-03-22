@@ -17,6 +17,7 @@ function createNetdiskRuntime(dependencies = {}) {
     pathModule,
     readStateFile,
     resolveLibrary,
+    resolveWindowIconPath,
     runtimePaths,
     videoExtensions,
     writeStateFile
@@ -679,6 +680,7 @@ function createNetdiskRuntime(dependencies = {}) {
       width: 920,
       height: 640,
       show: true,
+      icon: resolveWindowIconPath(),
       frame: true,
       autoHideMenuBar: true,
       backgroundColor: '#0f172a',

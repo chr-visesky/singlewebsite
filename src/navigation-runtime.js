@@ -13,6 +13,7 @@ function createNavigationRuntime(dependencies = {}) {
     getBannerText,
     getClassroomDefinitions,
     getCurrentWindowZoomFactor,
+    adjustWindowZoomByDelta,
     getMainWindow,
     isAllowedTopLevel,
     isExitShortcut,
@@ -49,6 +50,41 @@ function createNavigationRuntime(dependencies = {}) {
   let classroomBrowserView = null;
   let activeClassroomShell = null;
   let classroomShellMeasuredTopHeight = classroomShellTopHeight;
+
+  function wheelZoomDelta(input = {}) {
+    const candidates = [input.deltaY, input.wheelDeltaY, input.delta];
+
+    for (const candidate of candidates) {
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric) && numeric !== 0) {
+        return numeric;
+      }
+    }
+
+    return 0;
+  }
+
+  function tryHandleClassroomZoomInput(event, input = {}) {
+    if (!input || input.type !== 'mouseWheel' || !input.control || typeof adjustWindowZoomByDelta !== 'function') {
+      return false;
+    }
+
+    const deltaY = wheelZoomDelta(input);
+
+    if (!deltaY) {
+      return false;
+    }
+
+    event.preventDefault();
+    const appliedDelta = deltaY < 0 ? 0.1 : -0.1;
+    const nextZoomFactor = adjustWindowZoomByDelta(appliedDelta);
+    logNavigationDebug('classroom-view-zoom-wheel', {
+      deltaY,
+      appliedDelta,
+      nextZoomFactor
+    });
+    return true;
+  }
 
   function internalPagePath(pageName) {
     const pageFile = internalPages[pageName];
@@ -208,6 +244,10 @@ function createNavigationRuntime(dependencies = {}) {
     contents.setZoomFactor(getCurrentWindowZoomFactor());
 
     contents.on('before-input-event', (event, input) => {
+      if (tryHandleClassroomZoomInput(event, input)) {
+        return;
+      }
+
       if (shouldBlockShortcut(input)) {
         event.preventDefault();
         return;

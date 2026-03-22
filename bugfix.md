@@ -50,3 +50,47 @@ This file records regressions that were introduced during development and then f
   Changed the smoke helper to trigger navigation without awaiting it inside the page context, then waited for navigation from Playwright outside the destroyed execution context.
 - Avoid:
   In UI smoke, do not `await` app-triggered navigations from inside `page.evaluate(...)` when the same evaluation context is about to be replaced by a new page load.
+
+## Native study modules showed the default taskbar icon
+
+- How it appeared:
+  `StudyGate` 的作业、听写、背诵模块启动后，在任务栏和窗口标题栏里显示的是系统默认程序图标，不是项目自己的图标。
+- Root cause:
+  三个独立 WPF 模块都没有设置 `ApplicationIcon`，顶层窗口也没有设置 `Window.Icon`，所以发布后的模块 `.exe` 只能落回默认图标。
+- Fix:
+  Reused the packaged `StudyGate.exe` icon as each module自己的资源，给 `HomeworkApp`、`DictationApp`、`RecitationApp` 都加上了 assembly icon 和 WPF window icon，并把附属编辑/执行窗口也一起绑定到同一个图标。
+- Avoid:
+  Every independent C# module must set both the executable icon and the window icon before packaging. When a new native module is added, verify the packaged `.exe`, main window, and any standalone child windows no longer show the default Windows icon.
+
+## Main app fell back to the default Electron taskbar icon
+
+- How it appeared:
+  The packaged `StudyGate.exe` installed and launched normally, but the taskbar and shell shortcut icon still looked like the stock Electron app instead of the project icon.
+- Root cause:
+  The Windows package configuration only branded the unpacked app resources indirectly. `electron-builder` was still free to use its default application icon because the installer/window icon path was not wired through the package build and the packaged root did not carry an explicit runtime icon asset.
+- Fix:
+  Added a dedicated app-icon runtime, pointed the main shell windows at the branded icon path, configured the Windows/NSIS package icons explicitly in the packaging script, and copied the shared icon asset into the packaged app root so both the executable and runtime windows resolve the same icon.
+- Avoid:
+  When fixing or adding any desktop entry point, verify the packaged installer, the installed `StudyGate.exe`, and the runtime taskbar window all resolve the same branded icon. Do not assume branding child modules is enough for the main Electron shell.
+
+## UI smoke can pass against stale packaged artifacts if `build` and `test:ui` overlap
+
+- How it appeared:
+  A smoke run reported mismatched behavior after code changes even though the source files were already corrected, because the test was validating an older packaged app.
+- Root cause:
+  Packaging and UI smoke were run too close together, so the smoke suite could start against a stale `dist` artifact while a new build was still being produced.
+- Fix:
+  Changed the validation flow to run `npm run build` to completion first, then run `npm run test:ui` against the newly packaged output. Rechecked the packaged version and smoke report after the sequential run.
+- Avoid:
+  Treat packaged-app smoke as artifact validation, not source validation. Never overlap `build` and `test:ui` when changes touch packaging, preload, icons, updater, or native module wiring. Always rebuild first, then run smoke against the fresh `dist` output.
+
+## Online classroom `Ctrl + 滚轮` kept failing in BrowserView
+
+- How it appeared:
+  在线课堂页里按 `Ctrl + 滚轮` 没有任何缩放反应，最开始的 smoke 也一直卡在课堂 iframe 缩放不生效。
+- Root cause:
+  缩放最初挂在了 BrowserView 壳层和 isolated-world preload 上，分别踩中了两个问题：`before-input-event` 对 mouse wheel 不可靠，以及 isolated-world 里的课堂事件/桥接在课堂页面里并不稳定。结果是课堂页和 iframe 都没有走到真正能改变显示大小的逻辑。
+- Fix:
+  把在线课堂缩放收回到课堂模块自身：主 frame 和子 frame 都改成页面世界脚本，直接对各自 `document.documentElement.style.zoom` 做 `Ctrl + 滚轮 / Ctrl + 0` 处理，不再依赖通用 preload 或 BrowserView 壳层输入事件。同步把 advanced smoke 改成验证主 frame 和子 frame 的真实 zoom 值变化。
+- Avoid:
+  在线课堂行为必须留在课堂模块里，不要再把课堂交互塞回主窗口通用 preload。遇到 BrowserView 里的输入问题，优先验证页面世界脚本是否真的改变了课堂 DOM 的显示状态，再决定是否需要壳层参与。

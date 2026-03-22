@@ -79,7 +79,7 @@ namespace HomeworkApp.Views
             _homeworkScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(HomeworkScrollIndicator, _homeworkScrollIndicatorTimer);
             _draftScrollIndicatorTimer.Tick += (_, _) => ResetIndicatorColor(DraftScrollIndicator, _draftScrollIndicatorTimer);
             Unloaded += EditorPage_Unloaded;
-            SetAssistantPanelCollapsed();
+            SetAssistantPanelCollapsed(collapsed: false);
 
             LoadDocument();
             SetupInkCanvas();
@@ -573,18 +573,6 @@ namespace HomeworkApp.Views
             border.BorderThickness = new Thickness(0);
         }
 
-        private void ZoomIn_Click(object sender, RoutedEventArgs e)
-        {
-            _currentScale = Math.Min(_currentScale * 1.2, GetMaximumScale());
-            ApplyZoom();
-        }
-
-        private void ZoomOut_Click(object sender, RoutedEventArgs e)
-        {
-            _currentScale = Math.Max(_currentScale / 1.2, 1.0);
-            ApplyZoom();
-        }
-
         private void ApplyZoom(ScrollViewer? anchorViewer = null, Point? anchorPoint = null)
         {
             _currentScale = Math.Max(1.0, Math.Min(_currentScale, GetMaximumScale()));
@@ -637,22 +625,13 @@ namespace HomeworkApp.Views
             if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
             {
                 e.Handled = true;
-                if (e.Delta > 0)
-                {
-                    _currentScale = Math.Min(_currentScale * 1.2, GetMaximumScale());
-                }
-                else
-                {
-                    _currentScale = Math.Max(_currentScale / 1.2, 1.0);
-                }
-
                 if (sender is ScrollViewer scrollViewer)
                 {
-                    ApplyZoom(scrollViewer, e.GetPosition(scrollViewer));
+                    AdjustPaperZoom(e.Delta > 0 ? 1 : -1, scrollViewer, e.GetPosition(scrollViewer));
                 }
                 else
                 {
-                    ApplyZoom();
+                    AdjustPaperZoom(e.Delta > 0 ? 1 : -1);
                 }
             }
         }
@@ -684,27 +663,6 @@ namespace HomeworkApp.Views
         private void DraftScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
         {
             UpdateScrollIndicator(DraftScrollViewer, DraftScrollIndicator, _draftScrollIndicatorTimer);
-        }
-
-        private double GetMaximumScale()
-        {
-            if (EditorLayoutRoot == null)
-            {
-                return 5.0;
-            }
-
-            double baseWidth = A4Background.Width > 0 ? A4Background.Width : 794;
-            double availableWidth = EditorLayoutRoot.ActualWidth
-                - ThumbnailColumn.ActualWidth
-                - LeftColumn.ActualWidth
-                - 8;
-
-            if (availableWidth <= 0 || baseWidth <= 0)
-            {
-                return 1.0;
-            }
-
-            return Math.Max(1.0, availableWidth / baseWidth);
         }
 
         private async void BtnPageRatio_Click(object sender, RoutedEventArgs e)
@@ -768,47 +726,6 @@ namespace HomeworkApp.Views
             ToolPanel.Visibility = ToolPanel.Visibility == Visibility.Visible
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-        }
-
-        private void BtnExpandLeft_Click(object sender, RoutedEventArgs e)
-        {
-            SetAssistantPanelCollapsed();
-        }
-
-        private void BtnMenu_Click(object sender, RoutedEventArgs e)
-        {
-            var menu = new ContextMenu();
-            menu.Items.Add(new MenuItem { Header = "历史作业", Tag = "history" });
-            menu.Items.Add(new MenuItem { Header = "设置", Tag = "settings" });
-
-            foreach (var item in menu.Items)
-            {
-                if (item is MenuItem menuItem && menuItem.Tag != null)
-                {
-                    menuItem.Click += MenuItem_Click;
-                }
-            }
-
-            menu.PlacementTarget = BtnMenu;
-            menu.IsOpen = true;
-        }
-
-        private void MenuItem_Click(object? sender, RoutedEventArgs e)
-        {
-            if (sender is MenuItem menuItem && menuItem.Tag is string action)
-            {
-                FlushPendingChanges();
-
-                switch (action)
-                {
-                    case "history":
-                        NavigationService?.Navigate(new HistoryPage());
-                        break;
-                    case "settings":
-                        NavigationService?.Navigate(new SettingsPage());
-                        break;
-                }
-            }
         }
 
         private async void BtnPrint_Click(object sender, RoutedEventArgs e)
@@ -977,15 +894,6 @@ namespace HomeworkApp.Views
                 _documentService?.Dispose();
                 _disposed = true;
             }
-        }
-
-        private void SetAssistantPanelCollapsed()
-        {
-            LeftColumn.Width = new GridLength(200);
-            LeftPanel.Visibility = Visibility.Visible;
-            BtnExpandLeft.Visibility = Visibility.Collapsed;
-
-            ApplyZoom();
         }
 
         private void SetActiveTool(InkManager.ToolMode tool, bool handMode = false)

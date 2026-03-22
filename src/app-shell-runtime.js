@@ -12,6 +12,7 @@ function createAppShellRuntime(dependencies = {}) {
     logNavigationDebug,
     pathModule,
     preloadPath,
+    resolveWindowIconPath,
     sessionPartition,
     setMainWindow
   } = dependencies;
@@ -59,6 +60,7 @@ function createAppShellRuntime(dependencies = {}) {
       width: 1440,
       height: 960,
       show: false,
+      icon: resolveWindowIconPath(),
       frame: true,
       autoHideMenuBar: true,
       fullscreenable: true,

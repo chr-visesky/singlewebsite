@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\module-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,5 +14,9 @@
     <PackageReference Include="DiffPlex" Version="1.7.2" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="System.Speech" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\module-icon.ico" />
   </ItemGroup>
 </Project>

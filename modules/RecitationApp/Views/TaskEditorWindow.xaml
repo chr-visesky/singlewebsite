@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="编辑背诵任务"
+        Icon="pack://application:,,,/Assets/module-icon.ico"
         Width="720"
         Height="760"
         WindowStartupLocation="CenterOwner"

@@ -108,6 +108,9 @@ const {
   createStatePathHelpers
 } = require('./runtime-paths');
 const {
+  createAppIconRuntime
+} = require('./app-icon-runtime');
+const {
   normalizeAutoUpdateConfig
 } = require('./auto-update-config');
 const {
@@ -180,6 +183,8 @@ const {
   createRecitationRemoteRuntime
 } = require('./recitation-remote-runtime');
 const {
+  CLASSROOM_SUBFRAME_ZOOM_SCRIPT,
+  CLASSROOM_TOPFRAME_ZOOM_SCRIPT,
   LEGACY_MEDIA_COMPATIBILITY_SCRIPT,
   configureClassroomSecurityBootstrap
 } = require('./classroom-security-bootstrap');
@@ -191,6 +196,7 @@ const INTERNAL_MEDIA_ROUTE = `${INTERNAL_SERVER_PREFIX}/baidu/media`;
 const INTERNAL_OAUTH_CALLBACK_ROUTE = `${INTERNAL_SERVER_PREFIX}/baidu/oauth/callback`;
 const INTERNAL_MOBILE_CONFIG_ROUTE = `${INTERNAL_SERVER_PREFIX}/mobile`;
 const INTERNAL_MOBILE_SCHEDULE_API_ROUTE = `${INTERNAL_SERVER_PREFIX}/mobile/api/schedule`;
+const INTERNAL_HOMEWORK_SYNC_API_ROUTE = `${INTERNAL_SERVER_PREFIX}/homework/sync`;
 const INTERNAL_SERVER_PORT = 32147;
 const ALLOWED_APP_SCHEMES = new Set(['about:', 'blob:', 'data:', 'file:']);
 const ALLOWED_MEDIA_PERMISSIONS = new Set(['media', 'speaker-selection']);
@@ -254,6 +260,9 @@ const configRuntime = createConfigRuntime({
   stableUserDataDir: STABLE_USER_DATA_DIR
 });
 const runtimePaths = createStatePathHelpers(() => appConfig && appConfig.stateDir);
+const { resolveWindowIconPath } = createAppIconRuntime({
+  app, pathModule: path, processExecPath: process.execPath, projectRootPath: path.resolve(__dirname, '..')
+});
 const startupDebugRuntime = createStartupDebugRuntime({
   fs,
   logPath: STARTUP_DEBUG_LOG,
@@ -273,6 +282,7 @@ const exitRuntime = createExitRuntime({
   pathModule: path,
   preloadPath: path.join(__dirname, 'preload.js'),
   quitApp: () => app.quit(),
+  resolveWindowIconPath,
   sessionPartition: SESSION_PARTITION
 });
 const {
@@ -292,6 +302,8 @@ const securityRuntime = createSecurityRuntime({
   getClassroomDefinitions: () => classroomDefinitions,
   getMainWindow: () => mainWindow,
   getResolveClassroomForUrl: () => (navigationRuntime ? navigationRuntime.resolveClassroomForUrl : null),
+  classroomSubframeZoomScript: CLASSROOM_SUBFRAME_ZOOM_SCRIPT,
+  classroomTopframeZoomScript: CLASSROOM_TOPFRAME_ZOOM_SCRIPT,
   legacyMediaCompatibilityScript: LEGACY_MEDIA_COMPATIBILITY_SCRIPT,
   os,
   parseUrl,
@@ -355,6 +367,7 @@ navigationRuntime = createNavigationRuntime({
   getBannerText: () => appConfig.navigationBannerText,
   getClassroomDefinitions: () => classroomDefinitions,
   getCurrentWindowZoomFactor: () => currentWindowZoomFactor,
+  adjustWindowZoomByDelta: (delta) => applyWindowZoomFactor(currentWindowZoomFactor + (Number(delta) || 0)),
   getMainWindow: () => mainWindow,
   isAllowedTopLevel,
   isExitShortcut,
@@ -412,6 +425,7 @@ const appShellRuntime = createAppShellRuntime({
   logNavigationDebug,
   pathModule: path,
   preloadPath: path.join(__dirname, 'preload.js'),
+  resolveWindowIconPath,
   sessionPartition: SESSION_PARTITION,
   setMainWindow: (window) => {
     mainWindow = window;
@@ -671,6 +685,7 @@ const netdiskRuntime = createNetdiskRuntime({
   normalizePrefix,
   normalizeTitle,
   pathModule: path,
+  resolveWindowIconPath,
   readStateFile: (filePath) => {
     if (!filePath || !fs.existsSync(filePath)) {
       return '';
@@ -719,6 +734,7 @@ internalServiceRuntime = createInternalServiceRuntime({
   getSerializeStudySchedule: () => serializeStudySchedule,
   http,
   internalMediaRoute: INTERNAL_MEDIA_ROUTE,
+  internalHomeworkSyncApiRoute: INTERNAL_HOMEWORK_SYNC_API_ROUTE,
   internalMobileConfigRoute: INTERNAL_MOBILE_CONFIG_ROUTE,
   internalMobileScheduleApiRoute: INTERNAL_MOBILE_SCHEDULE_API_ROUTE,
   internalOAuthCallbackRoute: INTERNAL_OAUTH_CALLBACK_ROUTE,
@@ -727,7 +743,8 @@ internalServiceRuntime = createInternalServiceRuntime({
   normalizeDateList,
   normalizePrefix,
   os,
-  pathModule: path
+  pathModule: path,
+  syncRemoteHomeworkRequests
 });
 const {
   startInternalServer,

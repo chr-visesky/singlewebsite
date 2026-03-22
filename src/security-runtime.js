@@ -5,6 +5,8 @@ function createSecurityRuntime(dependencies = {}) {
     allowedAppSchemes,
     allowedMediaPermissions,
     app,
+    classroomSubframeZoomScript,
+    classroomTopframeZoomScript,
     fileURLToPath,
     fs,
     getAppConfig,
@@ -493,6 +495,9 @@ function createSecurityRuntime(dependencies = {}) {
 
     try {
       await webContents.executeJavaScript(legacyMediaCompatibilityScript, true);
+      if (typeof classroomTopframeZoomScript === 'string' && classroomTopframeZoomScript) {
+        await webContents.executeJavaScript(classroomTopframeZoomScript, true);
+      }
       logClassroomMediaDebug('compatibility-patch-success', {
         target: 'main-frame',
         url: currentUrl
@@ -539,6 +544,9 @@ function createSecurityRuntime(dependencies = {}) {
 
     try {
       await frame.executeJavaScript(legacyMediaCompatibilityScript, true);
+      if (typeof classroomSubframeZoomScript === 'string' && classroomSubframeZoomScript) {
+        await frame.executeJavaScript(classroomSubframeZoomScript, true);
+      }
       logClassroomMediaDebug('compatibility-patch-success', {
         target: 'sub-frame',
         frameProcessId,

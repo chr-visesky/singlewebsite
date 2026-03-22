@@ -5,8 +5,6 @@ const scheduleDate = document.getElementById('schedule-date');
 const scheduleList = document.getElementById('schedule-list');
 const calendarMonth = document.getElementById('calendar-month');
 const calendarGrid = document.getElementById('calendar-grid');
-const calendarSelectedDate = document.getElementById('calendar-selected-date');
-const calendarSelectedList = document.getElementById('calendar-selected-list');
 const homeNoticeNode = document.getElementById('home-notice');
 const homeNoticeImage = document.getElementById('home-notice-image');
 const homeNoticeDismiss = document.getElementById('home-notice-dismiss');
@@ -14,7 +12,6 @@ const homeNoticeDismiss = document.getElementById('home-notice-dismiss');
 let refreshPromise = null;
 let queuedRefreshOptions = null;
 let selectedCalendarDateKey = '';
-let currentCalendarModel = null;
 let currentHomeNotice = null;
 let noticeArmed = true;
 
@@ -131,36 +128,7 @@ function renderTodaySchedule(todaySchedule) {
   });
 }
 
-function renderCalendarSelectedList() {
-  const entries = currentCalendarModel && currentCalendarModel.entriesByDate
-    ? currentCalendarModel.entriesByDate[selectedCalendarDateKey] || []
-    : [];
-  calendarSelectedList.replaceChildren();
-
-  if (!entries.length) {
-    calendarSelectedList.append(createEmptyNode('这天没有计划'));
-    return;
-  }
-
-  entries.forEach((entry) => {
-    const article = document.createElement('article');
-    article.className = 'calendar-entry';
-
-    const time = document.createElement('span');
-    time.className = 'calendar-entry__time';
-    time.textContent = entry.time;
-
-    const title = document.createElement('span');
-    title.className = 'calendar-entry__title';
-    title.textContent = entry.title;
-
-    article.append(time, title);
-    calendarSelectedList.append(article);
-  });
-}
-
 function renderCalendarSchedule(calendarSchedule) {
-  currentCalendarModel = calendarSchedule;
   calendarMonth.textContent = calendarSchedule.monthLabel;
 
   const cellKeys = new Set((calendarSchedule.cells || []).map((cell) => cell.dateKey));
@@ -218,21 +186,11 @@ function renderCalendarSchedule(calendarSchedule) {
 
     cellNode.addEventListener('click', () => {
       selectedCalendarDateKey = cell.dateKey;
-      const selectedCell = (calendarSchedule.cells || []).find((entry) => entry.dateKey === cell.dateKey);
-      calendarSelectedDate.textContent = selectedCell
-        ? `${calendarSchedule.monthLabel} ${selectedCell.dayLabel}日`
-        : calendarSchedule.selectedDateLabel;
       renderCalendarSchedule(calendarSchedule);
     });
 
     calendarGrid.append(cellNode);
   });
-
-  const selectedCell = (calendarSchedule.cells || []).find((cell) => cell.dateKey === selectedCalendarDateKey);
-  calendarSelectedDate.textContent = selectedCell
-    ? `${calendarSchedule.monthLabel} ${selectedCell.dayLabel}日`
-    : calendarSchedule.selectedDateLabel;
-  renderCalendarSelectedList();
 }
 
 function createCard(card) {

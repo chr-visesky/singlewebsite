@@ -223,13 +223,14 @@
         </Border>
 
         <Button x:Name="BtnExpandLeft"
-                Grid.Column="0"
-                Content="▶"
+                AutomationProperties.AutomationId="BtnExpandLeft"
+                Grid.Column="1"
+                Content="◀"
                 Click="BtnExpandLeft_Click"
-                Visibility="Collapsed"
-                HorizontalAlignment="Right"
+                Visibility="Visible"
+                HorizontalAlignment="Left"
                 VerticalAlignment="Center"
-                Margin="0,0,-5,0"
+                Margin="-6,0,0,0"
                 Width="10"
                 Height="44"
                 Panel.ZIndex="1000"
@@ -240,7 +241,7 @@
                 FontSize="14"
                 Padding="0"
                 Cursor="Hand"
-                ToolTip="展开或收起作业助手"/>
+                ToolTip="收起作业助手"/>
 
         <Border x:Name="ThumbnailHost"
                 Grid.Column="1"
@@ -402,14 +403,14 @@
 
                     <!-- Zoom -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <Button Content="-" Width="24" Height="24"
+                        <Button x:Name="BtnZoomOut" AutomationProperties.AutomationId="BtnZoomOut" Content="-" Width="24" Height="24"
                                 Style="{StaticResource SecondaryButtonStyle}" FontSize="12"
                                 Padding="0" Click="ZoomOut_Click"/>
-                        <Button Content="+" Width="24" Height="24"
+                        <Button x:Name="BtnZoomIn" AutomationProperties.AutomationId="BtnZoomIn" Content="+" Width="24" Height="24"
                                 Style="{StaticResource SecondaryButtonStyle}" FontSize="12"
                                 Padding="0" Margin="4,0,0,0" Click="ZoomIn_Click"/>
                     </StackPanel>
-                    <TextBlock x:Name="TxtZoom" Text="100%" FontSize="10"
+                    <TextBlock x:Name="TxtZoom" AutomationProperties.AutomationId="TxtZoom" Text="100%" FontSize="10"
                                Foreground="{StaticResource MutedText}" HorizontalAlignment="Center"
                                Margin="0,4,0,8"/>
 

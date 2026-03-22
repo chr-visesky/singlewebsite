@@ -12,6 +12,7 @@ function createExitRuntime(dependencies = {}) {
     pathModule,
     preloadPath,
     quitApp,
+    resolveWindowIconPath,
     sessionPartition
   } = dependencies;
 
@@ -98,6 +99,7 @@ function createExitRuntime(dependencies = {}) {
       title: '退出验证',
       width: 420,
       height: 360,
+      icon: resolveWindowIconPath(),
       parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : null,
       modal: Boolean(mainWindow && !mainWindow.isDestroyed()),
       resizable: false,

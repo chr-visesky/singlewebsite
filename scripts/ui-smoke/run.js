@@ -7,6 +7,7 @@ const { runHomeworkInterfaceSmoke } = require('./homework-interface-smoke');
 const { runSkillZipSmoke } = require('./skill-zip-smoke');
 const { runStudyHelperSmoke } = require('./study-helper-smoke');
 const { runStudyHelperLearningSmoke } = require('./study-helper-learning-smoke');
+const { runStudyGateAdvancedSmoke } = require('./studygate-advanced-smoke');
 const { runStudyGateSmoke } = require('./studygate-smoke');
 const { runStudyModulesSmoke } = require('./study-modules-smoke');
 const { runUpdateArtifactSmoke } = require('./update-artifact-smoke');
@@ -79,7 +80,7 @@ Get-CimInstance Win32_Process |
   }
 }
 
-function runHomeworkSmoke(rootDir, outputDir, options = {}) {
+function runHomeworkSmoke(rootDir, outputDir, command, options = {}) {
   const dotnetPath = resolveDotnetPath();
   const dotnetEnv = createDotnetEnvironment(dotnetPath);
   const projectPath = path.join(rootDir, 'tools', 'HomeworkApp.UiSmoke', 'HomeworkApp.UiSmoke.csproj');
@@ -107,7 +108,7 @@ function runHomeworkSmoke(rootDir, outputDir, options = {}) {
       dotnetPath,
       [
         assemblyPath,
-        'run-print-smoke',
+        command,
         '--app',
         homeworkAppPath,
         '--output-dir',
@@ -168,7 +169,16 @@ async function main() {
       rootDir,
       outputDir: path.join(outputDir, 'studygate')
     });
-    const homework = normalizeHomeworkReport(runHomeworkSmoke(rootDir, path.join(outputDir, 'homework')));
+    const studyGateAdvanced = await runStudyGateAdvancedSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'studygate-advanced')
+    });
+    const homework = normalizeHomeworkReport(
+      runHomeworkSmoke(rootDir, path.join(outputDir, 'homework'), 'run-print-smoke')
+    );
+    const homeworkEditor = normalizeHomeworkReport(
+      runHomeworkSmoke(rootDir, path.join(outputDir, 'homework-editor'), 'run-editor-controls-smoke')
+    );
     const homeworkInterface = await runHomeworkInterfaceSmoke({
       rootDir,
       outputDir: path.join(outputDir, 'homework-interface')
@@ -195,7 +205,9 @@ async function main() {
     const report = {
       generatedAt: new Date().toISOString(),
       studyGate,
+      studyGateAdvanced,
       homework,
+      homeworkEditor,
       homeworkInterface,
       studyHelper,
       studyHelperLearning,
@@ -206,7 +218,9 @@ async function main() {
 
     report.failedChecks = [
       ...studyGate.failedChecks,
+      ...(Array.isArray(studyGateAdvanced.failedChecks) ? studyGateAdvanced.failedChecks : []),
       ...homework.failedChecks,
+      ...homeworkEditor.failedChecks,
       ...(Array.isArray(homeworkInterface.failedChecks) ? homeworkInterface.failedChecks : []),
       ...(Array.isArray(studyHelper.failedChecks) ? studyHelper.failedChecks : []),
       ...(Array.isArray(studyHelperLearning.failedChecks) ? studyHelperLearning.failedChecks : []),

@@ -170,6 +170,9 @@ async function summarizeHome(page) {
     const layoutOrder = Array.from(document.querySelectorAll('.dashboard > .dashboard__column')).map((node) =>
       Array.from(node.classList).find((className) => className.startsWith('dashboard__column--')) || node.className
     );
+    const modulesColumn = document.querySelector('.dashboard__column--modules');
+    const calendarColumn = document.querySelector('.dashboard__column--calendar');
+    const todayColumn = document.querySelector('.dashboard__column--today');
     const homeNoticeNode = document.getElementById('home-notice');
     const firstCard = document.querySelector('#card-grid .card');
     const model = window.studyGate ? await window.studyGate.getHomeModel({ syncRemote: false }) : null;
@@ -187,6 +190,10 @@ async function summarizeHome(page) {
       firstCardTitle: firstCard ? String(firstCard.querySelector('h2')?.textContent || '').trim() : '',
       firstCardBadge: firstCard ? String(firstCard.querySelector('.card__tag')?.textContent || '').trim() : '',
       firstModelCardId: model && Array.isArray(model.cards) && model.cards[0] ? String(model.cards[0].id || '') : '',
+      modulesColumnWidth: modulesColumn ? Math.round(modulesColumn.getBoundingClientRect().width) : 0,
+      calendarColumnWidth: calendarColumn ? Math.round(calendarColumn.getBoundingClientRect().width) : 0,
+      todayColumnWidth: todayColumn ? Math.round(todayColumn.getBoundingClientRect().width) : 0,
+      hasCalendarSelectedList: Boolean(document.getElementById('calendar-selected-list')),
       homeNoticeVisible: Boolean(homeNoticeNode && homeNoticeNode.hidden === false),
       updateButtonCompact: Boolean(updateButton && updateButton.classList.contains('nav-button--icon-only')),
       toolbarActions: shadowRoot
@@ -376,6 +383,16 @@ async function runStudyGateSmoke(options = {}) {
     ];
     if (JSON.stringify(report.home.layoutOrder) !== JSON.stringify(expectedLayout)) {
       report.failedChecks.push(`首页布局顺序异常: ${report.home.layoutOrder.join(' -> ')}`);
+    }
+
+    if (report.home.calendarColumnWidth <= report.home.modulesColumnWidth) {
+      report.failedChecks.push(
+        `首页宽度分配异常: 日历列 ${report.home.calendarColumnWidth}px 没有宽于左侧模块列 ${report.home.modulesColumnWidth}px。`
+      );
+    }
+
+    if (report.home.hasCalendarSelectedList) {
+      report.failedChecks.push('首页日历下方仍然保留了选中日期计划列表。');
     }
 
     if (report.home.homeNoticeVisible) {

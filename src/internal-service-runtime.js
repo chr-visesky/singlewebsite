@@ -12,6 +12,7 @@ function createInternalServiceRuntime(dependencies = {}) {
     getSaveStudySchedule,
     getSerializeStudySchedule,
     http,
+    internalHomeworkSyncApiRoute,
     internalMediaRoute,
     internalMobileConfigRoute,
     internalMobileScheduleApiRoute,
@@ -22,7 +23,8 @@ function createInternalServiceRuntime(dependencies = {}) {
     normalizePrefix,
     os,
     pathModule,
-    ensureMobileToken
+    ensureMobileToken,
+    syncRemoteHomeworkRequests
   } = dependencies;
 
   let internalServer = null;
@@ -227,6 +229,21 @@ function createInternalServiceRuntime(dependencies = {}) {
     });
   }
 
+  async function handleHomeworkSyncApi(response, requestUrl) {
+    if (!isAuthorizedMobileRequest(requestUrl)) {
+      sendJson(response, 403, {
+        error: 'forbidden'
+      });
+      return;
+    }
+
+    const result = await syncRemoteHomeworkRequests();
+    sendJson(response, result && result.success ? 200 : 500, result || {
+      success: false,
+      message: '云端作业同步失败。'
+    });
+  }
+
   async function handleOAuthCallback(response) {
     sendHtml(
       response,
@@ -261,6 +278,18 @@ function createInternalServiceRuntime(dependencies = {}) {
 
       if (requestUrl.pathname === internalMobileScheduleApiRoute) {
         await handleMobileScheduleApi(request, response, requestUrl);
+        return;
+      }
+
+      if (requestUrl.pathname === internalHomeworkSyncApiRoute) {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, {
+            error: 'method_not_allowed'
+          });
+          return;
+        }
+
+        await handleHomeworkSyncApi(response, requestUrl);
         return;
       }
 

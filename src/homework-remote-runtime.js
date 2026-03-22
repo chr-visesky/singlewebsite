@@ -77,7 +77,13 @@ function createHomeworkRemoteRuntime(dependencies = {}) {
     const remoteHomework = currentRemoteHomeworkConfig();
 
     if (!remoteHomework.enabled || typeof homeworkAgentRuntime.syncAgentHomeworkRequests !== 'function') {
-      return false;
+      return {
+        success: false,
+        enabled: false,
+        requestCount: 0,
+        processedCount: 0,
+        message: 'remote_homework_disabled'
+      };
     }
 
     remoteHomeworkSyncPromise = remoteHomeworkSyncPromise
@@ -88,10 +94,24 @@ function createHomeworkRemoteRuntime(dependencies = {}) {
           remoteUrl: normalizePrefix(remoteHomework.url),
           authToken: normalizePrefix(remoteHomework.authToken)
         });
-        return true;
+        return {
+          success: true,
+          enabled: true,
+          requestCount: requests.length,
+          processedCount: requests.length,
+          message: requests.length
+            ? `已同步 ${requests.length} 条云端作业请求。`
+            : '当前没有新的云端作业请求。'
+        };
       });
 
-    return remoteHomeworkSyncPromise.catch(() => false);
+    return remoteHomeworkSyncPromise.catch((error) => ({
+      success: false,
+      enabled: true,
+      requestCount: 0,
+      processedCount: 0,
+      message: error && error.message ? error.message : '云端作业同步失败。'
+    }));
   }
 
   function startRemoteHomeworkPolling() {

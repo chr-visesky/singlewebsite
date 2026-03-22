@@ -301,6 +301,7 @@ function sha256File(filePath) {
 }
 
 async function buildWindowsInstaller(projectRoot, appDir, outputDir, buildVersion, productName) {
+  const appIconPath = path.join(projectRoot, 'build', 'branding', 'studygate.ico');
   const artifacts = await builder.build({
     projectDir: projectRoot,
     prepackaged: appDir,
@@ -317,13 +318,19 @@ async function buildWindowsInstaller(projectRoot, appDir, outputDir, buildVersio
         output: outputDir
       },
       artifactName: `${productName} Setup ${buildVersion}.\${ext}`,
+      win: {
+        icon: appIconPath
+      },
       nsis: {
         oneClick: false,
         perMachine: false,
         allowToChangeInstallationDirectory: true,
         deleteAppDataOnUninstall: false,
         differentialPackage: false,
-        shortcutName: productName
+        shortcutName: productName,
+        installerIcon: appIconPath,
+        uninstallerIcon: appIconPath,
+        installerHeaderIcon: appIconPath
       }
     }
   });
@@ -387,6 +394,7 @@ async function packageApp() {
   const vendorPiperRuntimeDir = path.join(projectRoot, 'vendor', 'piper', 'runtime');
   const vendorPiperModelsDir = path.join(projectRoot, 'vendor', 'piper', 'models');
   const stagedRuntimeVendorPiperDir = path.join(stagedRuntimeAppDir, 'vendor', 'piper');
+  const appIconSource = path.join(projectRoot, 'build', 'branding', 'studygate.ico');
   const tarPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
   const dotnetCommand = resolveDotnetCommand();
   const runtimePackageJson = {
@@ -418,6 +426,7 @@ async function packageApp() {
   await fsPromises.cp(vendorPiperModelsDir, path.join(stagedRuntimeVendorPiperDir, 'models'), { recursive: true });
   await copyFileIfPresent(configSource, path.join(stagedRuntimeAppDir, 'embedded-config.json'));
   await copyFileIfPresent(secretConfigSource, path.join(stagedRuntimeAppDir, 'embedded-config.secrets.json'));
+  await copyFileIfPresent(appIconSource, path.join(stagedAppDir, 'studygate.ico'));
 
   for (const moduleTarget of MODULE_BUILD_TARGETS) {
     const publishDir = path.join(projectRoot, moduleTarget.publishRelativePath);

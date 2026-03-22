@@ -33,6 +33,7 @@ internal static partial class HomeworkAppUiSmoke
         return command switch
         {
             "run-print-smoke" => await RunPrintSmokeAsync(args.Skip(1).ToArray()),
+            "run-editor-controls-smoke" => await RunEditorControlsSmokeAsync(args.Skip(1).ToArray()),
             "run-history-delete-smoke" => await RunHistoryDeleteSmokeAsync(args.Skip(1).ToArray()),
             _ => new SmokeReport
             {
@@ -778,6 +779,16 @@ internal sealed class SmokeReport
     public string DeletedJobSubject { get; set; } = string.Empty;
     public int ExpectedPageCount { get; set; }
     public int ActualPageCount { get; set; }
+    public string ZoomAfterFirstStep { get; set; } = string.Empty;
+    public string ZoomAtMaximum { get; set; } = string.Empty;
+    public string ZoomAtExpandedMaximum { get; set; } = string.Empty;
+    public string ZoomAtCollapsedMaximum { get; set; } = string.Empty;
+    public bool AssistantCollapsed { get; set; }
+    public bool AssistantExpanded { get; set; }
+    public string AssistantCollapseGlyph { get; set; } = string.Empty;
+    public string AssistantExpandGlyph { get; set; } = string.Empty;
+    public bool HomeworkSyncTriggered { get; set; }
+    public string SyncDialogTitle { get; set; } = string.Empty;
     public string? ErrorMessage { get; set; }
     public List<string> FailedChecks { get; } = [];
     public List<PageComparison> Pages { get; } = [];

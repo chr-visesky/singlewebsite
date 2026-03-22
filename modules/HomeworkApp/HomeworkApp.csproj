@@ -8,12 +8,17 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>HomeworkApp</RootNamespace>
     <AssemblyName>HomeworkApp</AssemblyName>
+    <ApplicationIcon>Assets\homework-module.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- JSON serialization -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="PDFtoImage" Version="5.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\homework-module.ico" />
   </ItemGroup>
 
 </Project>

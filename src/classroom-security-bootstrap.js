@@ -149,6 +149,188 @@ const LEGACY_MEDIA_COMPATIBILITY_SCRIPT = String.raw`
 })();
 `;
 
+const CLASSROOM_TOPFRAME_ZOOM_SCRIPT = String.raw`
+(() => {
+  if (!window || window.top !== window || window.__studygateClassroomTopframeZoomInstalled) {
+    return;
+  }
+
+  Object.defineProperty(window, '__studygateClassroomTopframeZoomInstalled', {
+    configurable: false,
+    enumerable: false,
+    value: true
+  });
+
+  const minimumZoom = 0.6;
+  const maximumZoom = 2.5;
+  const zoomStep = 0.1;
+  const storageKey = '__studygateClassroomPageZoom';
+  const normalizeZoom = (value) => {
+    const numeric = Number(value) || 1;
+    const stepped = Math.round(numeric / zoomStep) * zoomStep;
+    return Math.max(minimumZoom, Math.min(Number(stepped.toFixed(2)), maximumZoom));
+  };
+  const readZoom = () => {
+    try {
+      return normalizeZoom(window.sessionStorage.getItem(storageKey) || 1);
+    } catch {
+      return 1;
+    }
+  };
+  const applyZoom = (value) => {
+    const zoom = normalizeZoom(value);
+
+    if (window.document && window.document.documentElement) {
+      window.document.documentElement.style.zoom = zoom.toFixed(2);
+    }
+
+    try {
+      window.sessionStorage.setItem(storageKey, String(zoom));
+    } catch {
+      // Ignore sessionStorage failures.
+    }
+
+    return zoom;
+  };
+  const sendZoomDelta = (rawDeltaY) => {
+    const numeric = Number(rawDeltaY) || 0;
+    return applyZoom(readZoom() + (numeric < 0 ? zoomStep : -zoomStep));
+  };
+  const sendZoomReset = () => {
+    return applyZoom(1);
+  };
+
+  window.__studygateClassroomTopframeTestHooks = Object.freeze({
+    triggerWheel(rawDeltaY) {
+      return sendZoomDelta(rawDeltaY);
+    },
+    resetZoom() {
+      return sendZoomReset();
+    }
+  });
+  applyZoom(readZoom());
+
+  window.addEventListener(
+    'wheel',
+    (event) => {
+      if (!event.ctrlKey) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      sendZoomDelta(event.deltaY);
+    },
+    { passive: false, capture: true }
+  );
+
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!event.ctrlKey || event.key !== '0') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      sendZoomReset();
+    },
+    true
+  );
+})();
+`;
+
+const CLASSROOM_SUBFRAME_ZOOM_SCRIPT = String.raw`
+(() => {
+  if (!window || window.top === window || window.__studygateClassroomSubframeZoomInstalled) {
+    return;
+  }
+
+  Object.defineProperty(window, '__studygateClassroomSubframeZoomInstalled', {
+    configurable: false,
+    enumerable: false,
+    value: true
+  });
+
+  const minimumZoom = 0.6;
+  const maximumZoom = 2.5;
+  const zoomStep = 0.1;
+  const storageKey = '__studygateClassroomPageZoom';
+  const normalizeZoom = (value) => {
+    const numeric = Number(value) || 1;
+    const stepped = Math.round(numeric / zoomStep) * zoomStep;
+    return Math.max(minimumZoom, Math.min(Number(stepped.toFixed(2)), maximumZoom));
+  };
+  const readZoom = () => {
+    try {
+      return normalizeZoom(window.sessionStorage.getItem(storageKey) || 1);
+    } catch {
+      return 1;
+    }
+  };
+  const applyZoom = (value) => {
+    const zoom = normalizeZoom(value);
+
+    if (window.document && window.document.documentElement) {
+      window.document.documentElement.style.zoom = zoom.toFixed(2);
+    }
+
+    try {
+      window.sessionStorage.setItem(storageKey, String(zoom));
+    } catch {
+      // Ignore sessionStorage failures.
+    }
+
+    return zoom;
+  };
+  const sendZoomDelta = (rawDeltaY) => {
+    const numeric = Number(rawDeltaY) || 0;
+    return applyZoom(readZoom() + (numeric < 0 ? zoomStep : -zoomStep));
+  };
+  const sendZoomReset = () => {
+    return applyZoom(1);
+  };
+
+  window.__studygateClassroomSubframeTestHooks = Object.freeze({
+    triggerWheel(rawDeltaY) {
+      return sendZoomDelta(rawDeltaY);
+    },
+    resetZoom() {
+      sendZoomReset();
+    }
+  });
+  applyZoom(readZoom());
+
+  window.addEventListener(
+    'wheel',
+    (event) => {
+      if (!event.ctrlKey) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      sendZoomDelta(event.deltaY);
+    },
+    { passive: false, capture: true }
+  );
+
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!event.ctrlKey || event.key !== '0') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      sendZoomReset();
+    },
+    true
+  );
+})();
+`;
+
 function normalizePrefix(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -246,6 +428,8 @@ function configureClassroomSecurityBootstrap(options = {}) {
 }
 
 module.exports = {
+  CLASSROOM_SUBFRAME_ZOOM_SCRIPT,
+  CLASSROOM_TOPFRAME_ZOOM_SCRIPT,
   LEGACY_MEDIA_COMPATIBILITY_SCRIPT,
   configureClassroomSecurityBootstrap
 };
