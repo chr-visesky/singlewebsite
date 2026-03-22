@@ -86,15 +86,10 @@ internal static partial class HomeworkAppUiSmoke
                 }
 
                 report.ZoomAtCollapsedMaximum = ZoomUntilStable(process.Id, "BtnZoomIn", "TxtZoom", 80);
-                if (ParseZoomPercent(report.ZoomAtCollapsedMaximum) <= ParseZoomPercent(report.ZoomAtExpandedMaximum))
+                if (ParseZoomPercent(report.ZoomAtCollapsedMaximum) != ParseZoomPercent(report.ZoomAtExpandedMaximum))
                 {
                     report.FailedChecks.Add(
-                        $"收起作业助手后缩放上限没有增大，展开最大 {report.ZoomAtExpandedMaximum}，收起最大 {report.ZoomAtCollapsedMaximum}。");
-                }
-
-                if (ParseZoomPercent(report.ZoomAtCollapsedMaximum) <= 125)
-                {
-                    report.FailedChecks.Add($"收起作业助手后缩放上限仍然没有超过 125%，实际是 {report.ZoomAtCollapsedMaximum}。");
+                        $"收起作业助手后不应继续增大缩放，展开最大 {report.ZoomAtExpandedMaximum}，收起最大 {report.ZoomAtCollapsedMaximum}。");
                 }
 
                 InvokeElement(collapsedButton!, "BtnExpandLeft");
@@ -107,6 +102,12 @@ internal static partial class HomeworkAppUiSmoke
                 else if (!string.Equals(ReadElementText(expandedButton!), "◀", StringComparison.Ordinal))
                 {
                     report.FailedChecks.Add($"重新展开作业助手后，按钮箭头没有切回 ◀，实际是 {ReadElementText(expandedButton!)}。");
+                }
+
+                var toolsButtonAfterExpand = WaitForVisibleDescendant(process.Id, "BtnTools", TimeSpan.FromSeconds(5));
+                if (toolsButtonAfterExpand == null)
+                {
+                    report.FailedChecks.Add("重新展开作业助手后，工具按钮消失了。");
                 }
 
                 InvokeElement(WaitForDescendant(process.Id, "BtnMenu", TimeSpan.FromSeconds(5)), "BtnMenu");

@@ -94,3 +94,25 @@ This file records regressions that were introduced during development and then f
   把在线课堂缩放收回到课堂模块自身：主 frame 和子 frame 都改成页面世界脚本，直接对各自 `document.documentElement.style.zoom` 做 `Ctrl + 滚轮 / Ctrl + 0` 处理，不再依赖通用 preload 或 BrowserView 壳层输入事件。同步把 advanced smoke 改成验证主 frame 和子 frame 的真实 zoom 值变化。
 - Avoid:
   在线课堂行为必须留在课堂模块里，不要再把课堂交互塞回主窗口通用 preload。遇到 BrowserView 里的输入问题，优先验证页面世界脚本是否真的改变了课堂 DOM 的显示状态，再决定是否需要壳层参与。
+
+## Online classroom controls leaked onto home cards and top frame zoomed with content
+
+- How it appeared:
+  首页里的在线课堂卡片出现了额外的 `初始化` 按钮，样式和其他卡片不一致；同时在线课堂 `Ctrl + 滚轮` 会缩放课堂顶部主 frame，而不是只缩放工具栏下方的内容子 frame。
+- Root cause:
+  在线课堂的状态重置能力被同时挂在共享 toolbar 和首页卡片上，模块边界被打破。缩放这边则是 BrowserView 壳层和课堂主 frame 都在抢 `Ctrl + 滚轮`，导致主 frame 本身被放大，而不是只把缩放意图转发给内容子 frame。
+- Fix:
+  去掉了首页卡片上的在线课堂 `初始化` 入口，只保留共享 toolbar 里的初始化。课堂缩放改成：BrowserView 不再拦截并调整整页 zoom，主 frame 只负责转发缩放命令，真正的 zoom 只作用在内容子 frame。
+- Avoid:
+  在线课堂相关入口和交互只能留在课堂模块自己的 toolbar / BrowserView 链路里，不能回流到首页卡片。涉及 frame 页面缩放时，先明确谁是容器、谁是内容，再验证只改内容 frame 的 DOM zoom。
+
+## Homework paper max zoom changed after collapsing the assistant and hid tools on reopen
+
+- How it appeared:
+  作业纸放大到最大后，收起作业助手还能继续放大；再展开作业助手时，右下角工具按钮会被挤没。
+- Root cause:
+  最大缩放上限按当前 `LeftColumn.ActualWidth` 动态计算。助手收起后左栏宽度变成 `0`，缩放上限被意外抬高，导致重新展开助手时布局空间不够，工具按钮被挤出可见区域。
+- Fix:
+  最大缩放上限改成始终按展开态助手宽度预留空间计算，不再因为助手收起而继续增大。同步更新 UI smoke，验证展开最大缩放和收起后最大缩放一致，且重新展开后 `BtnTools` 仍然可见。
+- Avoid:
+  会影响版面边界的缩放上限必须基于稳定布局约束计算，不能跟随临时折叠态波动。任何涉及作业纸缩放和助手收起/展开的改动，都必须跑 `HomeworkApp` 的 editor smoke，检查最大缩放和工具按钮可见性。

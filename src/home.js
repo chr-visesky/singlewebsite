@@ -53,19 +53,6 @@ async function launchStudyTarget(payload) {
   }
 }
 
-async function resetCourseSiteState(title = '在线课堂') {
-  if (!window.confirm(`这会清空 ${title} 的网站缓存、登录状态和本地站点数据，但保留已保存的账号密码。继续吗？`)) {
-    return;
-  }
-
-  try {
-    await window.studyGate.resetCourseSiteState();
-    window.alert(`${title} 状态已初始化。`);
-  } catch {
-    window.alert('初始化失败。');
-  }
-}
-
 async function completeSchedule(scheduleId) {
   try {
     await window.studyGate.completeStudySchedule({ scheduleId });
@@ -236,17 +223,6 @@ function createCard(card) {
   });
 
   actions.append(button);
-
-  if (card.supportsStateReset && hasTarget) {
-    const resetButton = document.createElement('button');
-    resetButton.type = 'button';
-    resetButton.className = 'card__ghost-button';
-    resetButton.textContent = '初始化';
-    resetButton.addEventListener('click', async () => {
-      await resetCourseSiteState(card.title);
-    });
-    actions.append(resetButton);
-  }
 
   inner.append(top, actions);
   article.append(inner);

@@ -51,39 +51,15 @@ function createNavigationRuntime(dependencies = {}) {
   let activeClassroomShell = null;
   let classroomShellMeasuredTopHeight = classroomShellTopHeight;
 
-  function wheelZoomDelta(input = {}) {
-    const candidates = [input.deltaY, input.wheelDeltaY, input.delta];
-
-    for (const candidate of candidates) {
-      const numeric = Number(candidate);
-      if (Number.isFinite(numeric) && numeric !== 0) {
-        return numeric;
-      }
-    }
-
-    return 0;
-  }
-
   function tryHandleClassroomZoomInput(event, input = {}) {
-    if (!input || input.type !== 'mouseWheel' || !input.control || typeof adjustWindowZoomByDelta !== 'function') {
+    if (!input || input.type !== 'mouseWheel' || !input.control) {
       return false;
     }
 
-    const deltaY = wheelZoomDelta(input);
-
-    if (!deltaY) {
-      return false;
-    }
-
-    event.preventDefault();
-    const appliedDelta = deltaY < 0 ? 0.1 : -0.1;
-    const nextZoomFactor = adjustWindowZoomByDelta(appliedDelta);
-    logNavigationDebug('classroom-view-zoom-wheel', {
-      deltaY,
-      appliedDelta,
-      nextZoomFactor
+    logNavigationDebug('classroom-view-zoom-wheel-pass-through', {
+      deltaY: Number(input.deltaY) || Number(input.wheelDeltaY) || Number(input.delta) || 0
     });
-    return true;
+    return false;
   }
 
   function internalPagePath(pageName) {

@@ -149,7 +149,7 @@ namespace HomeworkApp.Views
             double baseWidth = A4Background.Width > 0 ? A4Background.Width : 794;
             double availableWidth = EditorLayoutRoot.ActualWidth
                 - ThumbnailColumn.ActualWidth
-                - LeftColumn.ActualWidth
+                - AssistantPanelExpandedWidth
                 - 8;
 
             if (availableWidth <= 0 || baseWidth <= 0)

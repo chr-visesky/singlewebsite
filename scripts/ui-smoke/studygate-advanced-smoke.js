@@ -499,12 +499,21 @@ async function runStudyGateAdvancedSmoke(options = {}) {
         window.__studygateClassroomTopframeTestHooks.triggerWheel(-240);
       });
 
-      await waitForDocumentZoomChange(classroomPage, report.initialZoomFactor, 10000);
-      report.zoomAfterCtrlWheel = await readDocumentZoom(classroomPage);
+      await waitForDocumentZoomChange(classroomFrame, report.initialContentZoom, 10000);
+      report.zoomAfterCtrlWheel = {
+        top: await readDocumentZoom(classroomPage),
+        frame: await readDocumentZoom(classroomFrame)
+      };
 
-      if (!(report.zoomAfterCtrlWheel > report.initialZoomFactor)) {
+      if (Math.abs(report.zoomAfterCtrlWheel.top - report.initialZoomFactor) >= 0.01) {
         report.failedChecks.push(
-          `在线课堂 Ctrl+滚轮 没有放大课堂内容，初始 ${report.initialZoomFactor}，滚轮后 ${report.zoomAfterCtrlWheel}。`
+          `在线课堂主 frame 不应该缩放，初始 ${report.initialZoomFactor}，滚轮后 ${report.zoomAfterCtrlWheel.top}。`
+        );
+      }
+
+      if (!(report.zoomAfterCtrlWheel.frame > report.initialContentZoom)) {
+        report.failedChecks.push(
+          `在线课堂 Ctrl+滚轮 没有放大内容子 frame，初始 ${report.initialContentZoom}，滚轮后 ${report.zoomAfterCtrlWheel.frame}。`
         );
       }
 
@@ -514,12 +523,22 @@ async function runStudyGateAdvancedSmoke(options = {}) {
         }
         window.__studygateClassroomSubframeTestHooks.triggerWheel(-240);
       });
-      await waitForDocumentZoomChange(classroomFrame, report.initialContentZoom, 10000);
+      await classroomFrame.waitForFunction(
+        (previous) => {
+          const rawValue = document.documentElement && document.documentElement.style
+            ? document.documentElement.style.zoom
+            : '';
+          const currentZoom = Number(rawValue || 1) || 1;
+          return currentZoom > previous;
+        },
+        report.zoomAfterCtrlWheel.frame,
+        { timeout: 10000 }
+      );
       report.zoomAfterSubframeCtrlWheel = await readDocumentZoom(classroomFrame);
 
-      if (!(report.zoomAfterSubframeCtrlWheel > report.initialContentZoom)) {
+      if (!(report.zoomAfterSubframeCtrlWheel > report.zoomAfterCtrlWheel.frame)) {
         report.failedChecks.push(
-          `在线课堂子 frame Ctrl+滚轮 桥接没有继续放大，初始 ${report.initialContentZoom}，桥接后 ${report.zoomAfterSubframeCtrlWheel}。`
+          `在线课堂子 frame Ctrl+滚轮 没有继续放大，第一次后 ${report.zoomAfterCtrlWheel.frame}，桥接后 ${report.zoomAfterSubframeCtrlWheel}。`
         );
       }
 

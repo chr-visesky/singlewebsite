@@ -164,40 +164,39 @@ const CLASSROOM_TOPFRAME_ZOOM_SCRIPT = String.raw`
   const minimumZoom = 0.6;
   const maximumZoom = 2.5;
   const zoomStep = 0.1;
-  const storageKey = '__studygateClassroomPageZoom';
+  const messageType = '__studygateClassroomZoomCommand';
   const normalizeZoom = (value) => {
     const numeric = Number(value) || 1;
     const stepped = Math.round(numeric / zoomStep) * zoomStep;
     return Math.max(minimumZoom, Math.min(Number(stepped.toFixed(2)), maximumZoom));
   };
-  const readZoom = () => {
-    try {
-      return normalizeZoom(window.sessionStorage.getItem(storageKey) || 1);
-    } catch {
-      return 1;
-    }
-  };
-  const applyZoom = (value) => {
-    const zoom = normalizeZoom(value);
+  const sendCommandToChildFrames = (command, value) => {
+    const payload = {
+      type: messageType,
+      command,
+      value
+    };
 
-    if (window.document && window.document.documentElement) {
-      window.document.documentElement.style.zoom = zoom.toFixed(2);
+    for (const frame of Array.from(window.frames || [])) {
+      try {
+        frame.postMessage(payload, '*');
+      } catch {
+        // Ignore inaccessible child frames.
+      }
     }
-
-    try {
-      window.sessionStorage.setItem(storageKey, String(zoom));
-    } catch {
-      // Ignore sessionStorage failures.
-    }
-
-    return zoom;
   };
   const sendZoomDelta = (rawDeltaY) => {
     const numeric = Number(rawDeltaY) || 0;
-    return applyZoom(readZoom() + (numeric < 0 ? zoomStep : -zoomStep));
+    if (!numeric) {
+      return 1;
+    }
+
+    sendCommandToChildFrames('delta', numeric < 0 ? zoomStep : -zoomStep);
+    return 1;
   };
   const sendZoomReset = () => {
-    return applyZoom(1);
+    sendCommandToChildFrames('reset', 1);
+    return 1;
   };
 
   window.__studygateClassroomTopframeTestHooks = Object.freeze({
@@ -208,7 +207,9 @@ const CLASSROOM_TOPFRAME_ZOOM_SCRIPT = String.raw`
       return sendZoomReset();
     }
   });
-  applyZoom(readZoom());
+  if (window.document && window.document.documentElement) {
+    window.document.documentElement.style.zoom = '1';
+  }
 
   window.addEventListener(
     'wheel',
@@ -256,6 +257,7 @@ const CLASSROOM_SUBFRAME_ZOOM_SCRIPT = String.raw`
   const maximumZoom = 2.5;
   const zoomStep = 0.1;
   const storageKey = '__studygateClassroomPageZoom';
+  const messageType = '__studygateClassroomZoomCommand';
   const normalizeZoom = (value) => {
     const numeric = Number(value) || 1;
     const stepped = Math.round(numeric / zoomStep) * zoomStep;
@@ -300,6 +302,26 @@ const CLASSROOM_SUBFRAME_ZOOM_SCRIPT = String.raw`
     }
   });
   applyZoom(readZoom());
+
+  window.addEventListener('message', (event) => {
+    const data = event && event.data;
+
+    if (!data || data.type !== messageType) {
+      return;
+    }
+
+    if (data.command === 'delta') {
+      const delta = Number(data.value) || 0;
+      if (delta) {
+        applyZoom(readZoom() + delta);
+      }
+      return;
+    }
+
+    if (data.command === 'reset') {
+      sendZoomReset();
+    }
+  });
 
   window.addEventListener(
     'wheel',

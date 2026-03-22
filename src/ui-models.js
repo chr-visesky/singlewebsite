@@ -25,8 +25,7 @@ function buildHomeUiModel(options = {}) {
       target: classroom.entryUrl,
       scheduleTargetId: classroom.id,
       classroomId: classroom.id,
-      libraryId: '',
-      supportsStateReset: true
+      libraryId: ''
     })),
     ...libraries.map((library) => ({
       id: library.id,

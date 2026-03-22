@@ -189,6 +189,9 @@ async function summarizeHome(page) {
       cardCount: model && Array.isArray(model.cards) ? model.cards.length : 0,
       firstCardTitle: firstCard ? String(firstCard.querySelector('h2')?.textContent || '').trim() : '',
       firstCardBadge: firstCard ? String(firstCard.querySelector('.card__tag')?.textContent || '').trim() : '',
+      cardResetButtons: Array.from(document.querySelectorAll('#card-grid .card button'))
+        .map((button) => String(button.textContent || '').trim())
+        .filter((text) => text === '初始化').length,
       firstModelCardId: model && Array.isArray(model.cards) && model.cards[0] ? String(model.cards[0].id || '') : '',
       modulesColumnWidth: modulesColumn ? Math.round(modulesColumn.getBoundingClientRect().width) : 0,
       calendarColumnWidth: calendarColumn ? Math.round(calendarColumn.getBoundingClientRect().width) : 0,
@@ -393,6 +396,10 @@ async function runStudyGateSmoke(options = {}) {
 
     if (report.home.hasCalendarSelectedList) {
       report.failedChecks.push('首页日历下方仍然保留了选中日期计划列表。');
+    }
+
+    if (report.home.cardResetButtons > 0) {
+      report.failedChecks.push(`首页卡片仍然显示了 ${report.home.cardResetButtons} 个“初始化”按钮。`);
     }
 
     if (report.home.homeNoticeVisible) {
