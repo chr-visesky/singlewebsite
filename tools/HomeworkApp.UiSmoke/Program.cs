@@ -47,6 +47,9 @@ internal static partial class HomeworkAppUiSmoke
     {
         var report = new SmokeReport();
         string createdSmokeJobId = string.Empty;
+        bool startedProcess = false;
+        bool leaveProcessRunning = HasFlag(args, "--leave-process-running");
+        bool forceSmokeJob = HasFlag(args, "--force-smoke-job");
 
         try
         {
@@ -56,7 +59,7 @@ internal static partial class HomeworkAppUiSmoke
                 Path.Combine(Environment.CurrentDirectory, "temp", "ui-smoke", "homework");
             string? explicitJobDir = GetOption(args, "--job-dir");
             int existingProcessId = ParseIntOption(args, "--process-id");
-            string? jobDir = explicitJobDir ?? FindLatestJobDirectory();
+            string? jobDir = explicitJobDir ?? (forceSmokeJob ? null : FindLatestJobDirectory());
 
             report.AppPath = appPath;
             report.OutputDirectory = outputDir;
@@ -97,6 +100,7 @@ internal static partial class HomeworkAppUiSmoke
             {
                 KillProcessesByPath(appPath);
                 process = StartHomeworkApp(appPath);
+                startedProcess = true;
             }
 
             report.ProcessId = process.Id;
@@ -129,6 +133,9 @@ internal static partial class HomeworkAppUiSmoke
             });
 
             await WaitForFileAsync(pdfPath, TimeSpan.FromSeconds(30));
+            report.DeleteDialogTitle = await WaitForOptionalPrintCompleteDialogAsync(TimeSpan.FromSeconds(4))
+                ? "打印完成"
+                : string.Empty;
             VerifyPrintedPdf(jobDir!, pdfPath, report);
             report.Passed = report.FailedChecks.Count == 0;
         }
@@ -139,12 +146,12 @@ internal static partial class HomeworkAppUiSmoke
         }
         finally
         {
-            if (!string.IsNullOrWhiteSpace(report.AppPath))
+            if (startedProcess && !leaveProcessRunning && !string.IsNullOrWhiteSpace(report.AppPath))
             {
                 KillProcessesByPath(report.AppPath);
             }
 
-            if (!string.IsNullOrWhiteSpace(createdSmokeJobId))
+            if (!leaveProcessRunning && !string.IsNullOrWhiteSpace(createdSmokeJobId))
             {
                 try
                 {
@@ -259,6 +266,11 @@ internal static partial class HomeworkAppUiSmoke
         return int.TryParse(rawValue, out int value) && value > 0 ? value : 0;
     }
 
+    private static bool HasFlag(string[] args, string name)
+    {
+        return args.Any((value) => string.Equals(value, name, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static void ResetDirectory(string path)
     {
         if (Directory.Exists(path))
@@ -303,7 +315,7 @@ internal static partial class HomeworkAppUiSmoke
         var startInfo = new ProcessStartInfo(appPath)
         {
             WorkingDirectory = Path.GetDirectoryName(appPath) ?? Environment.CurrentDirectory,
-            UseShellExecute = false
+            UseShellExecute = true
         };
         var process = Process.Start(startInfo) ?? throw new InvalidOperationException("HomeworkApp 启动失败。");
         process.WaitForInputIdle(15000);
@@ -486,6 +498,8 @@ internal static partial class HomeworkAppUiSmoke
 
         while (DateTime.UtcNow < deadline)
         {
+            _ = TryDismissPrintCompleteDialog();
+
             if (File.Exists(path))
             {
                 long currentLength = new FileInfo(path).Length;
@@ -508,6 +522,31 @@ internal static partial class HomeworkAppUiSmoke
         }
 
         throw new TimeoutException("打印后的 PDF 没有在预期时间内生成。");
+    }
+
+    private static async Task<bool> WaitForOptionalPrintCompleteDialogAsync(TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+        bool dismissed = false;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (TryDismissPrintCompleteDialog())
+            {
+                dismissed = true;
+                await Task.Delay(200);
+                continue;
+            }
+
+            if (dismissed)
+            {
+                return true;
+            }
+
+            await Task.Delay(200);
+        }
+
+        return dismissed;
     }
 
     private static async Task WaitForDirectoryDeletedAsync(string path, TimeSpan timeout)

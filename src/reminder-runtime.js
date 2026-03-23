@@ -36,6 +36,12 @@ function createReminderRuntime(dependencies = {}) {
     s180: 180,
     s220: 220
   });
+  const REMINDER_FALLBACK_AUDIO_FORMAT = Object.freeze({
+    channels: 1,
+    sampleRate: 22050,
+    bitsPerSample: 16,
+    blockAlign: 2
+  });
 
   let reminderAudioPrewarmTimer = null;
   let reminderAudioPrewarmInFlight = false;
@@ -142,15 +148,39 @@ function createReminderRuntime(dependencies = {}) {
   }
 
   function reminderTemplateForLeadMinutes(leadMinutes) {
-    if (Number(leadMinutes) === 5) {
-      return ['alarm', 's120', 'alarm', 's220', 'distance', 's180', 'planName', 's180', 'remain', 's120', 'five_minutes'];
+    const numericLeadMinutes = Number(leadMinutes);
+
+    if (!Number.isFinite(numericLeadMinutes) || numericLeadMinutes <= 0) {
+      return null;
     }
 
-    if (Number(leadMinutes) === 1) {
-      return ['alarm', 's120', 'alarm', 's220', 'distance', 's180', 'planName', 's180', 'remain', 's120', 'one_minutes'];
+    return [
+      'alarm',
+      's120',
+      'alarm',
+      's220',
+      'distance',
+      's180',
+      'planName',
+      's180',
+      'remain',
+      's120',
+      reminderLeadComponentName(numericLeadMinutes)
+    ];
+  }
+
+  function reminderLeadComponentName(leadMinutes) {
+    const numericLeadMinutes = Number(leadMinutes);
+
+    if (numericLeadMinutes === 5) {
+      return 'five_minutes';
     }
 
-    return null;
+    if (numericLeadMinutes === 1) {
+      return 'one_minutes';
+    }
+
+    return `lead_${Math.max(1, Math.round(numericLeadMinutes))}_minutes`;
   }
 
   function pruneReminderAudioCache(cacheDirectory) {
@@ -375,13 +405,23 @@ function createReminderRuntime(dependencies = {}) {
   }
 
   async function ensureReminderFixedTextComponentWave(componentName, cacheDirectory) {
-    const text = REMINDER_FIXED_TEXT_COMPONENTS[componentName];
+    let text = REMINDER_FIXED_TEXT_COMPONENTS[componentName];
+    let fileName = `${componentName}.wav`;
+
+    if (!text) {
+      const dynamicLeadMatch = /^lead_(\d+)_minutes$/.exec(normalizePrefix(componentName).toLowerCase());
+
+      if (dynamicLeadMatch) {
+        text = `${dynamicLeadMatch[1]}分钟`;
+        fileName = `lead-${dynamicLeadMatch[1]}-minutes.wav`;
+      }
+    }
 
     if (!text) {
       return '';
     }
 
-    const componentPath = path.join(cacheDirectory, `${componentName}.wav`);
+    const componentPath = path.join(cacheDirectory, fileName);
 
     if (!fs.existsSync(componentPath)) {
       const built = await runPiperToWave(text, componentPath);
@@ -578,20 +618,20 @@ function createReminderRuntime(dependencies = {}) {
 
     const title = normalizePrefix(schedule && schedule.title) || '学习计划';
     const titlePath = await ensureReminderPlanTitleAudioPath(title);
+    const hasTitleAudio = Boolean(titlePath && fs.existsSync(titlePath));
 
-    if (!titlePath || !fs.existsSync(titlePath)) {
+    const componentDirectory = reminderAudioComponentDirPath();
+    const titleFormat = hasTitleAudio ? loadWaveFormat(titlePath) : REMINDER_FALLBACK_AUDIO_FORMAT;
+    const sequenceParts = [];
+    let fallbackAlarmPath = '';
+
+    if (!hasTitleAudio) {
       logReminderDebug('audio-sequence-title-missing', {
         title,
         leadMinutes,
         titlePath
       });
-      return [];
     }
-
-    const componentDirectory = reminderAudioComponentDirPath();
-    const titleFormat = loadWaveFormat(titlePath);
-    const sequenceParts = [];
-    let fallbackAlarmPath = '';
 
     for (const componentName of sequence) {
       if (Object.prototype.hasOwnProperty.call(REMINDER_SILENCE_COMPONENTS_MS, componentName)) {
@@ -604,6 +644,16 @@ function createReminderRuntime(dependencies = {}) {
       }
 
       if (componentName === 'planName') {
+        if (!hasTitleAudio) {
+          logReminderDebug('audio-sequence-component-skipped', {
+            title,
+            leadMinutes,
+            componentName,
+            reason: 'missing_title_audio'
+          });
+          continue;
+        }
+
         sequenceParts.push({
           componentName,
           kind: 'file',
@@ -660,6 +710,10 @@ function createReminderRuntime(dependencies = {}) {
         leadMinutes,
         componentName
       });
+      continue;
+    }
+
+    if (!sequenceParts.some((part) => part.kind === 'file' && part.componentName !== 'alarm')) {
       return [];
     }
 

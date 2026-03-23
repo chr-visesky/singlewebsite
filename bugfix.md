@@ -116,3 +116,25 @@ This file records regressions that were introduced during development and then f
   最大缩放上限改成始终按展开态助手宽度预留空间计算，不再因为助手收起而继续增大。同步更新 UI smoke，验证展开最大缩放和收起后最大缩放一致，且重新展开后 `BtnTools` 仍然可见。
 - Avoid:
   会影响版面边界的缩放上限必须基于稳定布局约束计算，不能跟随临时折叠态波动。任何涉及作业纸缩放和助手收起/展开的改动，都必须跑 `HomeworkApp` 的 editor smoke，检查最大缩放和工具按钮可见性。
+
+## Homework UI smoke hung on the print-complete dialog after print-to-PDF
+
+- How it appeared:
+  `HomeworkApp` 的打印 smoke 能把 PDF 打出来，但测试随后会卡在 `打印完成 / 已发送到打印机` 弹框，导致后续复用同一进程的 editor smoke 无法继续。
+- Root cause:
+  smoke harness 只在等待 PDF 文件生成时顺手轮询了一次弹框；如果 `MessageBox.Show("已发送到打印机…", "打印完成")` 在 PDF 已经稳定落盘后才弹出来，测试就会漏掉这个模态窗口，留下一个阻塞整个窗口的对话框。
+- Fix:
+  把打印完成弹框处理改成明确的收尾阶段：PDF 生成完成后，再额外等待一个短窗口并持续尝试关闭 `打印完成` 对话框；同时保留固定位置点击确认和回车兜底，保证模态框在进入下一步 editor smoke 之前被清掉。
+- Avoid:
+  对任何“打印成功后再弹提示框”的流程，不能把弹框处理绑死在文件生成轮询里。必须在打印完成后再做一次显式的模态窗口清理，否则复用同一进程的后续 smoke 会被残留对话框锁死。
+
+## Homework UI smoke menu step hung because the test guessed the first menu item
+
+- How it appeared:
+  作业助手收起/展开测试后，smoke 在 `BtnMenu` 这一步卡住，或者点开菜单却没有触发“同步云端作业”，最后报 `手动同步没有触发本地 StudyGate 同步接口`。
+- Root cause:
+  harness 之前只是把鼠标挪开后点击 `BtnMenu`，再用回车去“猜”第一项菜单。如果上下文菜单焦点没有稳定落到第一项，或者作业纸悬浮菜单抢了焦点，这个回车就不会命中“同步云端作业”。
+- Fix:
+  给作业助手菜单项补了明确的 `AutomationId`，菜单打开时主动把焦点放到第一项；smoke 则改成先把鼠标移到安全区域，再直接按 `AutomationId/Name` 查找并点击“同步云端作业”菜单项，不再靠回车猜第一项。
+- Avoid:
+  对弹出式菜单、上下文菜单、悬浮菜单的自动化，不要依赖“当前默认焦点大概率在第一项”这种假设。必须给关键菜单项稳定标识，并让 smoke 直接定位目标项；同时在菜单弹出前把鼠标移出会触发悬浮控件的区域。

@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 using System.Windows.Automation;
+using HomeworkApp;
 
 internal static partial class HomeworkAppUiSmoke
 {
@@ -15,6 +16,8 @@ internal static partial class HomeworkAppUiSmoke
         var report = new SmokeReport();
         StudyGateStateBackup? stateBackup = null;
         FakeHomeworkSyncServer? syncServer = null;
+        string cleanupJobDir = string.Empty;
+        bool startedProcess = false;
 
         try
         {
@@ -22,6 +25,8 @@ internal static partial class HomeworkAppUiSmoke
                 Path.Combine(Environment.CurrentDirectory, "dist", "StudyGate-win32-x64", "modules", "homework", "HomeworkApp.exe");
             string outputDir = GetOption(args, "--output-dir") ??
                 Path.Combine(Environment.CurrentDirectory, "temp", "ui-smoke", "homework-editor");
+            cleanupJobDir = GetOption(args, "--cleanup-job-dir") ?? string.Empty;
+            int existingProcessId = ParseIntOption(args, "--process-id");
             string token = "homework-editor-smoke-token";
 
             report.AppPath = appPath;
@@ -39,8 +44,18 @@ internal static partial class HomeworkAppUiSmoke
             syncServer = new FakeHomeworkSyncServer(token);
             await syncServer.StartAsync();
 
-            KillProcessesByPath(appPath);
-            Process process = StartHomeworkApp(appPath);
+            Process process;
+            if (existingProcessId > 0)
+            {
+                process = Process.GetProcessById(existingProcessId);
+            }
+            else
+            {
+                KillProcessesByPath(appPath);
+                process = StartHomeworkApp(appPath);
+                startedProcess = true;
+            }
+
             report.ProcessId = process.Id;
 
             RunSta(() =>
@@ -49,10 +64,7 @@ internal static partial class HomeworkAppUiSmoke
                 report.MainWindowTitle = mainWindow.Current.Name;
                 ContinueIntoEditor(mainWindow, process.Id);
 
-                var toolsButton = WaitForDescendant(process.Id, "BtnTools", TimeSpan.FromSeconds(20));
-                InvokeElement(toolsButton, "BtnTools");
-
-                var zoomText = WaitForDescendant(process.Id, "TxtZoom", TimeSpan.FromSeconds(10));
+                var zoomText = EnsureToolsPanelOpen(process.Id);
                 if (!string.Equals(ReadElementText(zoomText), "100%", StringComparison.Ordinal))
                 {
                     report.FailedChecks.Add($"初始缩放不是 100%，实际是 {ReadElementText(zoomText)}。");
@@ -110,8 +122,7 @@ internal static partial class HomeworkAppUiSmoke
                     report.FailedChecks.Add("重新展开作业助手后，工具按钮消失了。");
                 }
 
-                InvokeElement(WaitForDescendant(process.Id, "BtnMenu", TimeSpan.FromSeconds(5)), "BtnMenu");
-                InvokeElement(WaitForProcessElementByName(process.Id, "同步云端作业", TimeSpan.FromSeconds(5)), "同步云端作业");
+                ClickSyncHomeworkMenuEntry(process.Id);
 
                 WaitForCondition(() => syncServer.HitCount > 0, TimeSpan.FromSeconds(10), "手动同步没有触发本地 StudyGate 同步接口。");
                 IntPtr dialogHandle = WaitForDialogHandle(["作业同步"], TimeSpan.FromSeconds(10));
@@ -129,7 +140,7 @@ internal static partial class HomeworkAppUiSmoke
         }
         finally
         {
-            if (!string.IsNullOrWhiteSpace(report.AppPath))
+            if ((startedProcess || report.ProcessId > 0) && !string.IsNullOrWhiteSpace(report.AppPath))
             {
                 KillProcessesByPath(report.AppPath);
             }
@@ -140,6 +151,22 @@ internal static partial class HomeworkAppUiSmoke
             }
 
             RestoreStudyGateState(stateBackup);
+
+            if (!string.IsNullOrWhiteSpace(cleanupJobDir) && Directory.Exists(cleanupJobDir))
+            {
+                try
+                {
+                    string jobId = Path.GetFileName(cleanupJobDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    if (!string.IsNullOrWhiteSpace(jobId))
+                    {
+                        JobManager.DeleteJob(jobId);
+                    }
+                }
+                catch
+                {
+                    // Ignore smoke cleanup failures.
+                }
+            }
         }
 
         return report;
@@ -152,9 +179,21 @@ internal static partial class HomeworkAppUiSmoke
 
         for (int clickIndex = 0; clickIndex < maxClicks; clickIndex += 1)
         {
-            InvokeElement(WaitForDescendant(processId, buttonAutomationId, TimeSpan.FromSeconds(5)), buttonAutomationId);
+            var button = WaitForVisibleDescendant(processId, buttonAutomationId, TimeSpan.FromSeconds(1));
+            if (button == null)
+            {
+                return lastValue;
+            }
+
+            InvokeElement(button, buttonAutomationId);
             Thread.Sleep(150);
-            string currentValue = ReadElementText(WaitForDescendant(processId, zoomAutomationId, TimeSpan.FromSeconds(5)));
+            var zoomElement = WaitForVisibleDescendant(processId, zoomAutomationId, TimeSpan.FromSeconds(1));
+            if (zoomElement == null)
+            {
+                return lastValue;
+            }
+
+            string currentValue = ReadElementText(zoomElement);
 
             if (string.Equals(currentValue, lastValue, StringComparison.Ordinal))
             {
@@ -172,6 +211,19 @@ internal static partial class HomeworkAppUiSmoke
         }
 
         return lastValue;
+    }
+
+    private static AutomationElement EnsureToolsPanelOpen(int processId)
+    {
+        var zoomText = WaitForVisibleDescendant(processId, "TxtZoom", TimeSpan.FromSeconds(1));
+        if (zoomText != null)
+        {
+            return zoomText;
+        }
+
+        var toolsButton = WaitForDescendant(processId, "BtnTools", TimeSpan.FromSeconds(20));
+        InvokeElement(toolsButton, "BtnTools");
+        return WaitForDescendant(processId, "TxtZoom", TimeSpan.FromSeconds(10));
     }
 
     private static int ParseZoomPercent(string text)
@@ -193,31 +245,6 @@ internal static partial class HomeworkAppUiSmoke
             InvokeElement(continueButton, "BtnContinueHomework");
             _ = WaitForDescendant(processId, "BtnTools", TimeSpan.FromSeconds(20));
         }
-    }
-
-    private static AutomationElement WaitForProcessElementByName(int processId, string name, TimeSpan timeout)
-    {
-        DateTime deadline = DateTime.UtcNow.Add(timeout);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            var match = AutomationElement.RootElement.FindAll(
-                    TreeScope.Descendants,
-                    new AndCondition(
-                        new PropertyCondition(AutomationElement.ProcessIdProperty, processId),
-                        new PropertyCondition(AutomationElement.NameProperty, name)))
-                .Cast<AutomationElement>()
-                .FirstOrDefault((element) => !element.Current.IsOffscreen);
-
-            if (match != null)
-            {
-                return match;
-            }
-
-            Thread.Sleep(200);
-        }
-
-        throw new TimeoutException($"未找到名称为 {name} 的控件。");
     }
 
     private static AutomationElement? WaitForVisibleDescendant(int processId, string automationId, TimeSpan timeout)
@@ -301,6 +328,79 @@ internal static partial class HomeworkAppUiSmoke
         }
 
         throw new TimeoutException(timeoutMessage);
+    }
+
+    private static void MoveCursorToSafeMenuZone(int processId)
+    {
+        var root = WaitForMainWindow(processId, TimeSpan.FromSeconds(5));
+        var bounds = root.Current.BoundingRectangle;
+        int targetX = Math.Max(0, (int)Math.Round(bounds.Left + 48));
+        int targetY = Math.Max(0, (int)Math.Round(bounds.Top + 64));
+        CursorInterop.SetCursorPos(targetX, targetY);
+        Thread.Sleep(150);
+    }
+
+    private static void ClickSyncHomeworkMenuEntry(int processId)
+    {
+        MoveCursorToSafeMenuZone(processId);
+        var menuButton = WaitForDescendant(processId, "BtnMenu", TimeSpan.FromSeconds(5));
+        InvokeElement(menuButton, "BtnMenu");
+        var syncMenuItem = WaitForMenuItem(processId, "MenuActionsync", "同步云端作业", TimeSpan.FromSeconds(5));
+
+        if (syncMenuItem != null)
+        {
+            InvokeElement(syncMenuItem, "MenuActionSync");
+            return;
+        }
+
+        CursorInterop.keybd_event((byte)CursorInterop.VirtualKeyReturn, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(40);
+        CursorInterop.keybd_event((byte)CursorInterop.VirtualKeyReturn, 0, CursorInterop.KeyEventKeyUp, UIntPtr.Zero);
+    }
+
+    private static AutomationElement? WaitForMenuItem(int processId, string automationId, string displayName, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var root = WaitForMainWindow(processId, TimeSpan.FromSeconds(2));
+            var match = FindMenuItem(root, automationId, displayName);
+            if (match != null && !match.Current.IsOffscreen)
+            {
+                return match;
+            }
+
+            var windows = AutomationElement.RootElement.FindAll(
+                TreeScope.Children,
+                new PropertyCondition(AutomationElement.ProcessIdProperty, processId));
+
+            foreach (AutomationElement window in windows)
+            {
+                match = FindMenuItem(window, automationId, displayName);
+                if (match != null && !match.Current.IsOffscreen)
+                {
+                    return match;
+                }
+            }
+
+            Thread.Sleep(150);
+        }
+
+        return null;
+    }
+
+    private static AutomationElement? FindMenuItem(AutomationElement root, string automationId, string displayName)
+    {
+        var matches = root.FindAll(
+            TreeScope.Descendants,
+            new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem),
+                new OrCondition(
+                    new PropertyCondition(AutomationElement.AutomationIdProperty, automationId),
+                    new PropertyCondition(AutomationElement.NameProperty, displayName))));
+
+        return matches.Cast<AutomationElement>().FirstOrDefault();
     }
 
     private static StudyGateStateBackup BackupStudyGateState()
@@ -459,5 +559,17 @@ internal static partial class HomeworkAppUiSmoke
             context.Response.StatusCode = 404;
             context.Response.Close();
         }
+    }
+
+    private static class CursorInterop
+    {
+        internal const uint KeyEventKeyUp = 0x0002;
+        internal const int VirtualKeyReturn = 0x0D;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern bool SetCursorPos(int x, int y);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
     }
 }

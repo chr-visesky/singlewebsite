@@ -131,6 +131,35 @@ internal static partial class HomeworkAppUiSmoke
         throw new TimeoutException("确认对话框没有出现。");
     }
 
+    private static bool TryDismissDialog(IEnumerable<string> titleHints, IEnumerable<string> buttonTitles, TimeSpan timeout)
+    {
+        try
+        {
+            IntPtr dialogHandle = WaitForDialogHandle(titleHints, timeout);
+            if (!TryClickDialogButton(dialogHandle, buttonTitles))
+            {
+                ClickDialogConfirmFallback(dialogHandle);
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryDismissPrintCompleteDialog()
+    {
+        IntPtr dialogHandle = FindDialogHandle(["打印完成", "Print Complete", "已发送到打印机"]);
+        if (dialogHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        ClickDialogConfirmFallback(dialogHandle);
+        return true;
+    }
+
     private static void SetSaveDialogFileName(IntPtr dialogHandle, string filePath)
     {
         NativeMethods.SetForegroundWindow(dialogHandle);
@@ -176,6 +205,16 @@ internal static partial class HomeworkAppUiSmoke
 
     private static void ClickDialogButton(IntPtr dialogHandle, IEnumerable<string> buttonTitles)
     {
+        if (TryClickDialogButton(dialogHandle, buttonTitles))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"没有找到确认按钮。现有窗口标题: {GetWindowText(dialogHandle)}");
+    }
+
+    private static bool TryClickDialogButton(IntPtr dialogHandle, IEnumerable<string> buttonTitles)
+    {
         string[] titles = buttonTitles.Where((item) => !string.IsNullOrWhiteSpace(item)).ToArray();
         IntPtr buttonHandle = EnumerateChildWindows(dialogHandle)
             .Where((handle) => NativeMethods.IsWindowVisible(handle))
@@ -188,10 +227,45 @@ internal static partial class HomeworkAppUiSmoke
 
         if (buttonHandle == IntPtr.Zero)
         {
-            throw new InvalidOperationException($"没有找到确认按钮。现有窗口标题: {GetWindowText(dialogHandle)}");
+            return false;
         }
 
         _ = NativeMethods.SendMessage(buttonHandle, NativeMethods.BmClick, IntPtr.Zero, IntPtr.Zero);
+        return true;
+    }
+
+    private static void ClickDialogConfirmFallback(IntPtr dialogHandle)
+    {
+        NativeMethods.Rect rect = GetWindowRect(dialogHandle);
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+        int targetX = rect.Left + (int)(width * 0.80);
+        int targetY = rect.Top + (int)(height * 0.80);
+
+        NativeMethods.SetCursorPos(targetX, targetY);
+        NativeMethods.mouse_event(NativeMethods.MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+        NativeMethods.mouse_event(NativeMethods.MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(150);
+        PressEnterOnDialog(dialogHandle);
+    }
+
+    private static IntPtr FindDialogHandle(IEnumerable<string> titleHints)
+    {
+        string[] hints = titleHints.Where((item) => !string.IsNullOrWhiteSpace(item)).ToArray();
+        return EnumerateTopLevelWindows().FirstOrDefault((handle) =>
+        {
+            string title = GetWindowText(handle);
+            return hints.Any((hint) => title.Contains(hint, StringComparison.OrdinalIgnoreCase));
+        });
+    }
+
+    private static void PressEnterOnDialog(IntPtr dialogHandle)
+    {
+        NativeMethods.SetForegroundWindow(dialogHandle);
+        Thread.Sleep(120);
+        NativeMethods.keybd_event((byte)NativeMethods.VirtualKeyReturn, 0, 0, UIntPtr.Zero);
+        Thread.Sleep(40);
+        NativeMethods.keybd_event((byte)NativeMethods.VirtualKeyReturn, 0, NativeMethods.KeyEventKeyUp, UIntPtr.Zero);
     }
 
     private static IEnumerable<IntPtr> EnumerateTopLevelWindows()
@@ -244,6 +318,10 @@ internal static partial class HomeworkAppUiSmoke
     {
         public const uint WmSetText = 0x000C;
         public const uint BmClick = 0x00F5;
+        public const uint MouseEventLeftDown = 0x0002;
+        public const uint MouseEventLeftUp = 0x0004;
+        public const uint KeyEventKeyUp = 0x0002;
+        public const int VirtualKeyReturn = 0x0D;
 
         public delegate bool EnumWindowProc(IntPtr handle, IntPtr lParam);
 
@@ -276,6 +354,15 @@ internal static partial class HomeworkAppUiSmoke
 
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr handle);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetCursorPos(int x, int y);
+
+        [DllImport("user32.dll")]
+        public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+        [DllImport("user32.dll")]
+        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr SendMessage(IntPtr handle, uint message, IntPtr wParam, string lParam);

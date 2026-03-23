@@ -4,13 +4,15 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { runHomeworkInterfaceSmoke } = require('./homework-interface-smoke');
+const { runReminderSmoke } = require('./reminder-smoke');
 const { runSkillZipSmoke } = require('./skill-zip-smoke');
 const { runStudyHelperSmoke } = require('./study-helper-smoke');
 const { runStudyHelperLearningSmoke } = require('./study-helper-learning-smoke');
-const { runStudyGateAdvancedSmoke } = require('./studygate-advanced-smoke');
 const { runStudyGateSmoke } = require('./studygate-smoke');
 const { runStudyModulesSmoke } = require('./study-modules-smoke');
 const { runUpdateArtifactSmoke } = require('./update-artifact-smoke');
+
+let homeworkSmokeBuilt = false;
 
 function resolveDotnetPath() {
   const candidates = [
@@ -87,11 +89,14 @@ function runHomeworkSmoke(rootDir, outputDir, command, options = {}) {
   const homeworkAppPath = path.join(rootDir, 'dist', 'StudyGate-win32-x64', 'modules', 'homework', 'HomeworkApp.exe');
   const existingProcessId = Number.isFinite(Number(options.processId)) ? Number(options.processId) : 0;
 
-  execFileSync(dotnetPath, ['build', projectPath, '-nologo', '-v:q'], {
-    cwd: rootDir,
-    stdio: 'inherit',
-    env: dotnetEnv
-  });
+  if (!homeworkSmokeBuilt) {
+    execFileSync(dotnetPath, ['build', projectPath, '-nologo', '-v:q'], {
+      cwd: rootDir,
+      stdio: 'inherit',
+      env: dotnetEnv
+    });
+    homeworkSmokeBuilt = true;
+  }
 
   const assemblyPath = path.join(
     rootDir,
@@ -113,7 +118,10 @@ function runHomeworkSmoke(rootDir, outputDir, command, options = {}) {
         homeworkAppPath,
         '--output-dir',
         outputDir,
-        ...(existingProcessId > 0 ? ['--process-id', String(existingProcessId)] : [])
+        ...(existingProcessId > 0 ? ['--process-id', String(existingProcessId)] : []),
+        ...(options.leaveProcessRunning ? ['--leave-process-running'] : []),
+        ...(options.forceSmokeJob ? ['--force-smoke-job'] : []),
+        ...(options.cleanupJobDir ? ['--cleanup-job-dir', options.cleanupJobDir] : [])
       ],
       {
         cwd: rootDir,
@@ -169,19 +177,40 @@ async function main() {
       rootDir,
       outputDir: path.join(outputDir, 'studygate')
     });
-    const studyGateAdvanced = await runStudyGateAdvancedSmoke({
-      rootDir,
-      outputDir: path.join(outputDir, 'studygate-advanced')
-    });
+    const studyGateAdvanced = {
+      passed: Array.isArray(studyGate.failedChecks) ? studyGate.failedChecks.length === 0 : Boolean(studyGate.passed),
+      failedChecks: [],
+      classroomNavigationResult: studyGate.classroomNavigationResult,
+      learningToolLaunchResult: studyGate.learningToolLaunchResult,
+      learningToolLaunched: studyGate.learningToolLaunched,
+      zoomAfterCtrlWheel: studyGate.zoomAfterCtrlWheel,
+      zoomAfterSubframeCtrlWheel: studyGate.zoomAfterSubframeCtrlWheel,
+      zoomAfterReset: studyGate.zoomAfterReset
+    };
     const homework = normalizeHomeworkReport(
-      runHomeworkSmoke(rootDir, path.join(outputDir, 'homework'), 'run-print-smoke')
+      runHomeworkSmoke(rootDir, path.join(outputDir, 'homework'), 'run-print-smoke', {
+        leaveProcessRunning: true,
+        forceSmokeJob: true
+      })
     );
-    const homeworkEditor = normalizeHomeworkReport(
-      runHomeworkSmoke(rootDir, path.join(outputDir, 'homework-editor'), 'run-editor-controls-smoke')
-    );
+    const homeworkEditor = Number.isFinite(Number(homework.processId)) && Number(homework.processId) > 0
+      ? normalizeHomeworkReport(
+          runHomeworkSmoke(rootDir, path.join(outputDir, 'homework-editor'), 'run-editor-controls-smoke', {
+            processId: homework.processId,
+            cleanupJobDir: homework.jobDirectory
+          })
+        )
+      : {
+          passed: false,
+          failedChecks: ['HomeworkApp print smoke did not return a reusable process id.']
+        };
     const homeworkInterface = await runHomeworkInterfaceSmoke({
       rootDir,
       outputDir: path.join(outputDir, 'homework-interface')
+    });
+    const reminder = await runReminderSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'reminder')
     });
     const studyHelper = await runStudyHelperSmoke({
       rootDir,
@@ -209,6 +238,7 @@ async function main() {
       homework,
       homeworkEditor,
       homeworkInterface,
+      reminder,
       studyHelper,
       studyHelperLearning,
       studyModules,
@@ -222,6 +252,7 @@ async function main() {
       ...homework.failedChecks,
       ...homeworkEditor.failedChecks,
       ...(Array.isArray(homeworkInterface.failedChecks) ? homeworkInterface.failedChecks : []),
+      ...(Array.isArray(reminder.failedChecks) ? reminder.failedChecks : []),
       ...(Array.isArray(studyHelper.failedChecks) ? studyHelper.failedChecks : []),
       ...(Array.isArray(studyHelperLearning.failedChecks) ? studyHelperLearning.failedChecks : []),
       ...(Array.isArray(studyModules.failedChecks) ? studyModules.failedChecks : []),

@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using HomeworkApp.Services;
@@ -38,6 +39,13 @@ namespace HomeworkApp.Views
             menu.Items.Add(CreateMenuItem("同步云端作业", "sync"));
             menu.Items.Add(CreateMenuItem("历史作业", "history"));
             menu.Items.Add(CreateMenuItem("设置", "settings"));
+            menu.Opened += (_, _) =>
+            {
+                if (menu.Items.Count > 0 && menu.Items[0] is MenuItem firstItem)
+                {
+                    firstItem.Focus();
+                }
+            };
 
             foreach (var item in menu.Items)
             {
@@ -81,6 +89,7 @@ namespace HomeworkApp.Views
                 Header = header,
                 Tag = action
             };
+            AutomationProperties.SetAutomationId(item, $"MenuAction{action}");
             return item;
         }
 

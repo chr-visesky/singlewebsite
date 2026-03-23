@@ -13,6 +13,7 @@ function createReminderPollingRuntime(dependencies = {}) {
     normalizeReminderMarks,
     upsertScheduleMark,
     reminderRuntime,
+    selectReminderTrigger,
     defaultLeadMinutes,
     triggerGraceMs,
     checkAlignmentFuzzMs
@@ -61,26 +62,36 @@ function createReminderPollingRuntime(dependencies = {}) {
     }
   }
 
-  function createBaseReminderPayload(schedule, leadMinutes) {
-    const offsetLabel = leadMinutes > 0 ? `提前${leadMinutes}分钟` : '到点提醒';
-    const speechText = reminderRuntime.buildReminderSpeechText(schedule, leadMinutes);
+  function createBaseReminderPayload(schedule, trigger) {
+    const configuredLeadMinutes = Number(trigger && trigger.configuredLeadMinute);
+    const spokenLeadMinutes = Number(trigger && trigger.spokenLeadMinute);
+    const effectiveLeadMinutes = Number.isFinite(spokenLeadMinutes) ? spokenLeadMinutes : configuredLeadMinutes;
+    const offsetLabel = effectiveLeadMinutes > 0 ? `还剩${effectiveLeadMinutes}分钟` : '到点提醒';
+    const speechText = reminderRuntime.buildReminderSpeechText(schedule, effectiveLeadMinutes);
     return {
       id: schedule.id,
       time: `${offsetLabel} · ${schedule.time}`,
       title: schedule.title,
       message: speechText,
       speechText,
-      leadMinutes,
+      leadMinutes: configuredLeadMinutes,
+      spokenLeadMinutes: effectiveLeadMinutes,
+      reminderMode: trigger && trigger.mode ? trigger.mode : 'due',
       audioPath: ''
     };
   }
 
-  async function pushReminderToWindow(schedule, leadMinutes) {
-    const payload = createBaseReminderPayload(schedule, leadMinutes);
+  async function pushReminderToWindow(schedule, trigger) {
+    const configuredLeadMinutes = Number(trigger && trigger.configuredLeadMinute);
+    const spokenLeadMinutes = Number(trigger && trigger.spokenLeadMinute);
+    const effectiveLeadMinutes = Number.isFinite(spokenLeadMinutes) ? spokenLeadMinutes : configuredLeadMinutes;
+    const payload = createBaseReminderPayload(schedule, trigger);
     logReminderDebug('reminder-dispatch-start', {
       scheduleId: schedule.id,
       title: schedule.title,
-      leadMinutes,
+      leadMinutes: configuredLeadMinutes,
+      spokenLeadMinutes: effectiveLeadMinutes,
+      reminderMode: trigger && trigger.mode ? trigger.mode : 'due',
       time: schedule.time
     });
 
@@ -124,7 +135,7 @@ function createReminderPollingRuntime(dependencies = {}) {
     let audioSequence = [];
 
     try {
-      audioSequence = await reminderRuntime.buildReminderAudioSequence(schedule, leadMinutes);
+      audioSequence = await reminderRuntime.buildReminderAudioSequence(schedule, effectiveLeadMinutes);
     } catch (error) {
       logReminderDebug('audio-sequence-build-uncaught', {
         scheduleId: schedule.id,
@@ -146,7 +157,9 @@ function createReminderPollingRuntime(dependencies = {}) {
     logReminderDebug('reminder-dispatch-complete', {
       scheduleId: schedule.id,
       title: schedule.title,
-      leadMinutes,
+      leadMinutes: configuredLeadMinutes,
+      spokenLeadMinutes: effectiveLeadMinutes,
+      reminderMode: trigger && trigger.mode ? trigger.mode : 'due',
       time: schedule.time,
       notificationShown,
       popupShown,
@@ -207,56 +220,63 @@ function createReminderPollingRuntime(dependencies = {}) {
 
         const reminderMarks = typeof normalizeReminderMarks === 'function' ? normalizeReminderMarks(mark) : {};
 
-        for (const leadMinute of leadMinutes) {
-          const reminderKey = String(leadMinute);
+        const trigger =
+          typeof selectReminderTrigger === 'function'
+            ? selectReminderTrigger({
+                now,
+                scheduleStartTime,
+                leadMinutes,
+                reminderMarks,
+                graceMs: triggerGraceMs
+              })
+            : null;
 
-          if (reminderMarks[reminderKey]) {
-            continue;
-          }
+        if (!trigger) {
+          continue;
+        }
 
-          const reminderTime = new Date(scheduleStartTime.getTime() - leadMinute * 60 * 1000);
+        const reminderKey = String(trigger.configuredLeadMinute);
 
-          if (!reminderRuntime.reminderIsDue(now, reminderTime, triggerGraceMs)) {
-            continue;
-          }
+        logReminderDebug('check-due', {
+          scheduleId: schedule.id,
+          title: schedule.title,
+          leadMinute: trigger.configuredLeadMinute,
+          spokenLeadMinutes: trigger.spokenLeadMinute,
+          reminderMode: trigger.mode,
+          scheduleTime: schedule.time,
+          reminderTime: trigger.reminderTime.toISOString(),
+          now: now.toISOString()
+        });
 
-          logReminderDebug('check-due', {
+        const delivered = await pushReminderToWindow(schedule, trigger);
+
+        if (!delivered) {
+          logReminderDebug('check-delivery-failed', {
             scheduleId: schedule.id,
             title: schedule.title,
-            leadMinute,
-            scheduleTime: schedule.time,
-            reminderTime: reminderTime.toISOString(),
-            now: now.toISOString()
+            leadMinute: trigger.configuredLeadMinute,
+            spokenLeadMinutes: trigger.spokenLeadMinute,
+            reminderMode: trigger.mode,
+            scheduleTime: schedule.time
           });
-
-          const delivered = await pushReminderToWindow(schedule, leadMinute);
-
-          if (!delivered) {
-            logReminderDebug('check-delivery-failed', {
-              scheduleId: schedule.id,
-              title: schedule.title,
-              leadMinute,
-              scheduleTime: schedule.time
-            });
-            continue;
-          }
-
-          if (typeof upsertScheduleMark === 'function') {
-            upsertScheduleMark(
-              schedule,
-              {
-                remindedAt: now.toISOString(),
-                reminderMarks: {
-                  ...reminderMarks,
-                  [reminderKey]: now.toISOString()
-                }
-              },
-              now
-            );
-          }
-
-          return;
+          continue;
         }
+
+        if (typeof upsertScheduleMark === 'function') {
+          upsertScheduleMark(
+            schedule,
+            {
+              remindedAt: now.toISOString(),
+              reminderMarks: {
+                ...reminderMarks,
+                [reminderKey]: now.toISOString()
+              }
+            },
+            now
+          );
+        }
+
+        return;
       }
 
       logReminderDebug('check-no-trigger', {

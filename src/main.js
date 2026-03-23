@@ -103,76 +103,30 @@ const {
   serializeOnlineClassrooms,
   shortcutMatches
 } = require('./study-runtime');
-const {
-  createBannerAssetLoader,
-  createStatePathHelpers
-} = require('./runtime-paths');
-const {
-  createAppIconRuntime
-} = require('./app-icon-runtime');
-const {
-  normalizeAutoUpdateConfig
-} = require('./auto-update-config');
-const {
-  createConfigRuntime
-} = require('./config-runtime');
-const {
-  createStudyScheduleRuntime
-} = require('./schedule-runtime');
-const {
-  registerShellIpc
-} = require('./ipc-runtime');
-const {
-  createReminderPollingRuntime
-} = require('./reminder-polling-runtime');
-const {
-  createReminderRuntime
-} = require('./reminder-runtime');
-const {
-  createNavigationRuntime
-} = require('./navigation-runtime');
-const {
-  createNetdiskRuntime
-} = require('./netdisk-runtime');
-const {
-  createStorageRuntime
-} = require('./storage-runtime');
-const {
-  createStudyDataRuntime
-} = require('./study-data-runtime');
-const {
-  createExitRuntime
-} = require('./exit-runtime');
-const {
-  createAppShellRuntime
-} = require('./app-shell-runtime');
-const {
-  createInternalServiceRuntime
-} = require('./internal-service-runtime');
-const {
-  createSecurityRuntime
-} = require('./security-runtime');
-const {
-  createSessionGuardRuntime
-} = require('./session-guard-runtime');
-const {
-  createStartupDebugRuntime
-} = require('./startup-debug-runtime');
-const {
-  createStudyTargetRuntime
-} = require('./study-target-runtime');
-const {
-  createAutoUpdateRuntime
-} = require('./auto-update-runtime');
-const {
-  createDictationAgentRuntime
-} = require('./dictation-agent-runtime');
-const {
-  createDictationRemoteRuntime
-} = require('./dictation-remote-runtime');
-const {
-  createHomeworkAgentRuntime
-} = require('./homework-agent-runtime');
+const { createBannerAssetLoader, createStatePathHelpers } = require('./runtime-paths');
+const { createAppIconRuntime } = require('./app-icon-runtime');
+const { normalizeAutoUpdateConfig } = require('./auto-update-config');
+const { createConfigRuntime } = require('./config-runtime');
+const { createStudyScheduleRuntime } = require('./schedule-runtime');
+const { registerShellIpc } = require('./ipc-runtime');
+const { createReminderPollingRuntime } = require('./reminder-polling-runtime');
+const { createReminderRuntime } = require('./reminder-runtime');
+const { selectReminderTrigger } = require('./reminder-trigger-runtime');
+const { createNavigationRuntime } = require('./navigation-runtime');
+const { createNetdiskRuntime } = require('./netdisk-runtime');
+const { createStorageRuntime } = require('./storage-runtime');
+const { createStudyDataRuntime } = require('./study-data-runtime');
+const { createExitRuntime } = require('./exit-runtime');
+const { createAppShellRuntime } = require('./app-shell-runtime');
+const { createInternalServiceRuntime } = require('./internal-service-runtime');
+const { createSecurityRuntime } = require('./security-runtime');
+const { createSessionGuardRuntime } = require('./session-guard-runtime');
+const { createStartupDebugRuntime } = require('./startup-debug-runtime');
+const { createStudyTargetRuntime } = require('./study-target-runtime');
+const { createAutoUpdateRuntime } = require('./auto-update-runtime');
+const { createDictationAgentRuntime } = require('./dictation-agent-runtime');
+const { createDictationRemoteRuntime } = require('./dictation-remote-runtime');
+const { createHomeworkAgentRuntime } = require('./homework-agent-runtime');
 const {
   createHomeworkRemoteRuntime
 } = require('./homework-remote-runtime');
@@ -667,6 +621,7 @@ const reminderPollingRuntime = createReminderPollingRuntime({
   normalizeReminderMarks: (mark) => normalizeReminderMarks(mark),
   upsertScheduleMark: (schedule, updates, date) => upsertScheduleMark(schedule, updates, date),
   reminderRuntime,
+  selectReminderTrigger,
   defaultLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
   triggerGraceMs: REMINDER_TRIGGER_GRACE_MS,
   checkAlignmentFuzzMs: REMINDER_CHECK_ALIGNMENT_FUZZ_MS
