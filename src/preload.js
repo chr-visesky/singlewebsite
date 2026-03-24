@@ -1,9 +1,6 @@
 'use strict';
 const { contextBridge, ipcRenderer } = require('electron');
-const TOOLBAR_HEIGHT = 62;
-const TOOLBAR_HOST_ID = 'studygate-nav-host';
-const REMINDER_HOST_ID = 'studygate-reminder-host';
-const TOOLBAR_TOP_OFFSET_ATTR = 'data-studygate-original-top';
+const TOOLBAR_HEIGHT = 62, TOOLBAR_HOST_ID = 'studygate-nav-host', REMINDER_HOST_ID = 'studygate-reminder-host', TOOLBAR_TOP_OFFSET_ATTR = 'data-studygate-original-top';
 let refreshTimer = null;
 let reminderHideTimer = null;
 let reminderAudio = null;
@@ -235,13 +232,8 @@ function getToolbarShadowRoot() {
 }
 function createUpdateDialogRuntime() {
   let pollTimer = null;
-  function clearPollTimer() {
-    if (pollTimer) {
-      window.clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-  }
-  function normalizeSnapshot(rawSnapshot = {}) {
+  let subscribed = false;
+  const normalizeSnapshot = (rawSnapshot = {}) => {
     const snapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : {};
     return {
       currentVersion: typeof snapshot.currentVersion === 'string' ? snapshot.currentVersion : '',
@@ -250,9 +242,37 @@ function createUpdateDialogRuntime() {
       enabled: snapshot.enabled !== false,
       state: typeof snapshot.state === 'string' ? snapshot.state : 'idle',
       percent: Number(snapshot.percent) || 0,
-      message: typeof snapshot.message === 'string' ? snapshot.message : ''
+      message: typeof snapshot.message === 'string' ? snapshot.message : '',
+      transferredBytes: Number(snapshot.transferredBytes) || 0,
+      totalBytes: Number(snapshot.totalBytes) || 0,
+      bytesPerSecond: Number(snapshot.bytesPerSecond) || 0
     };
-  }
+  };
+  const formatBytes = (value) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return '';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let amount = numericValue;
+    let unitIndex = 0;
+    while (amount >= 1024 && unitIndex < units.length - 1) {
+      amount /= 1024;
+      unitIndex += 1;
+    }
+    const digits = amount >= 100 || unitIndex === 0 ? 0 : amount >= 10 ? 1 : 2;
+    return `${amount.toFixed(digits)} ${units[unitIndex]}`;
+  };
+  const formatSpeed = (value) => {
+    const formatted = formatBytes(value);
+    return formatted ? `${formatted}/s` : '';
+  };
+  const clearPollTimer = () => {
+    if (pollTimer) {
+      window.clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  };
   function ensureDialog() {
     const shadowRoot = getToolbarShadowRoot();
     if (!shadowRoot) {
@@ -266,10 +286,7 @@ function createUpdateDialogRuntime() {
       overlay.innerHTML = `
         <section class="update-dialog">
           <header class="update-dialog__header">
-            <div>
-              <p class="update-dialog__eyebrow">客户端更新</p>
-              <h2 class="update-dialog__title">检查更新</h2>
-            </div>
+            <div><p class="update-dialog__eyebrow">客户端更新</p><h2 class="update-dialog__title">检查更新</h2></div>
             <button type="button" class="update-dialog__close" data-role="close" aria-label="关闭">×</button>
           </header>
           <div class="update-dialog__versions">
@@ -277,6 +294,8 @@ function createUpdateDialogRuntime() {
             <div class="update-dialog__version-row"><span>最新版本</span><strong data-role="latest-version">-</strong></div>
           </div>
           <p class="update-dialog__status" data-role="status-text"></p>
+          <div class="update-dialog__progress" data-role="progress-track" hidden><div class="update-dialog__progress-bar" data-role="progress-bar"></div></div>
+          <p class="update-dialog__progress-note" data-role="progress-note" hidden></p>
           <div class="update-dialog__actions">
             <button type="button" class="update-dialog__button update-dialog__button--secondary" data-role="dismiss">关闭</button>
             <button type="button" class="update-dialog__button update-dialog__button--primary" data-role="primary" hidden></button>
@@ -297,8 +316,38 @@ function createUpdateDialogRuntime() {
       currentVersionNode: overlay.querySelector('[data-role="current-version"]'),
       latestVersionNode: overlay.querySelector('[data-role="latest-version"]'),
       statusNode: overlay.querySelector('[data-role="status-text"]'),
+      progressTrack: overlay.querySelector('[data-role="progress-track"]'),
+      progressBar: overlay.querySelector('[data-role="progress-bar"]'),
+      progressNote: overlay.querySelector('[data-role="progress-note"]'),
       primaryButton: overlay.querySelector('[data-role="primary"]')
     };
+  }
+  function updateProgress(elements, snapshot) {
+    const showProgress = snapshot.state === 'downloading' || snapshot.state === 'installing';
+    elements.progressTrack.hidden = !showProgress;
+    elements.progressNote.hidden = !showProgress;
+    if (!showProgress) {
+      elements.progressBar.style.width = '0%';
+      elements.progressNote.textContent = '';
+      return;
+    }
+    const safePercent = Math.max(0, Math.min(100, Number(snapshot.percent) || 0));
+    elements.progressBar.style.width = `${safePercent}%`;
+    if (snapshot.state === 'installing') {
+      elements.progressNote.textContent = '正在准备安装，客户端即将退出并启动安装程序。';
+      return;
+    }
+    const details = [];
+    const transferred = formatBytes(snapshot.transferredBytes);
+    const total = formatBytes(snapshot.totalBytes);
+    const speed = formatSpeed(snapshot.bytesPerSecond);
+    if (transferred && total) {
+      details.push(`${transferred} / ${total}`);
+    }
+    if (speed) {
+      details.push(speed);
+    }
+    elements.progressNote.textContent = details.join(' · ') || `${Math.round(safePercent)}%`;
   }
   function renderSnapshot(snapshot) {
     const elements = ensureDialog();
@@ -316,22 +365,27 @@ function createUpdateDialogRuntime() {
       primaryLabel = '检查中';
       primaryDisabled = true;
     } else if (snapshot.state === 'downloading') {
-      statusText = snapshot.percent > 0
-        ? `正在下载更新… ${Math.round(snapshot.percent)}%`
-        : '正在下载更新…';
+      statusText = snapshot.percent > 0 ? `正在下载更新… ${Math.round(snapshot.percent)}%` : '正在下载更新…';
       primaryLabel = '下载中';
       primaryDisabled = true;
     } else if (snapshot.state === 'downloaded' && snapshot.hasUpdate) {
       statusText = '更新已经下载完成。点击“立即升级”会退出客户端并安装新版本。';
       primaryLabel = '立即升级';
-      primaryAction = () => ipcRenderer.invoke('shell:install-downloaded-update');
+      primaryAction = async () => {
+        renderSnapshot({ ...snapshot, state: 'installing', percent: 100 });
+        await ipcRenderer.invoke('shell:install-downloaded-update');
+      };
     } else if (snapshot.state === 'available' && snapshot.hasUpdate) {
       statusText = '检测到新版本。点击“升级”开始下载，下载完成后退出客户端会自动安装。';
       primaryLabel = '升级';
       primaryAction = async () => {
+        renderSnapshot({ ...snapshot, state: 'downloading', percent: snapshot.percent || 0 });
         await ipcRenderer.invoke('shell:download-available-update');
-        await refreshSnapshot();
       };
+    } else if (snapshot.state === 'installing') {
+      statusText = '正在准备安装，客户端即将退出。';
+      primaryLabel = '安装中';
+      primaryDisabled = true;
     } else if (snapshot.state === 'error') {
       statusText = snapshot.message || '检查更新失败。';
     }
@@ -342,6 +396,7 @@ function createUpdateDialogRuntime() {
     elements.primaryButton.disabled = primaryDisabled;
     elements.primaryButton.textContent = primaryLabel;
     elements.primaryButton.onclick = primaryAction;
+    updateProgress(elements, snapshot);
   }
   async function fetchSnapshot() {
     return normalizeSnapshot(await ipcRenderer.invoke('shell:get-auto-update-status'));
@@ -350,10 +405,10 @@ function createUpdateDialogRuntime() {
     const snapshot = await fetchSnapshot();
     renderSnapshot(snapshot);
     clearPollTimer();
-    if (snapshot.state === 'checking' || snapshot.state === 'downloading') {
+    if (snapshot.state === 'checking') {
       pollTimer = window.setTimeout(() => {
         void refreshSnapshot();
-      }, 1000);
+      }, 800);
     }
     return snapshot;
   }
@@ -365,35 +420,36 @@ function createUpdateDialogRuntime() {
     clearPollTimer();
     elements.overlay.setAttribute('data-visible', 'false');
   }
+  function ensureSubscription() {
+    if (subscribed) {
+      return;
+    }
+    subscribed = true;
+    ipcRenderer.on('shell:auto-update-status', (_event, payload = {}) => {
+      const elements = ensureDialog();
+      if (!elements || elements.overlay.getAttribute('data-visible') !== 'true') {
+        return;
+      }
+      clearPollTimer();
+      renderSnapshot(normalizeSnapshot(payload));
+    });
+  }
   async function openDialog() {
+    ensureSubscription();
     const elements = ensureDialog();
     if (!elements) {
       return;
     }
     elements.overlay.setAttribute('data-visible', 'true');
-    renderSnapshot({
-      currentVersion: '',
-      latestVersion: '',
-      hasUpdate: false,
-      enabled: true,
-      state: 'checking',
-      percent: 0,
-      message: ''
-    });
+    renderSnapshot({ currentVersion: '', latestVersion: '', hasUpdate: false, enabled: true, state: 'checking', percent: 0, message: '' });
     const initialSnapshot = await fetchSnapshot();
-    if (['available', 'downloaded', 'downloading'].includes(initialSnapshot.state)) {
-      renderSnapshot(initialSnapshot);
-      if (initialSnapshot.state === 'downloading') {
-        await refreshSnapshot();
-      }
-      return;
+    renderSnapshot(initialSnapshot);
+    if (!['available', 'downloaded', 'downloading', 'installing'].includes(initialSnapshot.state)) {
+      renderSnapshot(normalizeSnapshot(await ipcRenderer.invoke('shell:check-for-updates')));
     }
-    renderSnapshot(normalizeSnapshot(await ipcRenderer.invoke('shell:check-for-updates')));
     await refreshSnapshot();
   }
-  return {
-    openDialog
-  };
+  return { openDialog };
 }
 async function dispatchToolbarAction(actionId) {
   if (actionId === 'check-update') {

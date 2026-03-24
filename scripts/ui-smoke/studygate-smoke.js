@@ -280,7 +280,9 @@ async function openUpdateDialogAndSummarize(page) {
       currentVersion: String(overlay.querySelector('[data-role="current-version"]')?.textContent || '').trim(),
       latestVersion: String(overlay.querySelector('[data-role="latest-version"]')?.textContent || '').trim(),
       statusText: String(overlay.querySelector('[data-role="status-text"]')?.textContent || '').trim(),
-      hasPrimaryButton: Boolean(overlay.querySelector('[data-role="primary"]:not([hidden])'))
+      hasPrimaryButton: Boolean(overlay.querySelector('[data-role="primary"]:not([hidden])')),
+      hasProgressTrack: Boolean(overlay.querySelector('[data-role="progress-track"]')),
+      hasProgressNote: Boolean(overlay.querySelector('[data-role="progress-note"]'))
     };
   });
 
@@ -740,6 +742,10 @@ async function runStudyGateSmoke(options = {}) {
 
       if (!report.updateDialog.latestVersion) {
         report.failedChecks.push('检查更新弹框没有显示最新版本。');
+      }
+
+      if (!report.updateDialog.hasProgressTrack || !report.updateDialog.hasProgressNote) {
+        report.failedChecks.push('检查更新弹框缺少下载进度展示区域。');
       }
     }
 

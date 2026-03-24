@@ -5,6 +5,7 @@ function createAutoUpdateRuntime(options = {}) {
     Notification,
     app,
     autoUpdater,
+    emitStatusChanged,
     fs,
     getAppConfig,
     logNavigationDebug,
@@ -15,11 +16,16 @@ function createAutoUpdateRuntime(options = {}) {
   let initialized = false;
   let intervalHandle = null;
   let checkPromise = null;
+  let downloadPromise = null;
   let activeCheckReason = 'auto';
   let lastStatus = {
     state: 'idle',
     currentVersion: app.getVersion(),
     availableVersion: '',
+    bytesPerSecond: 0,
+    percent: 0,
+    totalBytes: 0,
+    transferredBytes: 0,
     updatedAt: ''
   };
 
@@ -86,6 +92,13 @@ function createAutoUpdateRuntime(options = {}) {
       updatedAt: new Date().toISOString()
     };
     logUpdater(state, details);
+    try {
+      if (typeof emitStatusChanged === 'function') {
+        emitStatusChanged({ ...lastStatus });
+      }
+    } catch {
+      // Ignore renderer notification failures.
+    }
   }
 
   function currentConfig() {
@@ -125,6 +138,7 @@ function createAutoUpdateRuntime(options = {}) {
   }
 
   async function checkForUpdates(options = {}) {
+    registerHandlers();
     const autoUpdateConfig = currentConfig();
     const reason = normalizePrefix(options.reason) || 'auto';
     const autoDownload = options.autoDownload !== false;
@@ -155,6 +169,8 @@ function createAutoUpdateRuntime(options = {}) {
       updateStatus('checking', {
         feedUrl: autoUpdateConfig.url,
         channel: autoUpdateConfig.channel || 'latest',
+        message: '',
+        percent: 0,
         reason
       });
 
@@ -186,12 +202,15 @@ function createAutoUpdateRuntime(options = {}) {
     const autoUpdateConfig = currentConfig();
 
     return {
+      bytesPerSecond: Number(lastStatus.bytesPerSecond) || 0,
       currentVersion,
       latestVersion: normalizePrefix(lastStatus.availableVersion),
       hasUpdate: hasNewerAvailableVersion(lastStatus.availableVersion),
       enabled: updaterEnabled(autoUpdateConfig),
       state: lastStatus.state,
       percent: Number(lastStatus.percent) || 0,
+      totalBytes: Number(lastStatus.totalBytes) || 0,
+      transferredBytes: Number(lastStatus.transferredBytes) || 0,
       message: normalizePrefix(lastStatus.message)
     };
   }
@@ -223,16 +242,38 @@ function createAutoUpdateRuntime(options = {}) {
       };
     }
 
+    if (downloadPromise) {
+      return {
+        started: false,
+        state: lastStatus.state,
+        currentVersion: getCurrentVersion(),
+        latestVersion: availableVersion,
+        hasUpdate: true
+      };
+    }
+
     configureUpdater(true);
     updateStatus('downloading', {
       availableVersion,
-      percent: Number(lastStatus.percent) || 0
+      bytesPerSecond: 0,
+      percent: Number(lastStatus.percent) || 0,
+      totalBytes: Number(lastStatus.totalBytes) || 0,
+      transferredBytes: Number(lastStatus.transferredBytes) || 0
     });
-    await autoUpdater.downloadUpdate();
+    downloadPromise = autoUpdater.downloadUpdate()
+      .catch((error) => {
+        updateStatus('error', {
+          message: error && error.message ? error.message : String(error)
+        });
+        throw error;
+      })
+      .finally(() => {
+        downloadPromise = null;
+      });
 
     return {
       started: true,
-      state: lastStatus.state,
+      state: 'downloading',
       currentVersion: getCurrentVersion(),
       latestVersion: availableVersion,
       hasUpdate: true
@@ -240,6 +281,12 @@ function createAutoUpdateRuntime(options = {}) {
   }
 
   function installDownloadedUpdate() {
+    registerHandlers();
+    updateStatus('installing', {
+      availableVersion: lastStatus.availableVersion,
+      message: '',
+      percent: 100
+    });
     autoUpdater.quitAndInstall(false, true);
   }
 
@@ -251,13 +298,18 @@ function createAutoUpdateRuntime(options = {}) {
     initialized = true;
 
     autoUpdater.on('checking-for-update', () => {
-      updateStatus('checking');
+      updateStatus('checking', {
+        message: '',
+        percent: 0
+      });
     });
 
     autoUpdater.on('update-available', (info = {}) => {
       const version = normalizePrefix(info.version);
       updateStatus('available', {
-        availableVersion: version
+        availableVersion: version,
+        message: '',
+        percent: 0
       });
 
       if (activeCheckReason !== 'manual' && autoUpdater.autoDownload !== false) {
@@ -267,21 +319,35 @@ function createAutoUpdateRuntime(options = {}) {
 
     autoUpdater.on('update-not-available', () => {
       updateStatus('idle', {
-        availableVersion: ''
+        availableVersion: '',
+        bytesPerSecond: 0,
+        message: '',
+        percent: 0,
+        totalBytes: 0,
+        transferredBytes: 0
       });
     });
 
     autoUpdater.on('download-progress', (progress = {}) => {
       updateStatus('downloading', {
         availableVersion: lastStatus.availableVersion,
-        percent: Number(progress.percent) || 0
+        bytesPerSecond: Number(progress.bytesPerSecond) || 0,
+        message: '',
+        percent: Number(progress.percent) || 0,
+        totalBytes: Number(progress.total) || 0,
+        transferredBytes: Number(progress.transferred) || 0
       });
     });
 
     autoUpdater.on('update-downloaded', (info = {}) => {
       const version = normalizePrefix(info.version);
       updateStatus('downloaded', {
-        availableVersion: version
+        availableVersion: version,
+        bytesPerSecond: 0,
+        message: '',
+        percent: 100,
+        totalBytes: Number(lastStatus.totalBytes) || 0,
+        transferredBytes: Number(lastStatus.totalBytes || lastStatus.transferredBytes) || 0
       });
       notify('StudyGate 更新已就绪', `版本 ${version || '最新版本'} 已下载，将在下次退出时自动安装。`);
     });

@@ -11,6 +11,7 @@ const { runStudyHelperLearningSmoke } = require('./study-helper-learning-smoke')
 const { runStudyGateSmoke } = require('./studygate-smoke');
 const { runStudyModulesSmoke } = require('./study-modules-smoke');
 const { runUpdateArtifactSmoke } = require('./update-artifact-smoke');
+const { runUpdateRuntimeSmoke } = require('./update-runtime-smoke');
 
 let homeworkSmokeBuilt = false;
 
@@ -231,6 +232,10 @@ async function main() {
     const updateArtifacts = await runUpdateArtifactSmoke({
       rootDir
     });
+    const updateRuntime = await runUpdateRuntimeSmoke({
+      rootDir,
+      outputDir: path.join(outputDir, 'update-runtime')
+    });
     const report = {
       generatedAt: new Date().toISOString(),
       studyGate,
@@ -243,7 +248,8 @@ async function main() {
       studyHelperLearning,
       studyModules,
       skillZip,
-      updateArtifacts
+      updateArtifacts,
+      updateRuntime
     };
 
     report.failedChecks = [
@@ -257,7 +263,8 @@ async function main() {
       ...(Array.isArray(studyHelperLearning.failedChecks) ? studyHelperLearning.failedChecks : []),
       ...(Array.isArray(studyModules.failedChecks) ? studyModules.failedChecks : []),
       ...(Array.isArray(skillZip.failedChecks) ? skillZip.failedChecks : []),
-      ...(Array.isArray(updateArtifacts.failedChecks) ? updateArtifacts.failedChecks : [])
+      ...(Array.isArray(updateArtifacts.failedChecks) ? updateArtifacts.failedChecks : []),
+      ...(Array.isArray(updateRuntime.failedChecks) ? updateRuntime.failedChecks : [])
     ];
     report.passed = report.failedChecks.length === 0;
 

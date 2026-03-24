@@ -670,6 +670,11 @@ const autoUpdateRuntime = createAutoUpdateRuntime({
   Notification,
   app,
   autoUpdater,
+  emitStatusChanged: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('shell:auto-update-status', status);
+    }
+  },
   fs,
   getAppConfig: () => appConfig,
   logNavigationDebug,

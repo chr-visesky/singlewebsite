@@ -138,3 +138,25 @@ This file records regressions that were introduced during development and then f
   给作业助手菜单项补了明确的 `AutomationId`，菜单打开时主动把焦点放到第一项；smoke 则改成先把鼠标移到安全区域，再直接按 `AutomationId/Name` 查找并点击“同步云端作业”菜单项，不再靠回车猜第一项。
 - Avoid:
   对弹出式菜单、上下文菜单、悬浮菜单的自动化，不要依赖“当前默认焦点大概率在第一项”这种假设。必须给关键菜单项稳定标识，并让 smoke 直接定位目标项；同时在菜单弹出前把鼠标移出会触发悬浮控件的区域。
+
+## Manual update flow looked dead because the dialog did not receive live download/install state
+
+- How it appeared:
+  点击“检查更新”后，即使检测到新版本，弹框里也看不到下载进度，点“升级”后几乎没有反馈；安装阶段也没有任何显式状态，用户会误以为按钮没反应。
+- Root cause:
+  更新弹框只在打开时拉一次快照。手动下载时前端还在等待 `downloadUpdate()` 整个 Promise 完成，下载中的状态和进度没有持续推送到 renderer；安装前也没有单独的 `installing` 状态。
+- Fix:
+  给自动升级 runtime 补了状态广播，下载阶段改成立即返回并依靠事件持续推送 `checking / available / downloading / downloaded / installing`；弹框新增进度条、速度/传输量说明和安装准备状态。
+- Avoid:
+  任何需要等待长任务的桌面交互都不能只靠“打开时抓一帧快照”。只要任务会经历多个阶段，就必须有明确状态机和持续状态推送，并为用户展示实时进度。
+
+## Extracting update-dialog preload code reintroduced the home-page preload regression
+
+- How it appeared:
+  为了把 `src/preload.js` 压回 1000 行以内，我把更新弹框逻辑拆到新的 `preload-update-dialog-runtime.js` 后，打包版首页再次回到 `本地首页加载失败。`
+- Root cause:
+  这次又把主窗口 preload 变成了相对依赖外部 runtime 的形式，重新触发了同类风险：sandbox preload 在打包环境里没能稳定完成 bootstrap，导致 `window.studyGate` 和共享 toolbar 都没起来。
+- Fix:
+  撤掉新的 preload helper，把更新弹框逻辑收回 `src/preload.js` 本体，同时继续把总代码控制在 1000 行以内；随后用打包版和整套 `npm run test:ui` 重新验证首页和工具栏都正常。
+- Avoid:
+  对主窗口 preload，优先通过压缩和局部整理控制行数，不要轻易再引入新的相对 preload helper。只要涉及主窗口 preload 的拆分，必须把“打包版首页是否仍有 `window.studyGate` 和 toolbar”当成第一优先级回归项。
