@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using DictationApp.Models;
+using Newtonsoft.Json;
 using StudyModules.Shared;
 
 namespace DictationApp.Services;
@@ -11,16 +13,17 @@ public sealed class DictationTaskStore
 {
     private const string AppFolderName = "DictationApp";
     private readonly JsonFileStore<DictationTaskIndex> _store;
+    private readonly string _tasksFilePath;
 
     public DictationTaskStore()
     {
-        _store = new JsonFileStore<DictationTaskIndex>(
-            AppPaths.ResolveDataFile(AppFolderName, "tasks.json"));
+        _tasksFilePath = AppPaths.ResolveDataFile(AppFolderName, "tasks.json");
+        _store = new JsonFileStore<DictationTaskIndex>(_tasksFilePath);
     }
 
     public IReadOnlyList<DictationTask> GetAllTasks()
     {
-        return ReadIndex()
+        return ReadIndexSafely()
             .Tasks
             .OrderByDescending(item => item.TargetDate)
             .ThenBy(item => item.Title, StringComparer.CurrentCulture)
@@ -29,7 +32,7 @@ public sealed class DictationTaskStore
 
     public DictationTask Save(DictationTask task)
     {
-        DictationTaskIndex index = ReadIndex();
+        DictationTaskIndex index = ReadIndexSafely();
         DictationTask normalizedTask = NormalizeTask(task);
         index.Tasks.RemoveAll(item => string.Equals(item.TaskId, normalizedTask.TaskId, StringComparison.OrdinalIgnoreCase));
         index.Tasks.Add(normalizedTask);
@@ -66,6 +69,40 @@ public sealed class DictationTaskStore
         DictationTaskIndex index = _store.Read();
         index.Tasks ??= new List<DictationTask>();
         return index;
+    }
+
+    private DictationTaskIndex ReadIndexSafely()
+    {
+        try
+        {
+            return ReadIndex();
+        }
+        catch (JsonException)
+        {
+            BackupCorruptedTaskFile();
+            return new DictationTaskIndex();
+        }
+    }
+
+    private void BackupCorruptedTaskFile()
+    {
+        if (!File.Exists(_tasksFilePath))
+        {
+            return;
+        }
+
+        string backupPath = Path.Combine(
+            Path.GetDirectoryName(_tasksFilePath) ?? Path.GetTempPath(),
+            $"tasks.corrupted.{DateTime.Now:yyyyMMddHHmmss}.json");
+
+        try
+        {
+            File.Move(_tasksFilePath, backupPath, overwrite: false);
+        }
+        catch (IOException)
+        {
+            // Keep the original file in place if a backup with the same timestamp already exists.
+        }
     }
 
     private static DictationTask NormalizeTask(DictationTask task)

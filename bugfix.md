@@ -204,3 +204,14 @@ This file records regressions that were introduced during development and then f
   撤掉新的 preload helper，把更新弹框逻辑收回 `src/preload.js` 本体，同时继续把总代码控制在 1000 行以内；随后用打包版和整套 `npm run test:ui` 重新验证首页和工具栏都正常。
 - Avoid:
   对主窗口 preload，优先通过压缩和局部整理控制行数，不要轻易再引入新的相对 preload helper。只要涉及主窗口 preload 的拆分，必须把“打包版首页是否仍有 `window.studyGate` 和 toolbar”当成第一优先级回归项。
+
+## Dictation startup could feel frozen and exposed every answer up front
+
+- How it appeared:
+  On lower-performance PCs, opening the dictation module could stall while the main screen rendered a full task preview, and the preview/session flow made it easy for a child to copy the answer instead of attempting the dictation first.
+- Root cause:
+  The main window eagerly rendered every dictation item for the selected task, so long word lists turned startup into a large WPF list render. At the same time, the task session treated answer reveal as the primary action instead of making the learner attempt an answer before checking it.
+- Fix:
+  Changed the main-window preview to a short masked summary instead of the full answer list, added recovery for corrupted `tasks.json`, and redesigned the session flow so the learner types an attempt first and then checks or skips to reveal the answer.
+- Avoid:
+  Do not render full answer sets on a module landing page, especially for low-spec devices. Keep startup previews bounded, treat persisted task data as untrusted input, and make "check after attempt" the default interaction for dictation-style practice.

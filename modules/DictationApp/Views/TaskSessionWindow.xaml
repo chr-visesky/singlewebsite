@@ -4,7 +4,7 @@
         Title="执行听写任务"
         Icon="pack://application:,,,/Assets/module-icon.ico"
         Width="860"
-        Height="620"
+        Height="680"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -32,18 +32,51 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <TextBlock Text="当前答案"
+
+                <TextBlock Text="先播放，再自己写，最后核对答案"
                            FontSize="18"
                            FontWeight="SemiBold" />
-                <TextBlock x:Name="AnswerTextBlock"
+                <TextBlock x:Name="InstructionTextBlock"
                            Grid.Row="1"
-                           Margin="0,24,0,0"
-                           FontSize="38"
-                           FontWeight="SemiBold"
-                           Text="******"
+                           Margin="0,16,0,0"
+                           Foreground="#7A6A5A"
+                           Text="答案默认隐藏，避免直接照抄。" />
+                <TextBox x:Name="AttemptTextBox"
+                         Grid.Row="2"
+                         Margin="0,18,0,0"
+                         MinHeight="110"
+                         Padding="16"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         TextWrapping="Wrap"
+                         TextChanged="AttemptTextBox_OnTextChanged" />
+                <TextBlock x:Name="ResultTextBlock"
+                           Grid.Row="3"
+                           Margin="0,18,0,0"
+                           Foreground="#66584B"
                            TextWrapping="Wrap" />
+                <Border Grid.Row="4"
+                        Margin="0,18,0,0"
+                        Padding="20"
+                        Background="White"
+                        CornerRadius="20">
+                    <StackPanel>
+                        <TextBlock Text="标准答案"
+                                   FontSize="16"
+                                   FontWeight="SemiBold" />
+                        <TextBlock x:Name="AnswerTextBlock"
+                                   Margin="0,18,0,0"
+                                   FontSize="34"
+                                   FontWeight="SemiBold"
+                                   Text="先完成作答，再核对答案"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
 
@@ -51,19 +84,26 @@
                     Margin="0,24,0,0"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
-            <Button MinWidth="130"
+            <Button x:Name="PlayButton"
+                    MinWidth="120"
                     Margin="0,0,12,0"
                     Padding="16,12"
                     Click="PlayButton_OnClick"
                     Content="播放本项" />
+            <Button x:Name="CheckButton"
+                    MinWidth="136"
+                    Margin="0,0,12,0"
+                    Padding="16,12"
+                    Click="CheckButton_OnClick"
+                    Content="核对答案" />
             <Button x:Name="RevealButton"
-                    MinWidth="130"
+                    MinWidth="146"
                     Margin="0,0,12,0"
                     Padding="16,12"
                     Click="RevealButton_OnClick"
-                    Content="查看答案" />
+                    Content="跳过并看答案" />
             <Button x:Name="NextButton"
-                    MinWidth="130"
+                    MinWidth="120"
                     Margin="0,0,12,0"
                     Padding="16,12"
                     Click="NextButton_OnClick"

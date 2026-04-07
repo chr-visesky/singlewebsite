@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -9,6 +10,7 @@ namespace DictationApp;
 
 public partial class MainWindow : Window
 {
+    private const int PreviewItemLimit = 8;
     private readonly DictationTaskStore _taskStore;
     private readonly DictationSpeechService _speechService;
     private List<DictationTask> _tasks = new();
@@ -44,14 +46,14 @@ public partial class MainWindow : Window
             TitleTextBlock.Text = "请选择一个听写任务";
             MetaTextBlock.Text = string.Empty;
             DescriptionTextBlock.Text = "支持手工创建、AI agent 导入和后续云端导入。";
-            PreviewListBox.ItemsSource = System.Array.Empty<string>();
+            PreviewListBox.ItemsSource = Array.Empty<string>();
             return;
         }
 
         TitleTextBlock.Text = task.Title;
-        MetaTextBlock.Text = $"{task.Subject} · {task.Bucket} · {task.TargetDate:yyyy-MM-dd} · {task.Language}";
-        DescriptionTextBlock.Text = $"共 {task.Items.Count} 项。开始后默认隐藏答案，按项播放，手动切到下一项。";
-        PreviewListBox.ItemsSource = task.Items.Select(item => item.DisplayText).ToList();
+        MetaTextBlock.Text = $"{task.Subject} | {task.Bucket} | {task.TargetDate:yyyy-MM-dd} | {task.Language}";
+        DescriptionTextBlock.Text = $"共 {task.Items.Count} 项。首页只显示轻量预览，开始后先自己写，再核对答案。";
+        PreviewListBox.ItemsSource = BuildPreviewItems(task);
     }
 
     private void TaskListBox_OnSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -108,5 +110,43 @@ public partial class MainWindow : Window
     private void CloseButton_OnClick(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private static List<string> BuildPreviewItems(DictationTask task)
+    {
+        List<string> previewItems = task.Items
+            .Take(PreviewItemLimit)
+            .Select((item, index) => BuildPreviewLine(item, task.Language, index + 1))
+            .ToList();
+
+        int remainingCount = Math.Max(0, task.Items.Count - previewItems.Count);
+
+        if (remainingCount > 0)
+        {
+            previewItems.Add($"还有 {remainingCount} 项未展开，进入听写后逐项核对。");
+        }
+
+        if (previewItems.Count == 0)
+        {
+            previewItems.Add("当前任务还没有可执行的听写内容。");
+        }
+
+        return previewItems;
+    }
+
+    private static string BuildPreviewLine(DictationTaskItem item, string language, int index)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Hint))
+        {
+            return $"{index}. 提示：{item.Hint}";
+        }
+
+        string text = item.Text?.Trim() ?? string.Empty;
+        int visibleCount = text.Count((character) => !char.IsWhiteSpace(character));
+        bool isEnglish = (language ?? string.Empty).Contains("英", StringComparison.OrdinalIgnoreCase);
+        string unit = isEnglish ? "letters" : "字";
+        string maskedText = new string('•', Math.Max(2, Math.Min(visibleCount, 8)));
+
+        return $"{index}. {maskedText} ({visibleCount} {unit})";
     }
 }
