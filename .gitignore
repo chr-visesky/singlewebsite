@@ -38,8 +38,6 @@ modules/RecitationApp/bin/
 modules/RecitationApp/obj/
 .agents/
 .claude/
-config/mcporter.json
-cloudbaserc.json
 project.config.json
 skills-lock.json
 skills/cloudbase/

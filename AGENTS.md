@@ -20,4 +20,18 @@
 - Before submitting or releasing any `学习助手` / `skillPublic` change, verify all of these stay in sync: `skills/study-helper/SKILL.md` version, `cloudbase/functions/skillPublic/index.js` `SKILL_VERSION`, `cloudbase/functions/skillPublic/assets/study-helper.zip`, and if the function is already deployed, `/api/skill` metadata version must match the downloaded zip version.
 - When `学习助手` capabilities change, update every user-facing declaration together: `skills/study-helper/SKILL.md`, `skills/study-helper/scripts/study-helper.js`, and `cloudbase/functions/skillPublic/index.js` command metadata. Do not leave removed commands or stale descriptions in any one layer.
 - Before shipping any auto-update change, verify all of these stay in sync: `package.json` updater dependencies, `scripts/package-app.js` installer generation, `scripts/publish-cos-release.js` COS upload output, and the client `autoUpdate.url/channel` configuration expected by `src/auto-update-runtime.js`.
-- Before shipping any new native module or cloud-sync module, add a dedicated smoke path for both the packaged desktop module and the corresponding `学习助手`/cloud function command path. Do not rely on homework smoke to cover dictation, recitation, or future modules.
+- Before shipping any new native module or cloud-sync module, add a dedicated smoke path for both the packaged desktop module and the corresponding `学习助手` / cloud function command path. Do not rely on homework smoke to cover dictation, recitation, or future modules.
+
+## CloudBase Workspace Facts
+
+- The active CloudBase environment for this repo is `selfuse-5g3tkjfq0ede092b` (`alias=selfuse`, `region=ap-shanghai`).
+- The CloudBase mini program appid currently used by this repo is `wxf0e5731b8c3b1d9e`.
+- Keep the local mcporter MCP config in [config/mcporter.json](Q:/singlewebsite/config/mcporter.json) so future Codex sessions can reconnect to CloudBase quickly.
+- Keep the environment marker in [cloudbaserc.json](Q:/singlewebsite/cloudbaserc.json) so future Codex sessions do not need to rediscover the CloudBase envId.
+- The desktop auto-update feed is hosted from CloudBase static hosting at `https://selfuse-5g3tkjfq0ede092b-1324687027.tcloudbaseapp.com/studygate-updates/latest/`.
+- The CloudBase static hosting bucket is `8bb1-static-selfuse-5g3tkjfq0ede092b-1324687027`.
+- The CloudBase storage bucket is `7365-selfuse-5g3tkjfq0ede092b-1324687027`.
+- Publish desktop update artifacts to `studygate-updates/latest/` and keep exactly these files in sync: `latest.yml`, `update-manifest.json`, `StudyGate-win32-x64.zip`, `StudyGate-Setup-<version>.exe`.
+- When the homework cloud-sync contract changes, redeploy `homeworkPublic` and `homeworkAdmin`.
+- `build/branding/studygate.ico` and `build/branding/studygate.png` are real repo assets and must stay tracked.
+- `作业模块.md` and `听写和背诵模块.md` are project documents and must stay tracked.
