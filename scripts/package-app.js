@@ -317,7 +317,7 @@ async function buildWindowsInstaller(projectRoot, appDir, outputDir, buildVersio
       directories: {
         output: outputDir
       },
-      artifactName: `${productName} Setup ${buildVersion}.\${ext}`,
+      artifactName: `${productName}-Setup-${buildVersion}.\${ext}`,
       win: {
         icon: appIconPath
       },

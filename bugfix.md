@@ -29,6 +29,17 @@ This file records regressions that were introduced during development and then f
 - Avoid:
   Keep the packaged client update URL, release uploader default prefix, and deployment docs aligned whenever the update hosting path changes.
 
+## NSIS installer file name drifted away from latest.yml
+
+- How it appeared:
+  The packaged installer on disk used spaces in its file name, while `latest.yml` referenced the hyphenated variant produced by `electron-builder` metadata.
+- Root cause:
+  The custom NSIS artifact name in the packaging script used `"${productName} Setup ${buildVersion}"`, which did not match the file name that auto-update metadata expected clients to download.
+- Fix:
+  Changed the installer artifact naming pattern to `${productName}-Setup-${buildVersion}` so the generated installer file matches `latest.yml`.
+- Avoid:
+  Keep custom installer artifact naming aligned with the filenames referenced by auto-update metadata, and verify the generated installer file really exists under the exact name written into `latest.yml`.
+
 ## Cloud homework delete drifted away from the supported product boundary
 
 - How it appeared:
