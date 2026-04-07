@@ -26,6 +26,7 @@ tools/**/bin/
 tools/**/obj/
 .dotnet-home/
 .dotnet-cli/
+.dotnet-profile/
 .nuget/
 .nuget-local-feed/
 project.private.config.json
@@ -35,3 +36,11 @@ modules/DictationApp/bin/
 modules/DictationApp/obj/
 modules/RecitationApp/bin/
 modules/RecitationApp/obj/
+.agents/
+.claude/
+config/mcporter.json
+cloudbaserc.json
+project.config.json
+skills-lock.json
+skills/cloudbase/
+source/
