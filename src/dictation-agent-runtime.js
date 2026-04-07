@@ -13,6 +13,7 @@ function createDictationAgentRuntime(dependencies = {}) {
   } = dependencies;
 
   let syncPromise = Promise.resolve();
+  const NATIVE_AGENT_TIMEOUT_MS = 2 * 60 * 1000;
 
   function ensureMarksState() {
     const studyToolsState = typeof getStudyToolsState === 'function' ? getStudyToolsState() : {};
@@ -43,6 +44,16 @@ function createDictationAgentRuntime(dependencies = {}) {
     };
   }
 
+  function normalizeMarkErrorMessage(error, fallback) {
+    return normalizePrefix(error && error.message).slice(0, 240) || fallback;
+  }
+
+  function createTimeoutError(message) {
+    const error = new Error(message);
+    error.code = 'timeout';
+    return error;
+  }
+
   async function writeTempJson(filePath, payload) {
     await fs.promises.mkdir(pathModule.dirname(filePath), { recursive: true });
     await fs.promises.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
@@ -55,11 +66,7 @@ function createDictationAgentRuntime(dependencies = {}) {
     }).catch(() => {});
   }
 
-  async function invokeDictationAgentCreate(executablePath, payload, workingDirectory) {
-    const payloadPath = pathModule.join(workingDirectory, 'payload.json');
-    const resultPath = pathModule.join(workingDirectory, 'result.json');
-    await writeTempJson(payloadPath, payload);
-
+  async function runDictationProcess(executablePath, payloadPath, resultPath) {
     await new Promise((resolve, reject) => {
       const child = spawn(
         executablePath,
@@ -70,17 +77,48 @@ function createDictationAgentRuntime(dependencies = {}) {
           stdio: 'ignore'
         }
       );
+      let settled = false;
 
-      child.once('error', reject);
-      child.once('exit', (code) => {
-        if (code === 0) {
-          resolve();
+      const finish = (callback, value) => {
+        if (settled) {
           return;
         }
 
-        reject(new Error(`DictationApp 创建听写失败，退出码 ${code}`));
+        settled = true;
+        clearTimeout(timeoutId);
+        callback(value);
+      };
+
+      const timeoutId = setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          // Ignore kill failures when the child is already exiting.
+        }
+
+        finish(reject, createTimeoutError('DictationApp 处理听写超时。'));
+      }, NATIVE_AGENT_TIMEOUT_MS);
+
+      child.once('error', (error) => {
+        finish(reject, error);
+      });
+      child.once('exit', (code) => {
+        if (code === 0) {
+          finish(resolve);
+          return;
+        }
+
+        finish(reject, new Error(`DictationApp 创建听写失败，退出码 ${code}`));
       });
     });
+  }
+
+  async function invokeDictationAgentCreate(executablePath, payload, workingDirectory) {
+    const payloadPath = pathModule.join(workingDirectory, 'payload.json');
+    const resultPath = pathModule.join(workingDirectory, 'result.json');
+    await writeTempJson(payloadPath, payload);
+
+    await runDictationProcess(executablePath, payloadPath, resultPath);
 
     const resultText = await fs.promises.readFile(resultPath, 'utf8');
     const result = JSON.parse(resultText);
@@ -200,7 +238,14 @@ function createDictationAgentRuntime(dependencies = {}) {
       .catch(() => {})
       .then(async () => {
         for (const request of pendingRequests) {
-          await processRequest(request, context);
+          try {
+            await processRequest(request, context);
+          } catch (error) {
+            rememberMark(request.id, {
+              status: 'failed',
+              errorMessage: normalizeMarkErrorMessage(error, '听写同步失败。')
+            });
+          }
         }
       });
 

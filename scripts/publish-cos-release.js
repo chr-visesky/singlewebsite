@@ -97,7 +97,7 @@ async function main() {
   const region = requiredEnv('STUDYGATE_COS_REGION');
   const secretId = requiredEnv('STUDYGATE_COS_SECRET_ID');
   const secretKey = requiredEnv('STUDYGATE_COS_SECRET_KEY');
-  const prefix = normalizePrefix(process.env.STUDYGATE_COS_PREFIX) || 'studygate/releases/latest';
+  const prefix = normalizePrefix(process.env.STUDYGATE_COS_PREFIX) || 'studygate-updates/latest';
   const cos = new COS({
     SecretId: secretId,
     SecretKey: secretKey

@@ -13,6 +13,8 @@ function createHomeworkAgentRuntime(dependencies = {}) {
   } = dependencies;
 
   let syncPromise = Promise.resolve();
+  const NATIVE_AGENT_TIMEOUT_MS = 2 * 60 * 1000;
+  const SOURCE_DOWNLOAD_TIMEOUT_MS = 30 * 1000;
 
   function ensureMarksState() {
     const studyToolsState = typeof getStudyToolsState === 'function' ? getStudyToolsState() : {};
@@ -41,6 +43,16 @@ function createHomeworkAgentRuntime(dependencies = {}) {
       bucket: normalizePrefix(mark && mark.bucket),
       targetDate: normalizePrefix(mark && mark.targetDate)
     };
+  }
+
+  function normalizeMarkErrorMessage(error, fallback) {
+    return normalizePrefix(error && error.message).slice(0, 240) || fallback;
+  }
+
+  function createTimeoutError(message) {
+    const error = new Error(message);
+    error.code = 'timeout';
+    return error;
   }
 
   function supportedExtensionFromUrl(url) {
@@ -111,6 +123,74 @@ function createHomeworkAgentRuntime(dependencies = {}) {
     }).catch(() => {});
   }
 
+  async function fetchSourceWithTimeout(sourceUrl) {
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, SOURCE_DOWNLOAD_TIMEOUT_MS);
+
+    try {
+      return await fetch(sourceUrl, {
+        signal: abortController.signal
+      });
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        throw createTimeoutError('下载作业源文件超时。');
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async function runHomeworkProcess(executablePath, payloadPath, resultPath) {
+    await new Promise((resolve, reject) => {
+      const child = spawn(
+        executablePath,
+        ['--agent-create-homework', '--payload-file', payloadPath, '--result-file', resultPath],
+        {
+          cwd: pathModule.dirname(executablePath),
+          windowsHide: true,
+          stdio: 'ignore'
+        }
+      );
+      let settled = false;
+
+      const finish = (callback, value) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeoutId);
+        callback(value);
+      };
+
+      const timeoutId = setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          // Ignore kill failures when the child is already exiting.
+        }
+
+        finish(reject, createTimeoutError('HomeworkApp 处理作业超时。'));
+      }, NATIVE_AGENT_TIMEOUT_MS);
+
+      child.once('error', (error) => {
+        finish(reject, error);
+      });
+      child.once('exit', (code) => {
+        if (code === 0) {
+          finish(resolve);
+          return;
+        }
+
+        finish(reject, new Error(`HomeworkApp 创建作业失败，退出码 ${code}`));
+      });
+    });
+  }
+
   async function downloadSourceFiles(request, workingDirectory) {
     const sourceUrls = Array.isArray(request && request.sourceUrls) ? request.sourceUrls : [];
 
@@ -137,7 +217,7 @@ function createHomeworkAgentRuntime(dependencies = {}) {
         extension = extension || supportedExtensionFromContentType(matched[1]);
         buffer = Buffer.from(matched[2].replace(/\s+/g, ''), 'base64');
       } else {
-        const response = await fetch(sourceUrl);
+        const response = await fetchSourceWithTimeout(sourceUrl);
 
         if (!response.ok) {
           throw new Error(`下载作业源文件失败：${response.status}`);
@@ -165,27 +245,7 @@ function createHomeworkAgentRuntime(dependencies = {}) {
     const resultPath = pathModule.join(workingDirectory, 'result.json');
     await writeTempJson(payloadPath, payload);
 
-    await new Promise((resolve, reject) => {
-      const child = spawn(
-        executablePath,
-        ['--agent-create-homework', '--payload-file', payloadPath, '--result-file', resultPath],
-        {
-          cwd: pathModule.dirname(executablePath),
-          windowsHide: true,
-          stdio: 'ignore'
-        }
-      );
-
-      child.once('error', reject);
-      child.once('exit', (code) => {
-        if (code === 0) {
-          resolve();
-          return;
-        }
-
-        reject(new Error(`HomeworkApp 创建作业失败，退出码 ${code}`));
-      });
-    });
+    await runHomeworkProcess(executablePath, payloadPath, resultPath);
 
     const resultText = await fs.promises.readFile(resultPath, 'utf8');
     const result = JSON.parse(resultText);
@@ -305,7 +365,14 @@ function createHomeworkAgentRuntime(dependencies = {}) {
       .catch(() => {})
       .then(async () => {
         for (const request of pendingRequests) {
-          await processRequest(request, context);
+          try {
+            await processRequest(request, context);
+          } catch (error) {
+            rememberMark(request.id, {
+              status: 'failed',
+              errorMessage: normalizeMarkErrorMessage(error, '作业同步失败。')
+            });
+          }
         }
       });
 

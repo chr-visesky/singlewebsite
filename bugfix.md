@@ -7,6 +7,39 @@ This file records regressions that were introduced during development and then f
 - the concrete fix
 - how to avoid repeating it
 
+## Remote study-agent queue could be blocked by one bad request
+
+- How it appeared:
+  One failed remote homework, dictation, or recitation request could stop the rest of the batch from being processed, and a stuck native module launch could leave the queue waiting indefinitely.
+- Root cause:
+  The desktop agent runtimes processed each batch strictly in series without isolating failures per request, and the native module launch path had no timeout. Homework source downloads also had no timeout, so a slow source URL could pin the whole homework queue.
+- Fix:
+  Wrapped each request in its own failure boundary so later requests still run, recorded failed request marks for diagnostics, added timeouts around HomeworkApp/DictationApp/RecitationApp agent launches, and added a timeout to remote homework source downloads.
+- Avoid:
+  Any remote queue that consumes multiple requests must isolate failures per request and bound external work with explicit timeouts. Do not let one malformed request or hung child process stall the whole batch.
+
+## Release publisher defaulted to the wrong update path
+
+- How it appeared:
+  The packaged app checked updates from the `studygate-updates/latest` path, but the COS release publisher still defaulted to `studygate/releases/latest`.
+- Root cause:
+  The app-side update URL and the release upload script drifted apart, so a publish without explicit override variables could upload valid artifacts to a location the client never polled.
+- Fix:
+  Changed the release publisher default prefix to `studygate-updates/latest` so it matches the app configuration out of the box.
+- Avoid:
+  Keep the packaged client update URL, release uploader default prefix, and deployment docs aligned whenever the update hosting path changes.
+
+## Cloud homework delete drifted away from the supported product boundary
+
+- How it appeared:
+  CloudBase docs still described remote homework delete actions, and the shared homework runtime could still accept delete-mode payloads, even though homework deletion was only supported locally in the desktop client.
+- Root cause:
+  The cloud homework request flow retained an older delete model after the product boundary had already moved deletion back to local-only handling.
+- Fix:
+  Removed the remote delete documentation and made the shared homework runtime reject non-create submissions with `agent_homework_delete_not_supported`, so the cloud entry points now match the desktop behavior.
+- Avoid:
+  When a capability is intentionally removed, delete or reject it at every layer that can still describe or accept it: docs, public API entry points, shared runtimes, and client sync code.
+
 ## Home page fallback: `本地首页加载失败。`
 
 - How it appeared:

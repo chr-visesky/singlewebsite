@@ -572,6 +572,10 @@ function createAgentHomeworkRuntime(options = {}) {
   }
 
   async function createRequest(payload = {}, now) {
+    if (normalizeRequestOperation(payload.operation || payload.mode) !== 'create') {
+      throw createHomeworkRuntimeError('agent_homework_delete_not_supported');
+    }
+
     const requestId = normalizeId(payload.requestId || payload.id, '') || createRequestId();
     const sourceItems = await buildSourceItems(payload, requestId);
     const targetDate = normalizeDate(payload.targetDate, now.slice(0, 10));
@@ -684,7 +688,7 @@ function createAgentHomeworkRuntime(options = {}) {
 
   async function listRequests() {
     const state = await readState(db);
-    return serializeRequests(state.items);
+    return serializeRequests(state.items.filter((item) => item.operation === 'create'));
   }
 
   async function getRequestStatus(requestId, options = {}) {
