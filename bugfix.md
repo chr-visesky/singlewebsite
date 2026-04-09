@@ -7,6 +7,28 @@ This file records regressions that were introduced during development and then f
 - the concrete fix
 - how to avoid repeating it
 
+## Update publisher could expose metadata before the new installer finished uploading
+
+- How it appeared:
+  Some update installs could fail very early with an NSIS extraction error such as failing to write `winshell.dll`, even though the locally built installer itself was valid.
+- Root cause:
+  The COS publish script uploaded `latest.yml` and `update-manifest.json` before the current installer payload. That allowed clients to discover a new version while the referenced installer was still missing, stale, or only partially uploaded.
+- Fix:
+  Changed the publisher to upload only the installer/zip named by the current `update-manifest.json`, upload payload binaries first, upload metadata last, and fail fast if either the payload set or metadata set is incomplete.
+- Avoid:
+  Treat update metadata as the final commit point of a release. Never publish `latest.yml` before the exact installer and archive it points to are already in place.
+
+## Auto-update install could be blocked by the app's own quit guard
+
+- How it appeared:
+  After an update finished downloading, clicking install could keep showing that the current process could not be closed instead of handing control to the installer.
+- Root cause:
+  `autoUpdater.quitAndInstall()` ran while the main window still used the normal close interception path. The app only switched to `allowAppQuit = true` inside `before-quit`, so the update-triggered window close could still be prevented by the exit guard and password dialog flow.
+- Fix:
+  Before starting update installation, the auto-update runtime now explicitly switches the app into the allow-quit state and closes any exit-password window so `quitAndInstall()` can complete the shutdown path cleanly.
+- Avoid:
+  Any non-interactive quit path such as update install, restart, or maintenance shutdown must bypass UI close guards before requesting app exit.
+
 ## Remote study-agent queue could be blocked by one bad request
 
 - How it appeared:
@@ -215,3 +237,69 @@ This file records regressions that were introduced during development and then f
   Changed the main-window preview to a short masked summary instead of the full answer list, added recovery for corrupted `tasks.json`, and redesigned the session flow so the learner types an attempt first and then checks or skips to reveal the answer.
 - Avoid:
   Do not render full answer sets on a module landing page, especially for low-spec devices. Keep startup previews bounded, treat persisted task data as untrusted input, and make "check after attempt" the default interaction for dictation-style practice.
+
+## Installed app could not auto-update because `app-update.yml` was missing
+
+- How it appeared:
+  Fresh installs could launch normally, but checking for updates from the installed app failed before any real download started, and the packaged app had no `resources/app-update.yml`.
+- Root cause:
+  The packaging flow generated the NSIS installer and zip artifacts, but never wrote the updater runtime config into the staged app resources, so installed builds were missing the file `electron-updater` needs at runtime.
+- Fix:
+  Updated `scripts/package-app.js` to generate `resources/app-update.yml` during staging, wiring the generic feed URL, channel, and `updaterCacheDirName` into every packaged desktop build. Added artifact smoke coverage for the file.
+- Avoid:
+  Treat packaged updater config as a required release artifact, not an optional byproduct. Any auto-update change must verify the staged app, installer, and smoke suite all see the same `app-update.yml`.
+
+## Quit path crashed because netdisk cleanup was wired in `main.js` but not exported
+
+- How it appeared:
+  On shutdown, especially during update install, the app could throw before exiting because `main.js` called `clearPendingNetdiskAuth()` even though the runtime object did not export it.
+- Root cause:
+  The netdisk runtime owned the cleanup implementation, but its public return object omitted `clearPendingNetdiskAuth`, leaving the quit path with an undefined function call.
+- Fix:
+  Exported `clearPendingNetdiskAuth` from `src/netdisk-runtime.js` and kept the quit sequence in `src/main.js` using the shared runtime entry point.
+- Avoid:
+  When adding shutdown cleanup to `main.js`, verify the called helper is part of the source runtime's public contract and is exercised by an installed-app quit smoke, not only by source inspection.
+
+## Update install crashed in `before-quit` because session persistence was not wired from storage runtime
+
+- How it appeared:
+  A real `1744 -> 1815` upgrade could detect the new version and start download, but clicking install crashed the installed app during `before-quit` with `ReferenceError: persistSessionState is not defined`.
+- Root cause:
+  `src/storage-runtime.js` had the `persistSessionState` implementation, but the function was missing from the runtime return object, and `src/main.js` also was not destructuring it. The quit handler called `persistSessionState()` without ever getting a callable binding.
+- Fix:
+  Exported `persistSessionState` from `src/storage-runtime.js` and added it to the `storageRuntime` destructure in `src/main.js`, so the update-install quit path can flush session state without throwing.
+- Avoid:
+  Any runtime helper used in startup or quit hooks must be imported from the owning runtime in the same change. Real installer-to-updater E2E should stay in the release checklist because source-level smoke did not catch this missing binding.
+
+## Update dialog regressed to "already latest" after the download actually completed
+
+- How it appeared:
+  In a real local `1744 -> 1815` upgrade run, the main process finished downloading the installer and wrote it into the updater cache, but the visible dialog flipped back to `当前已经是最新版本。` instead of exposing the install action.
+- Root cause:
+  `src/auto-update-runtime.js` emitted live status changes using raw `lastStatus`, which only tracked `availableVersion`. The preload dialog renderer expects derived fields such as `latestVersion`, `enabled`, and `hasUpdate`, so the pushed `downloaded` payload was interpreted as "no update".
+- Fix:
+  Added a shared status-snapshot builder in `src/auto-update-runtime.js` and used it for live emits, `getStatus()`, and manual snapshots, so renderer updates always include `currentVersion`, `latestVersion`, `enabled`, and `hasUpdate`.
+- Avoid:
+  Treat updater IPC payloads as a stable contract. When adding or refactoring updater state, keep polling snapshots and push events shaped the same, and verify the packaged dialog still reaches `available -> downloading -> downloaded -> installing` in a real E2E run.
+
+## Auto-update launched the installer in interactive mode and then hung waiting for UI
+
+- How it appeared:
+  After download completed and the app entered `installing`, the updater did start `StudyGate-Setup-2026.408.1815.exe`, but the installed version stayed on `1744` while the installer process remained alive with `--updated --force-run`.
+- Root cause:
+  `src/auto-update-runtime.js` called `autoUpdater.quitAndInstall(false, true)`. In `electron-updater`, the first argument controls silent mode, so the desktop updater was starting the NSIS installer as a non-silent install during an otherwise automatic flow.
+- Fix:
+  Switched the call to `autoUpdater.quitAndInstall(true, true)` so automatic upgrades run the installer silently and still relaunch the app after install.
+- Avoid:
+  Do not rely on defaults or positional booleans for updater install behavior. When changing auto-update install flow, verify the actual spawned installer command path and confirm the installed version changes without any UI prompt.
+
+## Updater smoke stopped matching packaged behavior after `app-update.yml` became mandatory
+
+- How it appeared:
+  `npm run test:ui` failed in the update runtime smoke with `Missing packaged updater config: app-update.yml`, even though the real packaged installer and installed app already contained that file.
+- Root cause:
+  The smoke harness instantiated the packaged updater runtime without creating a mock `process.resourcesPath/app-update.yml`, so the new runtime guard was validating a fake environment that could never exist in a real packaged app.
+- Fix:
+  Reworked `scripts/ui-smoke/update-runtime-smoke.js` to create a temporary `resources/app-update.yml`, point `process.resourcesPath` at it, and assert the silent install call shape as part of the smoke.
+- Avoid:
+  When packaging assumptions become stricter, update the smoke harness to mimic the packaged filesystem contract instead of weakening the production guard. Packaged-app checks and runtime smoke should validate the same prerequisites.

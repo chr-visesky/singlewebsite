@@ -423,6 +423,7 @@ const {
   loadOriginStorageState,
   loadSiteCredentialState,
   loadStudyToolsState,
+  persistSessionState,
   restoreSessionState,
   saveSiteCredentialSnapshot,
   saveStudyToolsState,
@@ -663,6 +664,7 @@ const {
   authorizeNetdisk,
   buildLibraryFolderModel,
   buildLibraryModel,
+  clearPendingNetdiskAuth,
   loadNetdiskState,
   proxyNetdiskMedia
 } = netdiskRuntime;
@@ -670,6 +672,7 @@ const autoUpdateRuntime = createAutoUpdateRuntime({
   Notification,
   app,
   autoUpdater,
+  closeExitPasswordWindow,
   emitStatusChanged: (status) => {
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send('shell:auto-update-status', status);
@@ -679,7 +682,10 @@ const autoUpdateRuntime = createAutoUpdateRuntime({
   getAppConfig: () => appConfig,
   logNavigationDebug,
   normalizePrefix,
-  runtimePaths
+  runtimePaths,
+  setAllowAppQuit: (value) => {
+    allowAppQuit = Boolean(value);
+  }
 });
 internalServiceRuntime = createInternalServiceRuntime({
   createConfigError,
@@ -948,11 +954,17 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  appendStartupDebug('before-quit-start', {
+    allowAppQuit,
+    autoUpdateState: autoUpdateRuntime.getStatus().state,
+    hasMainWindow: Boolean(mainWindow && !mainWindow.isDestroyed())
+  });
   allowAppQuit = true;
   destroyClassroomBrowserView();
   stopSessionPersistence();
 
   clearPendingNetdiskAuth();
+  appendStartupDebug('before-quit-netdisk-auth-cleared');
   closeExitPasswordWindow();
   reminderPollingRuntime.stop();
   autoUpdateRuntime.stop();
@@ -961,5 +973,6 @@ app.on('before-quit', () => {
   stopRemoteDictationPolling();
   stopRemoteSchedulePolling();
   stopInternalServer();
+  appendStartupDebug('before-quit-services-stopped');
   void persistSessionState();
 });

@@ -1,16 +1,20 @@
 'use strict';
 
+const path = require('path');
+
 function createAutoUpdateRuntime(options = {}) {
   const {
     Notification,
     app,
     autoUpdater,
+    closeExitPasswordWindow,
     emitStatusChanged,
     fs,
     getAppConfig,
     logNavigationDebug,
     normalizePrefix,
-    runtimePaths
+    runtimePaths,
+    setAllowAppQuit
   } = options;
 
   let initialized = false;
@@ -84,13 +88,56 @@ function createAutoUpdateRuntime(options = {}) {
     logNavigationDebug(`auto-update:${event}`, details);
   }
 
-  function updateStatus(state, details = {}) {
-    lastStatus = {
+  function packagedUpdateConfigPath() {
+    return path.join(process.resourcesPath || '', 'app-update.yml');
+  }
+
+  function packagedUpdateConfigExists() {
+    const configPath = packagedUpdateConfigPath();
+
+    try {
+      return Boolean(configPath) && typeof fs.existsSync === 'function' && fs.existsSync(configPath);
+    } catch {
+      return false;
+    }
+  }
+
+  function assertPackagedUpdateConfigExists() {
+    const configPath = packagedUpdateConfigPath();
+    const exists = packagedUpdateConfigExists();
+
+    logUpdater('packaged-update-config-check', {
+      configPath,
+      exists
+    });
+
+    if (!exists) {
+      throw new Error(`Missing packaged updater config: ${configPath}`);
+    }
+  }
+
+  function buildStatusSnapshot(details = {}) {
+    const autoUpdateConfig = currentConfig();
+    const currentVersion = getCurrentVersion();
+    const availableVersion = normalizePrefix(details.availableVersion || lastStatus.availableVersion);
+
+    return {
       ...lastStatus,
+      ...details,
+      currentVersion,
+      latestVersion: availableVersion,
+      availableVersion,
+      enabled: updaterEnabled(autoUpdateConfig),
+      hasUpdate: hasNewerAvailableVersion(availableVersion)
+    };
+  }
+
+  function updateStatus(state, details = {}) {
+    lastStatus = buildStatusSnapshot({
       ...details,
       state,
       updatedAt: new Date().toISOString()
-    };
+    });
     logUpdater(state, details);
     try {
       if (typeof emitStatusChanged === 'function') {
@@ -112,6 +159,7 @@ function createAutoUpdateRuntime(options = {}) {
 
   function configureUpdater(autoDownload) {
     const autoUpdateConfig = currentConfig();
+    const configPath = packagedUpdateConfigPath();
 
     autoUpdater.allowPrerelease = autoUpdateConfig.allowPrerelease === true;
     autoUpdater.autoDownload = autoDownload;
@@ -120,6 +168,15 @@ function createAutoUpdateRuntime(options = {}) {
       provider: 'generic',
       url: autoUpdateConfig.url,
       channel: autoUpdateConfig.channel || 'latest'
+    });
+
+    logUpdater('configured', {
+      autoDownload,
+      channel: autoUpdateConfig.channel || 'latest',
+      feedUrl: autoUpdateConfig.url,
+      packaged: app.isPackaged,
+      packagedUpdateConfigExists: packagedUpdateConfigExists(),
+      packagedUpdateConfigPath: configPath
     });
 
     return autoUpdateConfig;
@@ -197,21 +254,19 @@ function createAutoUpdateRuntime(options = {}) {
 
   async function getManualCheckSnapshot() {
     registerHandlers();
-
-    const currentVersion = getCurrentVersion();
-    const autoUpdateConfig = currentConfig();
+    const snapshot = buildStatusSnapshot();
 
     return {
-      bytesPerSecond: Number(lastStatus.bytesPerSecond) || 0,
-      currentVersion,
-      latestVersion: normalizePrefix(lastStatus.availableVersion),
-      hasUpdate: hasNewerAvailableVersion(lastStatus.availableVersion),
-      enabled: updaterEnabled(autoUpdateConfig),
-      state: lastStatus.state,
-      percent: Number(lastStatus.percent) || 0,
-      totalBytes: Number(lastStatus.totalBytes) || 0,
-      transferredBytes: Number(lastStatus.transferredBytes) || 0,
-      message: normalizePrefix(lastStatus.message)
+      bytesPerSecond: Number(snapshot.bytesPerSecond) || 0,
+      currentVersion: snapshot.currentVersion,
+      latestVersion: snapshot.latestVersion,
+      hasUpdate: snapshot.hasUpdate,
+      enabled: snapshot.enabled,
+      state: snapshot.state,
+      percent: Number(snapshot.percent) || 0,
+      totalBytes: Number(snapshot.totalBytes) || 0,
+      transferredBytes: Number(snapshot.transferredBytes) || 0,
+      message: normalizePrefix(snapshot.message)
     };
   }
 
@@ -253,6 +308,7 @@ function createAutoUpdateRuntime(options = {}) {
     }
 
     configureUpdater(true);
+    assertPackagedUpdateConfigExists();
     updateStatus('downloading', {
       availableVersion,
       bytesPerSecond: 0,
@@ -280,14 +336,38 @@ function createAutoUpdateRuntime(options = {}) {
     };
   }
 
+  function prepareForInstall() {
+    try {
+      if (typeof setAllowAppQuit === 'function') {
+        setAllowAppQuit(true);
+      }
+    } catch {
+      // Ignore allow-quit failures and let the installer try anyway.
+    }
+
+    try {
+      if (typeof closeExitPasswordWindow === 'function') {
+        closeExitPasswordWindow();
+      }
+    } catch {
+      // Ignore exit dialog cleanup failures.
+    }
+  }
+
   function installDownloadedUpdate() {
     registerHandlers();
+    logUpdater('install-requested', {
+      availableVersion: lastStatus.availableVersion,
+      packagedUpdateConfigExists: packagedUpdateConfigExists(),
+      packagedUpdateConfigPath: packagedUpdateConfigPath()
+    });
+    prepareForInstall();
     updateStatus('installing', {
       availableVersion: lastStatus.availableVersion,
       message: '',
       percent: 100
     });
-    autoUpdater.quitAndInstall(false, true);
+    autoUpdater.quitAndInstall(true, true);
   }
 
   function registerHandlers() {
@@ -403,7 +483,7 @@ function createAutoUpdateRuntime(options = {}) {
   return {
     checkForUpdates,
     downloadAvailableUpdate,
-    getStatus: () => ({ ...lastStatus }),
+    getStatus: () => buildStatusSnapshot(),
     getManualCheckSnapshot,
     installDownloadedUpdate,
     start,

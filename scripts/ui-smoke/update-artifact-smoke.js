@@ -14,20 +14,26 @@ async function runUpdateArtifactSmoke({ rootDir }) {
   const manifestPath = path.join(distDir, 'update-manifest.json');
   const buildVersionPath = path.join(distDir, 'build-version.txt');
   const zipPath = path.join(distDir, 'StudyGate-win32-x64.zip');
+  const packagedUpdateConfigPath = path.join(distDir, 'StudyGate-win32-x64', 'resources', 'app-update.yml');
   const failedChecks = [];
 
-  const [latestYml, manifestText, buildVersionText] = await Promise.all([
+  const [latestYml, manifestText, buildVersionText, packagedUpdateConfigText] = await Promise.all([
     fs.readFile(latestYmlPath, 'utf8').catch(() => ''),
     fs.readFile(manifestPath, 'utf8').catch(() => ''),
-    fs.readFile(buildVersionPath, 'utf8').catch(() => '')
+    fs.readFile(buildVersionPath, 'utf8').catch(() => ''),
+    fs.readFile(packagedUpdateConfigPath, 'utf8').catch(() => '')
   ]);
 
   if (!latestYml) {
-    failedChecks.push('缺少 dist/latest.yml，自升级元数据没有生成。');
+    failedChecks.push('Missing dist/latest.yml.');
   }
 
   if (!manifestText) {
-    failedChecks.push('缺少 dist/update-manifest.json，自升级发布清单没有生成。');
+    failedChecks.push('Missing dist/update-manifest.json.');
+  }
+
+  if (!packagedUpdateConfigText) {
+    failedChecks.push('Missing dist/StudyGate-win32-x64/resources/app-update.yml.');
   }
 
   const manifest = manifestText ? JSON.parse(manifestText) : {};
@@ -35,19 +41,23 @@ async function runUpdateArtifactSmoke({ rootDir }) {
   const yamlVersion = parseYamlVersion(latestYml);
 
   if (!expectedVersion) {
-    failedChecks.push('缺少 dist/build-version.txt，自升级构建版本没有落盘。');
+    failedChecks.push('Missing dist/build-version.txt.');
   }
 
   if (yamlVersion && yamlVersion !== expectedVersion) {
-    failedChecks.push(`latest.yml 版本不一致：expected ${expectedVersion}, got ${yamlVersion}`);
+    failedChecks.push(`latest.yml version mismatch: expected ${expectedVersion}, got ${yamlVersion}`);
   }
 
   if (manifest.version && manifest.version !== expectedVersion) {
-    failedChecks.push(`update-manifest.json 版本不一致：expected ${expectedVersion}, got ${manifest.version}`);
+    failedChecks.push(`update-manifest.json version mismatch: expected ${expectedVersion}, got ${manifest.version}`);
   }
 
   if (!manifest.zip || manifest.zip.fileName !== path.basename(zipPath)) {
-    failedChecks.push('update-manifest.json 没有指向 StudyGate-win32-x64.zip。');
+    failedChecks.push('update-manifest.json does not point to StudyGate-win32-x64.zip.');
+  }
+
+  if (packagedUpdateConfigText && !/updaterCacheDirName:\s*singlewebsite-updater/i.test(packagedUpdateConfigText)) {
+    failedChecks.push('app-update.yml is missing updaterCacheDirName.');
   }
 
   return {
@@ -55,6 +65,7 @@ async function runUpdateArtifactSmoke({ rootDir }) {
     failedChecks,
     latestYmlPath,
     manifestPath,
+    packagedUpdateConfigPath,
     expectedVersion,
     yamlVersion,
     manifestVersion: manifest.version || ''

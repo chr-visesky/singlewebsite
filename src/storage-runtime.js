@@ -643,6 +643,7 @@ function createStorageRuntime(dependencies = {}) {
     loadOriginStorageState,
     loadSiteCredentialState,
     loadStudyToolsState,
+    persistSessionState,
     restoreSessionState,
     saveOriginStorageState,
     saveSiteCredentialSnapshot,

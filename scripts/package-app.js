@@ -294,6 +294,77 @@ async function copyFileIfPresent(sourcePath, targetPath) {
   return true;
 }
 
+async function cleanupPreviousInstallerArtifacts(outputDir, productName) {
+  const normalizedProductName = String(productName || '').trim().toLowerCase();
+  const removableFileNames = new Set([
+    'build-version.txt',
+    'builder-debug.yml',
+    'latest.yml',
+    'update-manifest.json'
+  ]);
+
+  const directoryEntries = await fsPromises.readdir(outputDir, { withFileTypes: true }).catch(() => []);
+
+  for (const entry of directoryEntries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const fileName = entry.name;
+    const normalizedFileName = fileName.toLowerCase();
+    const isLegacyInstaller =
+      normalizedProductName &&
+      (
+        normalizedFileName.startsWith(`${normalizedProductName} setup `) ||
+        normalizedFileName.startsWith(`${normalizedProductName}-setup-`)
+      ) &&
+      (normalizedFileName.endsWith('.exe') || normalizedFileName.endsWith('.blockmap'));
+
+    if (!removableFileNames.has(normalizedFileName) && !isLegacyInstaller) {
+      continue;
+    }
+
+    await removePathWithRetries(path.join(outputDir, fileName), {
+      rmOptions: { force: true },
+      retries: 5,
+      delayMs: 300
+    });
+  }
+}
+
+function updaterCacheDirName(packageName) {
+  const normalized = String(packageName || 'app')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${normalized || 'app'}-updater`;
+}
+
+async function writePackagedUpdaterConfig(stagedAppDir, appConfig, runtimePackageJson) {
+  const autoUpdateConfig = appConfig && appConfig.autoUpdate ? appConfig.autoUpdate : {};
+  const updateUrl = typeof autoUpdateConfig.url === 'string' ? autoUpdateConfig.url.trim() : '';
+
+  if (!updateUrl || autoUpdateConfig.enabled === false) {
+    return false;
+  }
+
+  const appUpdateYmlPath = path.join(stagedAppDir, 'resources', 'app-update.yml');
+  const channel = typeof autoUpdateConfig.channel === 'string' && autoUpdateConfig.channel.trim()
+    ? autoUpdateConfig.channel.trim()
+    : 'latest';
+  const content = [
+    'provider: generic',
+    `url: ${updateUrl}`,
+    `channel: ${channel}`,
+    `updaterCacheDirName: ${updaterCacheDirName(runtimePackageJson.name)}`
+  ].join(os.EOL);
+
+  await fsPromises.writeFile(appUpdateYmlPath, `${content}${os.EOL}`, 'utf8');
+  process.stdout.write(`写入自升级配置: ${appUpdateYmlPath}${os.EOL}`);
+  return true;
+}
+
 function sha256File(filePath) {
   const hash = crypto.createHash('sha256');
   hash.update(fs.readFileSync(filePath));
@@ -397,6 +468,9 @@ async function packageApp() {
   const appIconSource = path.join(projectRoot, 'build', 'branding', 'studygate.ico');
   const tarPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
   const dotnetCommand = resolveDotnetCommand();
+  const appConfig = fs.existsSync(configSource)
+    ? JSON.parse(fs.readFileSync(configSource, 'utf8'))
+    : {};
   const runtimePackageJson = {
     name: packageJson.name,
     version: buildVersion,
@@ -406,6 +480,7 @@ async function packageApp() {
   };
 
   await fsPromises.mkdir(outputDir, { recursive: true });
+  await cleanupPreviousInstallerArtifacts(outputDir, productName);
   ensureLocalNuGetFeed(projectRoot);
   await publishNativeTargets(dotnetCommand, projectRoot);
   await removePathWithRetries(stagingRootDir);
@@ -414,6 +489,7 @@ async function packageApp() {
   await fsPromises.rename(path.join(stagedAppDir, 'electron.exe'), path.join(stagedAppDir, `${productName}.exe`));
   await fsPromises.mkdir(stagedRuntimeAppDir, { recursive: true });
   await fsPromises.mkdir(stagedRuntimeModulesDir, { recursive: true });
+  await writePackagedUpdaterConfig(stagedAppDir, appConfig, runtimePackageJson);
   await fsPromises.writeFile(
     path.join(stagedRuntimeAppDir, 'package.json'),
     `${JSON.stringify(runtimePackageJson, null, 2)}${os.EOL}`,

@@ -22,7 +22,7 @@ class FakeAutoUpdater extends EventEmitter {
     this.autoInstallOnAppQuit = true;
     this.allowPrerelease = false;
     this.downloadCalls = 0;
-    this.quitAndInstallCalls = 0;
+    this.quitAndInstallCalls = [];
     this.feedUrl = null;
   }
 
@@ -66,8 +66,11 @@ class FakeAutoUpdater extends EventEmitter {
     });
   }
 
-  quitAndInstall() {
-    this.quitAndInstallCalls += 1;
+  quitAndInstall(isSilent, isForceRunAfter) {
+    this.quitAndInstallCalls.push({
+      isSilent,
+      isForceRunAfter
+    });
   }
 }
 
@@ -76,105 +79,141 @@ async function runUpdateRuntimeSmoke({ rootDir, outputDir }) {
   const updater = new FakeAutoUpdater();
   const statuses = [];
   const debugLogPath = path.join(outputDir, 'update-debug.log');
+  const resourcesDir = path.join(outputDir, 'resources');
+  const packagedUpdateConfigPath = path.join(resourcesDir, 'app-update.yml');
+  const originalResourcesPath = process.resourcesPath;
 
   fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(resourcesDir, { recursive: true });
+  fs.writeFileSync(
+    packagedUpdateConfigPath,
+    [
+      'provider: generic',
+      'url: https://updates.example.com/latest',
+      'channel: latest',
+      'updaterCacheDirName: singlewebsite-updater',
+      ''
+    ].join('\n'),
+    'utf8'
+  );
 
-  const runtime = createAutoUpdateRuntime({
-    Notification: class {
-      show() {}
-    },
-    app: {
-      getVersion: () => '2026.323.1849',
-      isPackaged: true
-    },
-    autoUpdater: updater,
-    emitStatusChanged: (status) => {
-      statuses.push({
-        ...status
-      });
-    },
-    fs,
-    getAppConfig: () => ({
-      autoUpdate: {
-        channel: 'latest',
-        enabled: true,
-        intervalMinutes: 180,
-        url: 'https://updates.example.com/latest'
+  Object.defineProperty(process, 'resourcesPath', {
+    configurable: true,
+    value: resourcesDir
+  });
+
+  try {
+    const runtime = createAutoUpdateRuntime({
+      Notification: class {
+        show() {}
+      },
+      app: {
+        getVersion: () => '2026.323.1849',
+        isPackaged: true
+      },
+      autoUpdater: updater,
+      emitStatusChanged: (status) => {
+        statuses.push({
+          ...status
+        });
+      },
+      fs,
+      getAppConfig: () => ({
+        autoUpdate: {
+          channel: 'latest',
+          enabled: true,
+          intervalMinutes: 180,
+          url: 'https://updates.example.com/latest'
+        }
+      }),
+      logNavigationDebug() {},
+      normalizePrefix,
+      runtimePaths: {
+        updateDebugLogPath: () => debugLogPath
       }
-    }),
-    logNavigationDebug() {},
-    normalizePrefix,
-    runtimePaths: {
-      updateDebugLogPath: () => debugLogPath
+    });
+
+    const checkResult = await runtime.checkForUpdates({
+      reason: 'manual',
+      autoDownload: false
+    });
+    const statusAfterCheck = runtime.getStatus();
+
+    if (!checkResult.hasUpdate || checkResult.availableVersion !== '2026.323.1900') {
+      failedChecks.push('Manual update check did not return the expected available version.');
     }
-  });
 
-  const checkResult = await runtime.checkForUpdates({
-    reason: 'manual',
-    autoDownload: false
-  });
-  const statusAfterCheck = runtime.getStatus();
+    if (statusAfterCheck.state !== 'available') {
+      failedChecks.push(`Status after check should be available, got ${statusAfterCheck.state || '(empty)'}.`);
+    }
 
-  if (!checkResult.hasUpdate || checkResult.availableVersion !== '2026.323.1900') {
-    failedChecks.push('手动检查更新没有返回正确的可升级版本。');
+    const downloadResult = await runtime.downloadAvailableUpdate();
+
+    if (!downloadResult.started || downloadResult.state !== 'downloading') {
+      failedChecks.push('Downloading an available update did not immediately return the downloading state.');
+    }
+
+    await delay(80);
+    const statusAfterDownload = runtime.getStatus();
+
+    if (statusAfterDownload.state !== 'downloaded') {
+      failedChecks.push(`Status after download should be downloaded, got ${statusAfterDownload.state || '(empty)'}.`);
+    }
+
+    if (Number(statusAfterDownload.percent) !== 100) {
+      failedChecks.push(`Download percent should be 100 after completion, got ${statusAfterDownload.percent}%.`);
+    }
+
+    if (statusAfterDownload.latestVersion !== '2026.323.1900' || statusAfterDownload.hasUpdate !== true) {
+      failedChecks.push('Downloaded status did not preserve latestVersion/hasUpdate for renderer updates.');
+    }
+
+    runtime.installDownloadedUpdate();
+    const statusAfterInstall = runtime.getStatus();
+
+    if (statusAfterInstall.state !== 'installing') {
+      failedChecks.push(`Status after install should be installing, got ${statusAfterInstall.state || '(empty)'}.`);
+    }
+
+    if (updater.quitAndInstallCalls.length !== 1) {
+      failedChecks.push(`installDownloadedUpdate should call quitAndInstall exactly once, got ${updater.quitAndInstallCalls.length}.`);
+    } else {
+      const installCall = updater.quitAndInstallCalls[0];
+      if (installCall.isSilent !== true || installCall.isForceRunAfter !== true) {
+        failedChecks.push('installDownloadedUpdate should request a silent installer run that relaunches after install.');
+      }
+    }
+
+    const observedStates = statuses.map((item) => item.state);
+
+    if (!observedStates.includes('checking') || !observedStates.includes('available')) {
+      failedChecks.push('Status push stream is missing checking/available.');
+    }
+
+    if (!observedStates.includes('downloading') || !observedStates.includes('downloaded')) {
+      failedChecks.push('Status push stream is missing downloading/downloaded.');
+    }
+
+    if (!observedStates.includes('installing')) {
+      failedChecks.push('Status push stream is missing installing.');
+    }
+
+    return {
+      passed: failedChecks.length === 0,
+      failedChecks,
+      checkResult,
+      downloadResult,
+      observedStates,
+      statusAfterCheck,
+      statusAfterDownload,
+      statusAfterInstall
+    };
+  } finally {
+    Object.defineProperty(process, 'resourcesPath', {
+      configurable: true,
+      value: originalResourcesPath
+    });
   }
-
-  if (statusAfterCheck.state !== 'available') {
-    failedChecks.push(`检查更新后状态应为 available，实际是 ${statusAfterCheck.state || '(empty)'}。`);
-  }
-
-  const downloadResult = await runtime.downloadAvailableUpdate();
-
-  if (!downloadResult.started || downloadResult.state !== 'downloading') {
-    failedChecks.push('开始下载更新时没有立即返回 downloading 状态。');
-  }
-
-  await delay(80);
-  const statusAfterDownload = runtime.getStatus();
-
-  if (statusAfterDownload.state !== 'downloaded') {
-    failedChecks.push(`下载完成后状态应为 downloaded，实际是 ${statusAfterDownload.state || '(empty)'}。`);
-  }
-
-  if (Number(statusAfterDownload.percent) !== 100) {
-    failedChecks.push(`下载完成后进度应为 100%，实际是 ${statusAfterDownload.percent}%。`);
-  }
-
-  runtime.installDownloadedUpdate();
-  const statusAfterInstall = runtime.getStatus();
-
-  if (statusAfterInstall.state !== 'installing') {
-    failedChecks.push(`点击安装后状态应为 installing，实际是 ${statusAfterInstall.state || '(empty)'}。`);
-  }
-
-  if (updater.quitAndInstallCalls !== 1) {
-    failedChecks.push(`installDownloadedUpdate 应调用一次 quitAndInstall，实际是 ${updater.quitAndInstallCalls} 次。`);
-  }
-
-  const observedStates = statuses.map((item) => item.state);
-
-  if (!observedStates.includes('checking') || !observedStates.includes('available')) {
-    failedChecks.push('更新状态没有正确推送 checking/available。');
-  }
-
-  if (!observedStates.includes('downloading') || !observedStates.includes('downloaded')) {
-    failedChecks.push('更新状态没有正确推送 downloading/downloaded。');
-  }
-
-  if (!observedStates.includes('installing')) {
-    failedChecks.push('更新状态没有正确推送 installing。');
-  }
-
-  return {
-    passed: failedChecks.length === 0,
-    failedChecks,
-    checkResult,
-    downloadResult,
-    observedStates,
-    statusAfterCheck,
-    statusAfterDownload,
-    statusAfterInstall
-  };
 }
 
 module.exports = {

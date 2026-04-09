@@ -12,7 +12,7 @@ function requiredEnv(name) {
   const value = normalizePrefix(process.env[name]);
 
   if (!value) {
-    throw new Error(`缺少环境变量 ${name}。`);
+    throw new Error(`Missing required environment variable: ${name}`);
   }
 
   return value;
@@ -69,13 +69,36 @@ async function uploadFile(cos, baseOptions, filePath) {
 function findArtifacts(outputDir) {
   const latestYmlPath = path.join(outputDir, 'latest.yml');
   const manifestPath = path.join(outputDir, 'update-manifest.json');
-  const zipPath = path.join(outputDir, 'StudyGate-win32-x64.zip');
-  const files = [latestYmlPath, manifestPath, zipPath];
-  const installerPaths = fs.readdirSync(outputDir)
-    .filter((fileName) => fileName.toLowerCase().endsWith('.exe') || fileName.toLowerCase().endsWith('.blockmap'))
-    .map((fileName) => path.join(outputDir, fileName));
 
-  return [...files, ...installerPaths].filter((filePath) => fs.existsSync(filePath));
+  if (!fs.existsSync(latestYmlPath) || !fs.existsSync(manifestPath)) {
+    return {
+      metadataFiles: [latestYmlPath, manifestPath].filter((filePath) => fs.existsSync(filePath)),
+      payloadFiles: []
+    };
+  }
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const payloadFiles = [];
+  const zipFileName = normalizePrefix(manifest && manifest.zip && manifest.zip.fileName);
+  const installerFileName = normalizePrefix(manifest && manifest.installer && manifest.installer.fileName);
+
+  if (zipFileName) {
+    payloadFiles.push(path.join(outputDir, zipFileName));
+  }
+
+  if (installerFileName) {
+    payloadFiles.push(path.join(outputDir, installerFileName));
+    const installerBlockmapPath = path.join(outputDir, `${installerFileName}.blockmap`);
+
+    if (fs.existsSync(installerBlockmapPath)) {
+      payloadFiles.push(installerBlockmapPath);
+    }
+  }
+
+  return {
+    metadataFiles: [latestYmlPath, manifestPath],
+    payloadFiles: payloadFiles.filter((filePath) => fs.existsSync(filePath))
+  };
 }
 
 function publicBaseUrl(bucket, region, prefix) {
@@ -102,15 +125,28 @@ async function main() {
     SecretId: secretId,
     SecretKey: secretKey
   });
-  const artifacts = findArtifacts(outputDir);
+  const { metadataFiles, payloadFiles } = findArtifacts(outputDir);
+  const artifacts = [...payloadFiles, ...metadataFiles];
 
   if (!artifacts.length) {
-    throw new Error('dist 目录下找不到可上传的更新产物。先运行 npm run build。');
+    throw new Error('No update artifacts were found in dist. Run npm run build first.');
+  }
+
+  if (!payloadFiles.length || !metadataFiles.length) {
+    throw new Error('Update artifacts are incomplete. Generate the installer and latest.yml/update-manifest.json first.');
   }
 
   const uploaded = [];
 
-  for (const filePath of artifacts) {
+  for (const filePath of payloadFiles) {
+    uploaded.push(await uploadFile(cos, {
+      bucket,
+      region,
+      prefix
+    }, filePath));
+  }
+
+  for (const filePath of metadataFiles) {
     uploaded.push(await uploadFile(cos, {
       bucket,
       region,

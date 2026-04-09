@@ -801,6 +801,7 @@ function createNetdiskRuntime(dependencies = {}) {
     authorizeNetdisk,
     buildLibraryFolderModel,
     buildLibraryModel,
+    clearPendingNetdiskAuth,
     ensureNetdiskAccessToken,
     getNetdiskFileDlink,
     loadNetdiskState,
