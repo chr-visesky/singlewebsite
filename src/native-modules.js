@@ -136,6 +136,10 @@ function launchNativeModule(moduleId, options = {}) {
     const child = spawn(executablePath, [], {
       cwd: path.dirname(executablePath),
       detached: true,
+      env: {
+        ...process.env,
+        ...(options.environment || {})
+      },
       stdio: 'ignore',
       windowsHide: false
     });

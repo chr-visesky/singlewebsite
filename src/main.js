@@ -287,6 +287,7 @@ const {
 let scheduleSessionPersist = () => {};
 const studyTargetRuntime = createStudyTargetRuntime({
   dialog,
+  getAppConfig: () => appConfig,
   launchLearningTool,
   launchNativeModule,
   learningToolEntryTarget: (toolId) => learningToolEntryTarget(toolId),

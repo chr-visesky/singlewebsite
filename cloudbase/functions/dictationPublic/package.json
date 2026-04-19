@@ -3,6 +3,7 @@
   "private": true,
   "dependencies": {
     "@cloudbase/node-sdk": "^3.10.0",
+    "tencentcloud-sdk-nodejs-tts": "^4.1.203",
     "wx-server-sdk": "latest"
   }
 }

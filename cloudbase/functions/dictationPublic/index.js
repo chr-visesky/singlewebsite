@@ -3,6 +3,7 @@
 const cloud = require('wx-server-sdk');
 const { createAgentDictationPublicRuntime } = require('./shared/agent-dictation-public');
 const { createAgentDictationRuntime } = require('./shared/agent-dictation-runtime');
+const { createDictationSpeechRuntime } = require('./shared/dictation-speech-runtime');
 const { createCollectionEnsurer } = require('./shared/ensure-collection');
 
 cloud.init({
@@ -40,6 +41,9 @@ const dictationRuntime = createAgentDictationRuntime({
 });
 const publicRuntime = createAgentDictationPublicRuntime({
   agentDictationRuntime: dictationRuntime,
+  dictationSpeechRuntime: createDictationSpeechRuntime({
+    normalizePrefix
+  }),
   readToken: READ_TOKEN,
   agentWriteToken: AGENT_WRITE_TOKEN,
   normalizePrefix

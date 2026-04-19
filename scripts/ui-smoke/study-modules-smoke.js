@@ -47,7 +47,7 @@ function runStudyModulesSmoke({ rootDir, outputDir }) {
   const dotnetPath = resolveDotnetPath();
   const dotnetEnv = createDotnetEnvironment(dotnetPath);
   const projectPath = path.join(rootDir, 'tools', 'StudyModules.UiSmoke', 'StudyModules.UiSmoke.csproj');
-  const assemblyPath = path.join(rootDir, 'tools', 'StudyModules.UiSmoke', 'bin', 'Debug', 'net10.0', 'StudyModules.UiSmoke.dll');
+  const assemblyPath = path.join(rootDir, 'tools', 'StudyModules.UiSmoke', 'bin', 'Debug', 'net10.0-windows', 'StudyModules.UiSmoke.dll');
   const dictationAppPath = path.join(rootDir, 'dist', 'StudyGate-win32-x64', 'modules', 'dictation', 'DictationApp.exe');
   const recitationAppPath = path.join(rootDir, 'dist', 'StudyGate-win32-x64', 'modules', 'recitation', 'RecitationApp.exe');
 

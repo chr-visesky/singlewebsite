@@ -288,6 +288,17 @@ This file records regressions that were introduced during development and then f
   After download completed and the app entered `installing`, the updater did start `StudyGate-Setup-2026.408.1815.exe`, but the installed version stayed on `1744` while the installer process remained alive with `--updated --force-run`.
 - Root cause:
   `src/auto-update-runtime.js` called `autoUpdater.quitAndInstall(false, true)`. In `electron-updater`, the first argument controls silent mode, so the desktop updater was starting the NSIS installer as a non-silent install during an otherwise automatic flow.
+
+## Dictation session layout fought the real lesson workflow
+
+- How it appeared:
+  The dictation session showed one small handwriting box per item, so the child had to look across many mini writing areas instead of following a normal classroom rhythm. The page also made the lesson feel like a form editor rather than "listen to this question, write it, save it, move on".
+- Root cause:
+  The session UI was designed around per-row editing and deferred checking, but it never matched the intended mental model of "top = lesson progress and saved results, bottom = one current writing board". That mismatch came from treating the session as a list of parallel inputs instead of a single active-answer workspace.
+- Fix:
+  Redesigned `DictationApp` so the top half is a lesson result strip with one card per question and the bottom half is a single large handwriting board. Each answer is now saved upward into its question card, the board is cleared for the next question, and grading still happens only after the whole round is complete.
+- Avoid:
+  For classroom-style dictation, always design around one active answer at a time. Keep "progress/history" and "current writing surface" separate, and validate the interaction against a real student workflow before adding more per-item controls.
 - Fix:
   Switched the call to `autoUpdater.quitAndInstall(true, true)` so automatic upgrades run the installer silently and still relaunch the app after install.
 - Avoid:
@@ -303,3 +314,58 @@ This file records regressions that were introduced during development and then f
   Reworked `scripts/ui-smoke/update-runtime-smoke.js` to create a temporary `resources/app-update.yml`, point `process.resourcesPath` at it, and assert the silent install call shape as part of the smoke.
 - Avoid:
   When packaging assumptions become stricter, update the smoke harness to mimic the packaged filesystem contract instead of weakening the production guard. Packaged-app checks and runtime smoke should validate the same prerequisites.
+
+## Dictation session still showed too much chrome after switching to the single handwriting board
+
+- How it appeared:
+  After the first single-board redesign, the session page still felt busy: the top area was too tall, question cards occupied too much space, the bottom area still carried extra prompt text, and the writing-time controls had not been fully pushed out into settings.
+- Root cause:
+  The redesign fixed the high-level flow, but the visible layout still inherited too much of the previous "instruction-heavy form" structure. We kept a roomy top container, oversized cards, and visible helper copy in the writing area instead of treating the session as a minimal classroom surface.
+- Fix:
+  Compressed the top section into a flat horizontal question strip, reduced each card to a small number-plus-preview tile, removed the extra visible session copy from the bottom area so only the handwriting board and `清空手写` remain, and kept playback count / writing seconds exclusively in the dedicated settings window. Updated native-module smoke and the real-UI test case document to validate the new structure.
+- Avoid:
+  For dictation session UI, separate "visible student surface" from "automation/status plumbing". Visible elements should be limited to what the student truly needs in the moment, while status text and timing metadata stay hidden for smoke and diagnostics. Whenever the dictation layout is changed, verify the real window still reads as "top = question strip, bottom = one handwriting board" before closing the work.
+
+## Dictation task home drifted away from the rest of the product shell
+
+- How it appeared:
+  The dictation task page opened in a smaller window, the four action buttons were squeezed so the right edge could be clipped, tasks could not be deleted from the UI, and the overall button/card styling no longer matched the rest of the WPF modules or the desktop shell.
+- Root cause:
+  The page kept a narrow fixed action strip that no longer fit the growing button set, never added a delete path to the task store or main window, did not default to the expected maximized state, and had no module-level shared style resources to keep DictationApp visually aligned with the other surfaces.
+- Fix:
+  Reworked the dictation home action area into a stable multi-row layout, added task deletion to `DictationTaskStore` and the main window, made the main dictation window start maximized, introduced app-level shared brushes/button/card/input styles for DictationApp, and updated native-module smoke plus the real-UI test cases to check the maximized shell and visible actions.
+- Avoid:
+  Treat a module landing page as part of the same product shell, not a one-off screen. Any time actions are added to a fixed toolbar area, revalidate layout at runtime sizes, add the missing persistence path if the action edits data, and keep the module on shared visual tokens instead of ad-hoc inline styling.
+
+## Dictation lesson window did not follow the same default maximized shell behavior
+
+- How it appeared:
+  The dictation task home already opened maximized, but after clicking `开始听写` the actual lesson window still opened in a smaller centered window, so the handwriting surface and question strip did not use the full screen like the rest of the module.
+- Root cause:
+  The maximized-window fix only covered `DictationApp.MainWindow`. `TaskSessionWindow` still kept its original fixed startup size and never opted into the same shell behavior.
+- Fix:
+  Made `TaskSessionWindow` start maximized and updated the native-module smoke plus the real-UI test cases to assert that both the task home and the lesson window now open maximized by default.
+- Avoid:
+  When a module adopts a default shell behavior such as maximized startup, apply it to the full primary flow, not just the landing page. Smoke should validate every top-level window the learner actually uses, not only the first one.
+
+## Dictation session drifted into batch typing and stopped matching the real lesson workflow
+
+- How it appeared:
+  During development, the dictation session regressed into a “batch + text box + manual review” flow. That made the module feel like task management instead of student dictation, and it no longer matched the real classroom path of “finish one lesson, then review only the wrong words”.
+- Root cause:
+  The session redesign started from implementation convenience rather than the actual student workflow. We used batch rows, typed answers, and loose review steps, so the product boundary drifted away from “lesson-based handwriting dictation with automatic judging”.
+- Fix:
+  Replaced the batch text-box session with a lesson-first handwriting session, added per-item `InkCanvas` writing areas, split handwriting recognition from judging, made judging strict enough to prefer `请重写` over false positives, kept wrong-word replay as the only follow-up round, and updated native-module smoke to validate the new real window flow.
+- Avoid:
+  For student dictation, treat the core unit as a lesson, not a batch. Keep “recognition” and “judging” as separate layers, prefer false negatives over false positives, and update UI smoke whenever the real learner flow changes so tests do not keep validating an outdated interaction model.
+
+## Dictation task home still behaved like a pop-up form instead of a lesson word-group workspace
+
+- How it appeared:
+  Even after the earlier cleanup, the task home still felt like a management form: the main actions lived in a toolbar cluster, grouping was weak, and editing a lesson still leaned on the old pop-up mental model instead of letting the parent manage one lesson's word groups inline.
+- Root cause:
+  The page structure had not fully shifted from “task CRUD screen” to “lesson word-group workspace”. Creation, editing, and deletion were still organized around toolbar actions and separate editor surfaces, so the UI hierarchy did not match the desired flow of “pick a grouped lesson on the left, edit the individual dictation word groups on the right”.
+- Fix:
+  Reworked `DictationApp.MainWindow` into a split workspace: a single `+` create affordance and grouped task cards on the left, card-level edit/delete actions, and a right-side inline editor focused on one word group row at a time. Added new automation anchors for the grouped list and inline editor, refreshed the real-UI test case document, and updated native-module smoke to validate the new shell.
+- Avoid:
+  For study-task modules, decide the primary interaction unit first. If the real unit is a lesson's word-group set, the landing page must be a workspace for that set, not a generic CRUD toolbar. Whenever the interaction model changes, update both the visible IA and the smoke anchors in the same change.

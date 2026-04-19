@@ -24,6 +24,27 @@ public sealed class DictationTask
     [JsonProperty("language")]
     public string Language { get; set; } = "中文";
 
+    [JsonProperty("sourceType")]
+    public string SourceType { get; set; } = "manual";
+
+    [JsonProperty("textbook")]
+    public string Textbook { get; set; } = string.Empty;
+
+    [JsonProperty("grade")]
+    public string Grade { get; set; } = string.Empty;
+
+    [JsonProperty("term")]
+    public string Term { get; set; } = string.Empty;
+
+    [JsonProperty("unitTitle")]
+    public string UnitTitle { get; set; } = string.Empty;
+
+    [JsonProperty("lessonTitle")]
+    public string LessonTitle { get; set; } = string.Empty;
+
+    [JsonProperty("courseKey")]
+    public string CourseKey { get; set; } = string.Empty;
+
     [JsonProperty("items")]
     public List<DictationTaskItem> Items { get; set; } = new();
 
@@ -34,7 +55,71 @@ public sealed class DictationTask
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 
     [JsonIgnore]
-    public string Summary => $"{Subject} · {Bucket} · {TargetDate:yyyy-MM-dd} · {Items.Count} 项";
+    public string Summary => BuildSummary();
+
+    [JsonIgnore]
+    public string CourseLabel => BuildCourseLabel();
+
+    [JsonIgnore]
+    public string GroupLabel => BuildGroupLabel();
+
+    private string BuildSummary()
+    {
+        string courseLabel = BuildCourseLabel();
+        string prefix = string.IsNullOrWhiteSpace(courseLabel)
+            ? $"{Subject} · {Bucket}"
+            : $"{Subject} · {courseLabel}";
+        return $"{prefix} · {Items.Count} 题";
+    }
+
+    private string BuildCourseLabel()
+    {
+        var parts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(Textbook))
+        {
+            parts.Add(Textbook.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(Grade))
+        {
+            parts.Add(Grade.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(Term))
+        {
+            parts.Add(Term.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(UnitTitle))
+        {
+            parts.Add(UnitTitle.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(LessonTitle))
+        {
+            parts.Add(LessonTitle.Trim());
+        }
+
+        return parts.Count == 0 ? string.Empty : string.Join(" · ", parts);
+    }
+
+    private string BuildGroupLabel()
+    {
+        string courseLabel = BuildCourseLabel();
+
+        if (!string.IsNullOrWhiteSpace(courseLabel))
+        {
+            return courseLabel;
+        }
+
+        if (!string.IsNullOrWhiteSpace(LessonTitle))
+        {
+            return LessonTitle.Trim();
+        }
+
+        return $"{Subject} · {Bucket}";
+    }
 }
 
 public sealed class DictationTaskItem

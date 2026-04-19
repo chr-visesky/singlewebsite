@@ -7,76 +7,107 @@
         Height="720"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize">
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Grid Background="{StaticResource ModuleShellBackgroundBrush}">
+        <Border Margin="20"
+                Padding="24"
+                Style="{StaticResource PanelBorderStyle}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-        <StackPanel>
-            <TextBlock Text="任务标题" FontWeight="SemiBold" />
-            <TextBox x:Name="TitleTextBox" Margin="0,8,0,0" Height="38" />
-        </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="任务标题"
+                               Style="{StaticResource SectionTitleStyle}" />
+                    <TextBox x:Name="TitleTextBox"
+                             Margin="0,8,0,0"
+                             Height="38" />
+                </StackPanel>
 
-        <Grid Grid.Row="1" Margin="0,18,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Margin="0,0,12,0">
-                <TextBlock Text="科目" FontWeight="SemiBold" />
-                <ComboBox x:Name="SubjectComboBox" Margin="0,8,0,0" SelectedIndex="0">
-                    <ComboBoxItem Content="语文" />
-                    <ComboBoxItem Content="英语" />
-                </ComboBox>
-            </StackPanel>
-            <StackPanel Grid.Column="1" Margin="0,0,12,0">
-                <TextBlock Text="课内/课外" FontWeight="SemiBold" />
-                <ComboBox x:Name="BucketComboBox" Margin="0,8,0,0" SelectedIndex="0">
-                    <ComboBoxItem Content="课内" />
-                    <ComboBoxItem Content="课外" />
-                </ComboBox>
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-                <TextBlock Text="日期" FontWeight="SemiBold" />
-                <DatePicker x:Name="TargetDatePicker" Margin="0,8,0,0" />
-            </StackPanel>
-        </Grid>
+                <Grid Grid.Row="1"
+                      Margin="0,18,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="科目"
+                                   Style="{StaticResource SectionBodyStyle}"
+                                   Foreground="{StaticResource ModuleTextBrush}" />
+                        <ComboBox x:Name="SubjectComboBox"
+                                  Margin="0,8,0,0"
+                                  SelectedIndex="0">
+                            <ComboBoxItem Content="语文" />
+                            <ComboBoxItem Content="英语" />
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1"
+                                Margin="0,0,12,0">
+                        <TextBlock Text="课内/课外"
+                                   Style="{StaticResource SectionBodyStyle}"
+                                   Foreground="{StaticResource ModuleTextBrush}" />
+                        <ComboBox x:Name="BucketComboBox"
+                                  Margin="0,8,0,0"
+                                  SelectedIndex="0">
+                            <ComboBoxItem Content="课内" />
+                            <ComboBoxItem Content="课外" />
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="日期"
+                                   Style="{StaticResource SectionBodyStyle}"
+                                   Foreground="{StaticResource ModuleTextBrush}" />
+                        <DatePicker x:Name="TargetDatePicker"
+                                    Margin="0,8,0,0" />
+                    </StackPanel>
+                </Grid>
 
-        <StackPanel Grid.Row="2" Margin="0,18,0,0">
-            <TextBlock Text="朗读语言" FontWeight="SemiBold" />
-            <ComboBox x:Name="LanguageComboBox" Margin="0,8,0,0" SelectedIndex="0">
-                <ComboBoxItem Content="中文" />
-                <ComboBoxItem Content="英语" />
-            </ComboBox>
-        </StackPanel>
+                <StackPanel Grid.Row="2"
+                            Margin="0,18,0,0">
+                    <TextBlock Text="朗读语言"
+                               Style="{StaticResource SectionBodyStyle}"
+                               Foreground="{StaticResource ModuleTextBrush}" />
+                    <ComboBox x:Name="LanguageComboBox"
+                              Margin="0,8,0,0"
+                              SelectedIndex="0">
+                        <ComboBoxItem Content="中文" />
+                        <ComboBoxItem Content="英语" />
+                    </ComboBox>
+                </StackPanel>
 
-        <StackPanel Grid.Row="3" Margin="0,18,0,0">
-            <TextBlock Text="听写内容（每行一项）" FontWeight="SemiBold" />
-            <TextBox x:Name="ItemsTextBox"
-                     Margin="0,8,0,0"
-                     AcceptsReturn="True"
-                     VerticalScrollBarVisibility="Auto"
-                     TextWrapping="Wrap" />
-        </StackPanel>
+                <StackPanel Grid.Row="3"
+                            Margin="0,18,0,0">
+                    <TextBlock Text="听写内容（每行一题）"
+                               Style="{StaticResource SectionTitleStyle}" />
+                    <TextBox x:Name="ItemsTextBox"
+                             Margin="0,8,0,0"
+                             AcceptsReturn="True"
+                             VerticalScrollBarVisibility="Auto"
+                             TextWrapping="Wrap" />
+                </StackPanel>
 
-        <StackPanel Grid.Row="4"
-                    Margin="0,24,0,0"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right">
-            <Button MinWidth="120"
-                    Margin="0,0,12,0"
-                    Padding="18,12"
-                    Click="SaveButton_OnClick"
-                    Content="保存" />
-            <Button MinWidth="120"
-                    Padding="18,12"
-                    Click="CancelButton_OnClick"
-                    Content="取消" />
-        </StackPanel>
+                <StackPanel Grid.Row="4"
+                            Margin="0,24,0,0"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right">
+                    <Button MinWidth="120"
+                            Margin="0,0,12,0"
+                            Padding="18,12"
+                            Click="SaveButton_OnClick"
+                            Content="保存"
+                            Style="{StaticResource PrimaryButtonStyle}" />
+                    <Button MinWidth="120"
+                            Padding="18,12"
+                            Click="CancelButton_OnClick"
+                            Content="取消"
+                            Style="{StaticResource SecondaryButtonStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

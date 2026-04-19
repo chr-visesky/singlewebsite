@@ -3,6 +3,7 @@
 function createStudyTargetRuntime(dependencies = {}) {
   const {
     dialog,
+    getAppConfig,
     launchLearningTool,
     launchNativeModule,
     learningToolEntryTarget,
@@ -24,6 +25,24 @@ function createStudyTargetRuntime(dependencies = {}) {
     return resolveNativeModuleDefinitionFromIndex(moduleId) || resolveNativeModule(moduleId);
   }
 
+  function buildNativeModuleEnvironment(moduleId) {
+    if (moduleId !== 'dictation-module' || typeof getAppConfig !== 'function') {
+      return {};
+    }
+
+    const appConfig = getAppConfig();
+    const remoteDictation = appConfig && appConfig.remoteDictation ? appConfig.remoteDictation : null;
+
+    if (!remoteDictation || !remoteDictation.enabled) {
+      return {};
+    }
+
+    return {
+      STUDYGATE_DICTATION_SERVICE_URL: normalizePrefix(remoteDictation.url),
+      STUDYGATE_DICTATION_SERVICE_TOKEN: normalizePrefix(remoteDictation.authToken)
+    };
+  }
+
   function launchNativeModuleEntry(moduleId) {
     const moduleDefinition = resolveNativeModuleDefinition(moduleId);
 
@@ -32,6 +51,7 @@ function createStudyTargetRuntime(dependencies = {}) {
     }
 
     const result = launchNativeModule(moduleId, {
+      environment: buildNativeModuleEnvironment(moduleId),
       executableDir: pathModule.dirname(processExecPath()),
       projectRoot: projectRootPath
     });

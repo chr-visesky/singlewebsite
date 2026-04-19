@@ -15,6 +15,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="Microsoft.Ink">
+      <HintPath>$(CommonProgramFiles)\Microsoft Shared\Ink\Microsoft.Ink.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <Resource Include="Assets\module-icon.ico" />
   </ItemGroup>
 </Project>

@@ -30,6 +30,15 @@ function normalizeLanguage(value, subject) {
   return normalizeSubject(subject) === '英语' ? '英语' : '中文';
 }
 
+function normalizeCourseField(value, maxLength = 80) {
+  return String(value || '').trim().slice(0, maxLength);
+}
+
+function normalizeSourceType(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized || 'manual';
+}
+
 function normalizeQueryText(value) {
   return String(value || '').trim().slice(0, 40).toLowerCase();
 }
@@ -108,6 +117,13 @@ function createAgentDictationRuntime(options = {}) {
         bucket,
         targetDate: normalizeDate(item.targetDate, fallbackDate),
         language: normalizeLanguage(item.language, subject),
+        sourceType: normalizeSourceType(item.sourceType || 'cloud'),
+        textbook: normalizeCourseField(item.textbook, 120),
+        grade: normalizeCourseField(item.grade, 40),
+        term: normalizeCourseField(item.term, 40),
+        unitTitle: normalizeCourseField(item.unitTitle, 80),
+        lessonTitle: normalizeCourseField(item.lessonTitle, 80),
+        courseKey: normalizeCourseField(item.courseKey, 120),
         items: dictationItems,
         summary: normalizeSummary(item.summary, `${subject}听写创建请求`),
         note: normalizeNote(item.note || item.description),
@@ -286,6 +302,13 @@ function createAgentDictationRuntime(options = {}) {
       bucket: item.bucket,
       targetDate: item.targetDate,
       language: item.language,
+      sourceType: item.sourceType,
+      textbook: item.textbook,
+      grade: item.grade,
+      term: item.term,
+      unitTitle: item.unitTitle,
+      lessonTitle: item.lessonTitle,
+      courseKey: item.courseKey,
       items: item.items.slice(),
       itemCount: item.items.length,
       summary: item.summary,
@@ -400,6 +423,13 @@ function createAgentDictationRuntime(options = {}) {
       bucket: normalizeBucket(payload.bucket),
       targetDate: normalizeDate(payload.targetDate, now.slice(0, 10)),
       language: normalizeLanguage(payload.language, subject),
+      sourceType: normalizeSourceType(payload.sourceType || 'cloud'),
+      textbook: normalizeCourseField(payload.textbook, 120),
+      grade: normalizeCourseField(payload.grade, 40),
+      term: normalizeCourseField(payload.term, 40),
+      unitTitle: normalizeCourseField(payload.unitTitle, 80),
+      lessonTitle: normalizeCourseField(payload.lessonTitle, 80),
+      courseKey: normalizeCourseField(payload.courseKey, 120),
       items,
       summary: normalizeSummary(payload.summary, `${subject}听写创建请求`),
       note: normalizeNote(payload.note || payload.description),

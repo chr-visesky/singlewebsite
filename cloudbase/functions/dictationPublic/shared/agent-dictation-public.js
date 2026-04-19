@@ -3,6 +3,7 @@
 function createAgentDictationPublicRuntime(options = {}) {
   const {
     agentDictationRuntime,
+    dictationSpeechRuntime,
     readToken,
     agentWriteToken,
     normalizePrefix
@@ -169,6 +170,32 @@ function createAgentDictationPublicRuntime(options = {}) {
         'getAgentDictationRequestStatuses',
         'queryAgentDictationRequests'
       ]);
+
+      if (action === 'synthesizeDictationSpeech') {
+        if (!readToken) {
+          return jsonResponse(500, {
+            error: 'missing_read_token'
+          });
+        }
+
+        if (requestToken !== readToken) {
+          return jsonResponse(403, {
+            error: 'forbidden'
+          });
+        }
+
+        try {
+          return jsonResponse(200, await dictationSpeechRuntime.synthesizeSpeech(payload));
+        } catch (error) {
+          if (error && error.code) {
+            return jsonResponse(400, {
+              error: error.code
+            });
+          }
+
+          throw error;
+        }
+      }
 
       if (agentActions.has(action)) {
         if (!agentWriteToken) {

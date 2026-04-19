@@ -22,7 +22,7 @@ public partial class TaskEditorWindow : Window
         SelectComboItem(SubjectComboBox, task.Subject);
         SelectComboItem(BucketComboBox, task.Bucket);
         SelectComboItem(LanguageComboBox, task.Language);
-        ItemsTextBox.Text = string.Join(Environment.NewLine, task.Items.Select(item => item.Text));
+        ItemsTextBox.Text = string.Join(Environment.NewLine, task.Items.Select((item) => item.Text));
     }
 
     public DictationTask BuildTask(string? taskId = null, DateTime? createdAt = null)
@@ -38,11 +38,11 @@ public partial class TaskEditorWindow : Window
             CreatedAt = createdAt ?? default,
             Items = ItemsTextBox.Text
                 .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(item => new DictationTaskItem
+                .Select((item) => new DictationTaskItem
                 {
                     Text = item.Trim()
                 })
-                .Where(item => !string.IsNullOrWhiteSpace(item.Text))
+                .Where((item) => !string.IsNullOrWhiteSpace(item.Text))
                 .ToList()
         };
     }

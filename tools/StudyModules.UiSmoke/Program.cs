@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -178,6 +179,8 @@ internal static class Program
         {
             report.FailedChecks.Add($"听写模块创建后的 items 数量不对：{itemCount}");
         }
+
+        DictationUiSmoke.Run(appPath, dataRoot, report.Dictation, report.FailedChecks);
     }
 
     private static void RunRecitationSmoke(string appPath, string outputDir, string dataRoot, ModuleSmokeReport report)
@@ -271,6 +274,7 @@ internal static class Program
         };
 
         startInfo.Environment["STUDYGATE_MODULES_DATA_ROOT"] = dataRoot;
+        ApplyDotnetEnvironment(startInfo);
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"无法启动 {executablePath}");
         string stdout = process.StandardOutput.ReadToEnd();
@@ -296,5 +300,19 @@ internal static class Program
         }
 
         return string.Empty;
+    }
+
+    private static void ApplyDotnetEnvironment(ProcessStartInfo startInfo)
+    {
+        string dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT_X64")
+            ?? Environment.GetEnvironmentVariable("DOTNET_ROOT")
+            ?? Path.GetDirectoryName(Environment.ProcessPath ?? string.Empty)
+            ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(dotnetRoot))
+        {
+            startInfo.Environment["DOTNET_ROOT"] = dotnetRoot;
+            startInfo.Environment["DOTNET_ROOT_X64"] = dotnetRoot;
+        }
     }
 }

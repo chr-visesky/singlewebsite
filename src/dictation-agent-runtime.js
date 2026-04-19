@@ -185,6 +185,13 @@ function createDictationAgentRuntime(dependencies = {}) {
           bucket: request.bucket,
           targetDate: request.targetDate,
           language: request.language,
+          sourceType: request.sourceType,
+          textbook: request.textbook,
+          grade: request.grade,
+          term: request.term,
+          unitTitle: request.unitTitle,
+          lessonTitle: request.lessonTitle,
+          courseKey: request.courseKey,
           items: Array.isArray(request.items) ? request.items : []
         },
         workingDirectory

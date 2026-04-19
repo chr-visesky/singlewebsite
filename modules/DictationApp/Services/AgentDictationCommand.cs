@@ -25,6 +25,27 @@ public static class AgentDictationCommand
         [JsonProperty("language")]
         public string Language { get; set; } = string.Empty;
 
+        [JsonProperty("sourceType")]
+        public string SourceType { get; set; } = string.Empty;
+
+        [JsonProperty("textbook")]
+        public string Textbook { get; set; } = string.Empty;
+
+        [JsonProperty("grade")]
+        public string Grade { get; set; } = string.Empty;
+
+        [JsonProperty("term")]
+        public string Term { get; set; } = string.Empty;
+
+        [JsonProperty("unitTitle")]
+        public string UnitTitle { get; set; } = string.Empty;
+
+        [JsonProperty("lessonTitle")]
+        public string LessonTitle { get; set; } = string.Empty;
+
+        [JsonProperty("courseKey")]
+        public string CourseKey { get; set; } = string.Empty;
+
         [JsonProperty("items")]
         public List<string> Items { get; set; } = new();
     }
@@ -81,7 +102,14 @@ public static class AgentDictationCommand
                 payload.Bucket,
                 payload.TargetDate,
                 payload.Language,
-                payload.Items);
+                payload.Items,
+                payload.SourceType,
+                payload.Textbook,
+                payload.Grade,
+                payload.Term,
+                payload.UnitTitle,
+                payload.LessonTitle,
+                payload.CourseKey);
             CommandFileIO.WriteJsonFile(resultFile, new CreateDictationResult
             {
                 Ok = true,
