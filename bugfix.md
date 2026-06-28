@@ -421,3 +421,14 @@ This file records regressions that were introduced during development and then f
   Normalized zip entry names to slash-separated paths before comparing them in `scripts/ui-smoke/skill-zip-smoke.js`.
 - Avoid:
   Zip smoke checks must compare normalized logical paths, not platform-specific archive entry separators.
+
+## Update publishing asked for COS keys even though the feed uses CloudBase hosting
+
+- How it appeared:
+  Publishing desktop update artifacts appeared to require `STUDYGATE_COS_SECRET_ID` and `STUDYGATE_COS_SECRET_KEY`, even though previous releases were uploaded through the CloudBase/WeChat cloud development login state without manually created AK/SK credentials.
+- Root cause:
+  The package script still pointed at the legacy raw COS SDK uploader while the actual update feed is hosted from CloudBase static hosting at `studygate-updates/latest/`.
+- Fix:
+  Added a CloudBase hosting publisher that uploads the exact update artifacts through the project-local CloudBase CLI, and made the legacy `publish:updates:cos` command route to that CloudBase publisher.
+- Avoid:
+  For this repo, treat the update feed as CloudBase static hosting. Use raw COS SDK credentials only through the explicit legacy `publish:updates:cos:sdk` command.
