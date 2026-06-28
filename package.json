@@ -11,6 +11,7 @@
     "publish:updates:cloudbase": "node scripts/publish-cloudbase-hosting-release.js",
     "publish:updates:cos": "node scripts/publish-cloudbase-hosting-release.js",
     "publish:updates:cos:sdk": "node scripts/publish-cos-release.js",
+    "cloudbase:functions:deploy": "node scripts/deploy-cloudbase-functions.js",
     "server": "node server/server.js",
     "cloudbase:token": "node scripts/generate-cloudbase-token.js",
     "test:ui": "node scripts/ui-smoke/run.js",

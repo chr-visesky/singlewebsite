@@ -89,6 +89,69 @@ function run(command, args, options = {}) {
   }
 }
 
+function runCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd || process.cwd(),
+    encoding: 'utf8',
+    shell: false
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(' ')} exited with code ${result.status}\n${result.stderr || result.stdout || ''}`);
+  }
+
+  return `${result.stdout || ''}${result.stderr || ''}`;
+}
+
+function parseFirstJsonObject(output) {
+  const text = String(output || '');
+  const start = text.indexOf('{');
+
+  if (start < 0) {
+    throw new Error(`Unable to parse JSON output: ${text}`);
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+
+      if (depth === 0) {
+        return JSON.parse(text.slice(start, index + 1));
+      }
+    }
+  }
+
+  throw new Error(`Unable to find complete JSON object in output: ${text}`);
+}
+
 function uploadFile({ nodePath, cliPath, envId, prefix, filePath }) {
   const fileName = path.basename(filePath);
   const cloudPath = `${prefix}/${fileName}`;
@@ -102,6 +165,28 @@ function uploadFile({ nodePath, cliPath, envId, prefix, filePath }) {
   };
 }
 
+function cleanupStaleFiles({ nodePath, cliPath, envId, prefix, currentFileNames }) {
+  const output = runCapture(nodePath, [cliPath, 'hosting', 'list', prefix, '--env-id', envId, '--json']);
+  const listing = parseFirstJsonObject(output);
+  const items = Array.isArray(listing.data) ? listing.data : [];
+  const keep = new Set(currentFileNames);
+  const deleted = [];
+
+  for (const item of items) {
+    const key = item && item.key;
+    const fileName = path.posix.basename(String(key || '').replace(/\\/g, '/'));
+
+    if (!key || keep.has(fileName)) {
+      continue;
+    }
+
+    run(nodePath, [cliPath, 'hosting', 'delete', key, '--env-id', envId, '--json']);
+    deleted.push(key);
+  }
+
+  return deleted;
+}
+
 function main() {
   const rootDir = path.resolve(__dirname, '..');
   const outputDir = path.join(rootDir, 'dist');
@@ -110,6 +195,7 @@ function main() {
   const baseUrl = readBaseUrl(rootDir, prefix);
   const cliPath = path.join(rootDir, 'tools', 'wechat-cli', 'node_modules', '@cloudbase', 'cli', 'bin', 'cloudbase');
   const { metadataFiles, payloadFiles } = findArtifacts(outputDir);
+  const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'update-manifest.json'), 'utf8'));
 
   if (!payloadFiles.length || !metadataFiles.length) {
     throw new Error('Update artifacts are incomplete. Run npm run build before publishing.');
@@ -137,10 +223,20 @@ function main() {
     }));
   }
 
+  const currentFileNames = [...payloadFiles, ...metadataFiles].map((filePath) => path.basename(filePath));
+  const deletedStaleFiles = cleanupStaleFiles({
+    nodePath: process.execPath,
+    cliPath,
+    envId,
+    prefix,
+    currentFileNames
+  });
+
   const report = {
     uploadedAt: new Date().toISOString(),
     envId,
     baseUrl,
+    deletedStaleFiles,
     files: uploaded.map((file) => ({
       ...file,
       url: `${baseUrl}/${encodeURIComponent(file.fileName)}`

@@ -432,3 +432,14 @@ This file records regressions that were introduced during development and then f
   Added a CloudBase hosting publisher that uploads the exact update artifacts through the project-local CloudBase CLI, and made the legacy `publish:updates:cos` command route to that CloudBase publisher.
 - Avoid:
   For this repo, treat the update feed as CloudBase static hosting. Use raw COS SDK credentials only through the explicit legacy `publish:updates:cos:sdk` command.
+
+## CloudBase admin functions were not listed in the deploy config
+
+- How it appeared:
+  Running `cloudbase fn deploy <admin function>` fell back to an interactive "use default config" prompt instead of deploying immediately, so admin/public functions could be skipped during release.
+- Root cause:
+  `cloudbase/cloudbaserc.json` only listed `skillPublic`; the admin and public functions existed locally and remotely but were not part of the project deploy configuration.
+- Fix:
+  Added every CloudBase function to `cloudbase/cloudbaserc.json` with the existing Nodejs16.13 runtime, added `npm run cloudbase:functions:deploy`, and verified the full function set deploys non-interactively.
+- Avoid:
+  Keep every deployable CloudBase function in `cloudbase/cloudbaserc.json`. Release functions through `npm run cloudbase:functions:deploy` instead of one-off CLI commands.

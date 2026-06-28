@@ -4,6 +4,66 @@
   "functionRoot": "./functions",
   "functions": [
     {
+      "name": "scheduleAdmin",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "schedulePublic",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "homeworkAdmin",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "homeworkPublic",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "dictationAdmin",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "dictationPublic",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "recitationAdmin",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "recitationPublic",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "agentAccessAdmin",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
+      "name": "agentAccessPublic",
+      "runtime": "Nodejs16.13",
+      "handler": "index.main",
+      "timeout": 15
+    },
+    {
       "name": "skillPublic",
       "runtime": "Nodejs16.13",
       "handler": "index.main",

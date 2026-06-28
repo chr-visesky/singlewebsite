@@ -32,6 +32,10 @@
 - The CloudBase static hosting bucket is `8bb1-static-selfuse-5g3tkjfq0ede092b-1324687027`.
 - The CloudBase storage bucket is `7365-selfuse-5g3tkjfq0ede092b-1324687027`.
 - Publish desktop update artifacts to `studygate-updates/latest/` and keep exactly these files in sync: `latest.yml`, `update-manifest.json`, `StudyGate-win32-x64.zip`, `StudyGate-Setup-<version>.exe`.
+- Desktop update artifacts are published through CloudBase static hosting with `npm run publish:updates:cloudbase` / `npm run publish:updates:cos`; do not ask for raw COS AK/SK unless explicitly using `npm run publish:updates:cos:sdk`.
+- After every desktop update publish, delete any old file under `studygate-updates/latest/` that is not part of the current publish. The CloudBase hosting publisher does this automatically so the cloud directory stays limited to the current `latest.yml`, `update-manifest.json`, `StudyGate-win32-x64.zip`, and `StudyGate-Setup-<version>.exe`.
+- Full CloudBase function release command: `npm run cloudbase:functions:deploy`. It deploys every function listed in `cloudbase/cloudbaserc.json`; keep admin and public functions listed there so deployments never fall back to interactive default prompts.
+- Current release checklist: `git pull --ff-only`, `npm run build`, `npm run test:ui`, `npm run skill:publish:study-helper` when the skill changed, `npm run cloudbase:functions:deploy` when CloudBase code/config changed, `npm run publish:updates:cloudbase`, then verify `cloudbase fn list`, `cloudbase hosting list studygate-updates/latest`, the public `update-manifest.json`, and `git status --short --branch`.
 - When the homework cloud-sync contract changes, redeploy `homeworkPublic` and `homeworkAdmin`.
 - `build/branding/studygate.ico` and `build/branding/studygate.png` are real repo assets and must stay tracked.
 - `作业模块.md` and `听写和背诵模块.md` are project documents and must stay tracked.
