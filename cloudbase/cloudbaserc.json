@@ -5,7 +5,7 @@
   "functions": [
     {
       "name": "skillPublic",
-      "runtime": "Nodejs20.19",
+      "runtime": "Nodejs16.13",
       "handler": "index.main",
       "timeout": 15
     }
