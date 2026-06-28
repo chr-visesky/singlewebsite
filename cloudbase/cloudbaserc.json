@@ -1,5 +1,13 @@
 {
   "version": "2.0",
   "envId": "selfuse-5g3tkjfq0ede092b",
-  "functionRoot": "./functions"
+  "functionRoot": "./functions",
+  "functions": [
+    {
+      "name": "skillPublic",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 15
+    }
+  ]
 }
