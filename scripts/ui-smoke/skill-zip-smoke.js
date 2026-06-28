@@ -40,13 +40,15 @@ function hasRemovedDeleteCommand(content) {
 
 function readZipEntry(zipPath, entryPath) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'study-helper-zip-'));
+  const normalizedEntryPath = String(entryPath || '').replace(/\\/g, '/');
 
   try {
     const command = `
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead('${String(zipPath).replace(/'/g, "''")}')
-$entry = $zip.Entries | Where-Object { $_.FullName -eq '${String(entryPath).replace(/'/g, "''")}' } | Select-Object -First 1
-if (-not $entry) { throw 'Zip entry not found: ${String(entryPath).replace(/'/g, "''")}' }
+$entryPath = '${String(normalizedEntryPath).replace(/'/g, "''")}'
+$entry = $zip.Entries | Where-Object { $_.FullName.Replace('\\', '/') -eq $entryPath } | Select-Object -First 1
+if (-not $entry) { throw 'Zip entry not found: ${String(normalizedEntryPath).replace(/'/g, "''")}' }
 $target = '${String(path.join(tempDir, 'entry.txt')).replace(/'/g, "''")}'
 [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
 $zip.Dispose()

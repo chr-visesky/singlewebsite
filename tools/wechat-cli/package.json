@@ -1,0 +1,15 @@
+{
+  "name": "studygate-wechat-cli",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Project-local WeChat mini program and CloudBase CLI tools for StudyGate.",
+  "scripts": {
+    "miniprogram-ci": "miniprogram-ci",
+    "cloudbase": "cloudbase",
+    "tcb": "tcb"
+  },
+  "devDependencies": {
+    "@cloudbase/cli": "3.5.8",
+    "miniprogram-ci": "2.1.31"
+  }
+}

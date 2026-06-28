@@ -410,3 +410,14 @@ This file records regressions that were introduced during development and then f
   Kept the dialog's raw entered title separate from the normalized display title. Existing homework now preserves its current title unless the user typed a new one; newly created homework still receives the automatic default title when the field is blank. Added a UI smoke regression check for appending a page without overwriting a custom title.
 - Avoid:
   Preserve user-authored metadata when reusing an existing document. Default values should be applied at object creation time, not treated as an explicit edit during append or navigation flows.
+
+## Skill zip smoke failed on Windows path separators
+
+- How it appeared:
+  `npm run test:ui` failed in the `study-helper` zip smoke even though `tar -tf` showed `study-helper/SKILL.md` inside `cloudbase/functions/skillPublic/assets/study-helper.zip`.
+- Root cause:
+  Windows `Compress-Archive` stores entry names with backslashes when read through .NET `ZipFile`, while the smoke expected only slash-separated paths.
+- Fix:
+  Normalized zip entry names to slash-separated paths before comparing them in `scripts/ui-smoke/skill-zip-smoke.js`.
+- Avoid:
+  Zip smoke checks must compare normalized logical paths, not platform-specific archive entry separators.
