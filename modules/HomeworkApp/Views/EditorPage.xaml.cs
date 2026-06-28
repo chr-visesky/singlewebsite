@@ -66,7 +66,7 @@ namespace HomeworkApp.Views
             _saveDebouncer = new System.Threading.Timer(DebouncedSave, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
 
             // Initialize color borders array
-            _colorBorders = new[] { ColorBlack, ColorRed, ColorBlue, ColorGreen, ColorYellow };
+            _colorBorders = new[] { ColorBlack, ColorRed, ColorBlue, ColorGreen, ColorYellow, ColorGray };
 
             // Setup homework tree
             TxtToday.Text = DateTime.Today.ToString("yyyy 年 MM 月 dd 日 dddd", new System.Globalization.CultureInfo("zh-CN"));
@@ -300,11 +300,13 @@ namespace HomeworkApp.Views
         private void SetupInkCanvas()
         {
             MainInkCanvas.Strokes.StrokesChanged += InkCanvas_StrokesChanged;
+            AttachSelectionHistory(MainInkCanvas);
         }
 
         private void SetupDraftInkCanvas()
         {
             DraftInkCanvas.Strokes.StrokesChanged += DraftInkCanvas_StrokesChanged;
+            AttachSelectionHistory(DraftInkCanvas);
         }
 
         private void ApplyPageCanvasSize()
@@ -340,6 +342,7 @@ namespace HomeworkApp.Views
         {
             if (e.Added.Count > 0 || e.Removed.Count > 0)
             {
+                RecordInkHistory(MainInkCanvas, e);
                 // Schedule auto-save
                 _saveDebouncer?.Change(2000, System.Threading.Timeout.Infinite);
             }
@@ -349,6 +352,7 @@ namespace HomeworkApp.Views
         {
             if (e.Added.Count > 0 || e.Removed.Count > 0)
             {
+                RecordInkHistory(DraftInkCanvas, e);
                 // Schedule auto-save
                 _saveDebouncer?.Change(2000, System.Threading.Timeout.Infinite);
             }
@@ -361,7 +365,16 @@ namespace HomeworkApp.Views
 
             if (_inkManager != null)
             {
-                _inkManager.SetStrokes(strokes ?? new StrokeCollection());
+                _isLoadingInkState = true;
+                try
+                {
+                    _inkManager.SetStrokes(strokes ?? new StrokeCollection());
+                }
+                finally
+                {
+                    _isLoadingInkState = false;
+                }
+                ResetInkHistory(MainInkCanvas);
             }
         }
 
@@ -372,7 +385,16 @@ namespace HomeworkApp.Views
 
             if (_draftInkManager != null)
             {
-                _draftInkManager.SetStrokes(strokes ?? new StrokeCollection());
+                _isLoadingInkState = true;
+                try
+                {
+                    _draftInkManager.SetStrokes(strokes ?? new StrokeCollection());
+                }
+                finally
+                {
+                    _isLoadingInkState = false;
+                }
+                ResetInkHistory(DraftInkCanvas);
             }
         }
 
@@ -436,7 +458,7 @@ namespace HomeworkApp.Views
             _saveDebouncer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
         }
 
-        private void FlushPendingChanges()
+        private void FlushPendingChanges(bool markAsLastJob = true)
         {
             if (_disposed)
             {
@@ -445,7 +467,14 @@ namespace HomeworkApp.Views
 
             StopPendingSaveDebounce();
             SaveCurrentPageInk();
-            JobManager.SaveJob(_job!);
+            if (markAsLastJob)
+            {
+                JobManager.SaveJob(_job!);
+            }
+            else
+            {
+                _job.Save(_job.JobDirectory);
+            }
         }
 
         private void UpdateScrollIndicator(ScrollViewer viewer, Border indicator, DispatcherTimer timer)
@@ -505,20 +534,34 @@ namespace HomeworkApp.Views
         {
             if (sender is Border border && border.Tag is string colorName)
             {
-                _currentColor = colorName switch
-                {
-                    "Black" => Colors.Black,
-                    "Red" => Colors.Red,
-                    "Blue" => Colors.Blue,
-                    "Green" => Colors.Green,
-                    "Yellow" => Colors.Yellow,
-                    _ => Colors.Black
-                };
-
-                _inkManager?.SetPenColor(_currentColor);
-                _draftInkManager?.SetPenColor(_currentColor);
-                UpdateColorSelectorVisual();
+                SetPenColor(colorName);
             }
+        }
+
+        private void ColorButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is string colorName)
+            {
+                SetPenColor(colorName);
+            }
+        }
+
+        private void SetPenColor(string colorName)
+        {
+            _currentColor = colorName switch
+            {
+                "Black" => Colors.Black,
+                "Red" => Colors.Red,
+                "Blue" => Colors.Blue,
+                "Green" => Colors.Green,
+                "Yellow" => Colors.Yellow,
+                "Gray" => Colors.Gray,
+                _ => Colors.Black
+            };
+
+            _inkManager?.SetPenColor(_currentColor);
+            _draftInkManager?.SetPenColor(_currentColor);
+            UpdateColorSelectorVisual();
         }
 
         private void Width1_Click(object sender, MouseButtonEventArgs e)
@@ -694,6 +737,7 @@ namespace HomeworkApp.Views
                 Color c when c == Colors.Blue => ColorBlue,
                 Color c when c == Colors.Green => ColorGreen,
                 Color c when c == Colors.Yellow => ColorYellow,
+                Color c when c == Colors.Gray => ColorGray,
                 _ => ColorBlack
             };
 
@@ -755,9 +799,18 @@ namespace HomeworkApp.Views
 
         private Task PrintJobAsync()
         {
+            var pageSelection = new PrintPageSelectionDialog(EffectivePageCount(), _currentPageIndex)
+            {
+                Owner = Window.GetWindow(this)
+            };
+            if (pageSelection.ShowDialog() != true)
+            {
+                throw new OperationCanceledException("已取消打印。");
+            }
+
             var (printQueue, printTicket) = ResolvePrintDestination();
             var document = new HomeworkPrintDocument(_job, _documentService);
-            document.Print(printQueue, printTicket);
+            document.Print(printQueue, printTicket, pageSelection.SelectedPageIndexes);
             MessageBox.Show($"已发送到打印机：{printQueue.Name}", "打印完成", MessageBoxButton.OK, MessageBoxImage.Information);
             return Task.CompletedTask;
         }
@@ -882,11 +935,13 @@ namespace HomeworkApp.Views
         {
             if (!_disposed)
             {
-                FlushPendingChanges();
+                FlushPendingChanges(markAsLastJob: false);
                 Unloaded -= EditorPage_Unloaded;
                 EndPan();
                 MainInkCanvas.Strokes.StrokesChanged -= InkCanvas_StrokesChanged;
                 DraftInkCanvas.Strokes.StrokesChanged -= DraftInkCanvas_StrokesChanged;
+                DetachSelectionHistory(MainInkCanvas);
+                DetachSelectionHistory(DraftInkCanvas);
                 StopPendingSaveDebounce();
                 _saveDebouncer?.Dispose();
                 _homeworkScrollIndicatorTimer.Stop();

@@ -190,21 +190,12 @@ async function main() {
     };
     const homework = normalizeHomeworkReport(
       runHomeworkSmoke(rootDir, path.join(outputDir, 'homework'), 'run-print-smoke', {
-        leaveProcessRunning: true,
         forceSmokeJob: true
       })
     );
-    const homeworkEditor = Number.isFinite(Number(homework.processId)) && Number(homework.processId) > 0
-      ? normalizeHomeworkReport(
-          runHomeworkSmoke(rootDir, path.join(outputDir, 'homework-editor'), 'run-editor-controls-smoke', {
-            processId: homework.processId,
-            cleanupJobDir: homework.jobDirectory
-          })
-        )
-      : {
-          passed: false,
-          failedChecks: ['HomeworkApp print smoke did not return a reusable process id.']
-        };
+    const homeworkEditor = normalizeHomeworkReport(
+      runHomeworkSmoke(rootDir, path.join(outputDir, 'homework-editor'), 'run-editor-controls-smoke')
+    );
     const homeworkInterface = await runHomeworkInterfaceSmoke({
       rootDir,
       outputDir: path.join(outputDir, 'homework-interface')

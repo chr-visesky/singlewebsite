@@ -91,6 +91,12 @@ internal static partial class HomeworkAppUiSmoke
                 File.Delete(pdfPath);
             }
 
+            AppSettingsStore.Save(new AppSettings
+            {
+                DefaultPrinterName = "Microsoft Print to PDF",
+                PaperSize = "A4"
+            });
+
             Process process;
             if (existingProcessId > 0)
             {
@@ -125,6 +131,17 @@ internal static partial class HomeworkAppUiSmoke
 
                 var printButton = WaitForDescendant(process.Id, "BtnPrint", TimeSpan.FromSeconds(20));
                 InvokeElement(printButton, "BtnPrint");
+                var confirmPagesButton = WaitForProcessDescendant(
+                    process.Id,
+                    "ConfirmPrintPages",
+                    TimeSpan.FromSeconds(10));
+                var secondPage = WaitForProcessDescendant(process.Id, "PrintPage2", TimeSpan.FromSeconds(5));
+                if (secondPage.TryGetCurrentPattern(TogglePattern.Pattern, out object togglePattern) &&
+                    ((TogglePattern)togglePattern).Current.ToggleState == ToggleState.On)
+                {
+                    ((TogglePattern)togglePattern).Toggle();
+                }
+                InvokeElement(confirmPagesButton, "ConfirmPrintPages");
 
                 IntPtr saveDialogHandle = WaitForSaveDialogHandle(TimeSpan.FromSeconds(30));
                 report.SaveDialogTitle = GetWindowText(saveDialogHandle);
@@ -136,7 +153,7 @@ internal static partial class HomeworkAppUiSmoke
             report.DeleteDialogTitle = await WaitForOptionalPrintCompleteDialogAsync(TimeSpan.FromSeconds(4))
                 ? "打印完成"
                 : string.Empty;
-            VerifyPrintedPdf(jobDir!, pdfPath, report);
+            VerifyPrintedPdf(jobDir!, pdfPath, report, [0]);
             report.Passed = report.FailedChecks.Count == 0;
         }
         catch (Exception exception)
@@ -287,6 +304,7 @@ internal static partial class HomeworkAppUiSmoke
             $"打印冒烟-{DateTime.Now:HHmmssfff}",
             DateTime.Today,
             "课内");
+        JobManager.AddBlankPage(job);
         var stroke = new Stroke(new StylusPointCollection(new[]
         {
             new StylusPoint(86, 140),
@@ -388,6 +406,31 @@ internal static partial class HomeworkAppUiSmoke
         }
 
         throw new TimeoutException($"未找到控件 {automationId}。");
+    }
+
+    private static AutomationElement WaitForProcessDescendant(int processId, string automationId, TimeSpan timeout)
+    {
+        DateTime deadline = DateTime.UtcNow.Add(timeout);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var windows = AutomationElement.RootElement.FindAll(
+                TreeScope.Children,
+                new PropertyCondition(AutomationElement.ProcessIdProperty, processId));
+
+            foreach (AutomationElement window in windows)
+            {
+                var match = FindDescendantByAutomationId(window, automationId);
+                if (match != null && !match.Current.IsOffscreen)
+                {
+                    return match;
+                }
+            }
+
+            Thread.Sleep(200);
+        }
+
+        throw new TimeoutException($"未找到进程控件 {automationId}。");
     }
 
     private static AutomationElement WaitForElementByName(int processId, string name, TimeSpan timeout)
@@ -566,7 +609,11 @@ internal static partial class HomeworkAppUiSmoke
         throw new TimeoutException("本地作业目录没有在预期时间内删除。");
     }
 
-    private static void VerifyPrintedPdf(string jobDirectory, string pdfPath, SmokeReport report)
+    private static void VerifyPrintedPdf(
+        string jobDirectory,
+        string pdfPath,
+        SmokeReport report,
+        IReadOnlyList<int> expectedPageIndexes)
     {
         RunSta(() =>
         {
@@ -581,7 +628,7 @@ internal static partial class HomeworkAppUiSmoke
             using var actualDocumentService = new DocumentService();
             actualDocumentService.LoadDocument(pdfPath);
 
-            int expectedPageCount = Math.Max(1, job.TotalPages);
+            int expectedPageCount = expectedPageIndexes.Count;
             int actualPageCount = Math.Max(0, actualDocumentService.PageCount);
             report.ExpectedPageCount = expectedPageCount;
             report.ActualPageCount = actualPageCount;
@@ -591,36 +638,37 @@ internal static partial class HomeworkAppUiSmoke
                 report.FailedChecks.Add($"打印 PDF 页数不对。期望 {expectedPageCount} 页，实际 {actualPageCount} 页。");
             }
 
-            for (int pageIndex = 0; pageIndex < Math.Min(expectedPageCount, actualPageCount); pageIndex += 1)
+            for (int outputPageIndex = 0; outputPageIndex < Math.Min(expectedPageCount, actualPageCount); outputPageIndex += 1)
             {
-                string expectedPath = Path.Combine(report.ExpectedDirectory, $"page-{pageIndex + 1}.png");
-                string actualPath = Path.Combine(report.ActualDirectory, $"page-{pageIndex + 1}.png");
+                int sourcePageIndex = expectedPageIndexes[outputPageIndex];
+                string expectedPath = Path.Combine(report.ExpectedDirectory, $"page-{outputPageIndex + 1}.png");
+                string actualPath = Path.Combine(report.ActualDirectory, $"page-{outputPageIndex + 1}.png");
 
-                BitmapSource expectedBitmap = renderer.RenderPagePreview(pageIndex, HomeworkPrintRenderer.DefaultPageSize, 144);
+                BitmapSource expectedBitmap = renderer.RenderPagePreview(sourcePageIndex, HomeworkPrintRenderer.DefaultPageSize, 144);
                 SavePng(expectedBitmap, expectedPath);
 
                 var actualPage = actualDocumentService
-                    .GetPageAsync(pageIndex, expectedBitmap.PixelWidth, expectedBitmap.PixelHeight)
+                    .GetPageAsync(outputPageIndex, expectedBitmap.PixelWidth, expectedBitmap.PixelHeight)
                     .ConfigureAwait(false)
                     .GetAwaiter()
                     .GetResult();
 
                 if (actualPage?.Image == null)
                 {
-                    report.FailedChecks.Add($"打印 PDF 第 {pageIndex + 1} 页没有正确渲染出来。");
+                    report.FailedChecks.Add($"打印 PDF 第 {outputPageIndex + 1} 页没有正确渲染出来。");
                     continue;
                 }
 
                 if (actualPage.Image is not BitmapSource actualSource)
                 {
-                    report.FailedChecks.Add($"打印 PDF 第 {pageIndex + 1} 页返回了非位图结果。");
+                    report.FailedChecks.Add($"打印 PDF 第 {outputPageIndex + 1} 页返回了非位图结果。");
                     continue;
                 }
 
                 BitmapSource actualBitmap = ResizeBitmap(actualSource, expectedBitmap.PixelWidth, expectedBitmap.PixelHeight);
                 SavePng(actualBitmap, actualPath);
 
-                PageComparison pageReport = ComparePages(pageIndex + 1, expectedBitmap, actualBitmap);
+                PageComparison pageReport = ComparePages(outputPageIndex + 1, expectedBitmap, actualBitmap);
                 report.Pages.Add(pageReport);
 
                 bool likelyBlank = pageReport.ExpectedNonWhiteRatio > 0.02 &&
@@ -630,7 +678,7 @@ internal static partial class HomeworkAppUiSmoke
                 if (likelyBlank || tooDifferent)
                 {
                     report.FailedChecks.Add(
-                        $"打印 PDF 第 {pageIndex + 1} 页和预期渲染差异过大: changed={pageReport.ChangedPixelRatio:F4}, avg={pageReport.AverageChannelDifference:F2}, actualInk={pageReport.ActualNonWhiteRatio:F4}。");
+                        $"打印 PDF 第 {outputPageIndex + 1} 页和预期渲染差异过大: changed={pageReport.ChangedPixelRatio:F4}, avg={pageReport.AverageChannelDifference:F2}, actualInk={pageReport.ActualNonWhiteRatio:F4}。");
                 }
             }
         });
@@ -828,6 +876,10 @@ internal sealed class SmokeReport
     public string AssistantExpandGlyph { get; set; } = string.Empty;
     public bool HomeworkSyncTriggered { get; set; }
     public string SyncDialogTitle { get; set; } = string.Empty;
+    public bool UndoRedoPassed { get; set; }
+    public bool HistoryStepLimitPassed { get; set; }
+    public bool HorizontalScrollBarPassed { get; set; }
+    public string NewHomeworkDefaultTitle { get; set; } = string.Empty;
     public string? ErrorMessage { get; set; }
     public List<string> FailedChecks { get; } = [];
     public List<PageComparison> Pages { get; } = [];

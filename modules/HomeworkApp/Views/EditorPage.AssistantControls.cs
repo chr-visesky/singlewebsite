@@ -36,6 +36,7 @@ namespace HomeworkApp.Views
         private void BtnMenu_Click(object sender, RoutedEventArgs e)
         {
             var menu = new ContextMenu();
+            menu.Items.Add(CreateMenuItem("新建作业", "new-homework"));
             menu.Items.Add(CreateMenuItem("同步云端作业", "sync"));
             menu.Items.Add(CreateMenuItem("历史作业", "history"));
             menu.Items.Add(CreateMenuItem("设置", "settings"));
@@ -68,6 +69,9 @@ namespace HomeworkApp.Views
 
             switch (action)
             {
+                case "new-homework":
+                    ShowNewHomeworkDialog(_job.Subject, DateTime.Today, _job.Bucket, appendPageIfExisting: true);
+                    break;
                 case "sync":
                     await SyncHomeworkFromCloudAsync();
                     break;
@@ -150,23 +154,7 @@ namespace HomeworkApp.Views
 
         private double GetMaximumScale()
         {
-            if (EditorLayoutRoot == null)
-            {
-                return 5.0;
-            }
-
-            double baseWidth = A4Background.Width > 0 ? A4Background.Width : 794;
-            double availableWidth = EditorLayoutRoot.ActualWidth
-                - ThumbnailColumn.ActualWidth
-                - AssistantPanelExpandedWidth
-                - 8;
-
-            if (availableWidth <= 0 || baseWidth <= 0)
-            {
-                return 1.0;
-            }
-
-            return Math.Max(1.0, availableWidth / baseWidth);
+            return 5.0;
         }
 
         private void SetAssistantPanelCollapsed(bool collapsed)

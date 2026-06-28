@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using System.Text;
 using System.Windows.Automation;
 using HomeworkApp;
+using HomeworkApp.Models;
+using HomeworkApp.Services;
 
 internal static partial class HomeworkAppUiSmoke
 {
@@ -17,6 +19,9 @@ internal static partial class HomeworkAppUiSmoke
         StudyGateStateBackup? stateBackup = null;
         FakeHomeworkSyncServer? syncServer = null;
         string cleanupJobDir = string.Empty;
+        string createdNewHomeworkJobId = string.Empty;
+        string createdEditorJobId = string.Empty;
+        string titlePreservationJobId = string.Empty;
         bool startedProcess = false;
 
         try
@@ -51,6 +56,27 @@ internal static partial class HomeworkAppUiSmoke
             }
             else
             {
+                string titlePreservationSubject = $"标题保留测试-{DateTime.Now:HHmmssfff}";
+                var titlePreservationJob = JobManager.CreateBlankJob(
+                    titlePreservationSubject,
+                    DateTime.Today,
+                    "课外",
+                    "不要被覆盖",
+                    false);
+                titlePreservationJobId = titlePreservationJob.JobId;
+                JobManager.CreateBlankJob(titlePreservationSubject, DateTime.Today, "课外", null, true);
+                var titlePreservationReloaded = JobManager.LoadJob(titlePreservationJobId);
+                if (!string.Equals(titlePreservationReloaded?.Title, "不要被覆盖", StringComparison.Ordinal) ||
+                    titlePreservationReloaded?.TotalPages != 2)
+                {
+                    report.FailedChecks.Add("追加空白页时覆盖了已有作业的自定义名称，或没有追加页面。");
+                }
+
+                var editorJob = JobManager.CreateBlankJob(
+                    $"编辑器功能测试-{DateTime.Now:HHmmssfff}",
+                    DateTime.Today,
+                    "课外");
+                createdEditorJobId = editorJob.JobId;
                 KillProcessesByPath(appPath);
                 process = StartHomeworkApp(appPath);
                 startedProcess = true;
@@ -75,6 +101,112 @@ internal static partial class HomeworkAppUiSmoke
 
                 report.ZoomAtExpandedMaximum = ZoomUntilStable(process.Id, "BtnZoomIn", "TxtZoom", 80);
                 report.ZoomAtMaximum = report.ZoomAtExpandedMaximum;
+                if (ParseZoomPercent(report.ZoomAtExpandedMaximum) != 500)
+                {
+                    report.FailedChecks.Add($"作业纸最大缩放应为 500%，实际是 {report.ZoomAtExpandedMaximum}。");
+                }
+
+                var homeworkViewport = WaitForDescendant(process.Id, "HomeworkScrollViewer", TimeSpan.FromSeconds(5));
+                var horizontalScrollBar = homeworkViewport.FindAll(
+                        TreeScope.Descendants,
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ScrollBar))
+                    .Cast<AutomationElement>()
+                    .FirstOrDefault(element =>
+                        !element.Current.IsOffscreen &&
+                        Equals(element.GetCurrentPropertyValue(AutomationElement.OrientationProperty), OrientationType.Horizontal));
+                var viewportBounds = homeworkViewport.Current.BoundingRectangle;
+                var windowBounds = mainWindow.Current.BoundingRectangle;
+                report.HorizontalScrollBarPassed = horizontalScrollBar != null &&
+                    viewportBounds.Left >= windowBounds.Left &&
+                    viewportBounds.Right <= windowBounds.Right;
+                if (!report.HorizontalScrollBarPassed)
+                {
+                    report.FailedChecks.Add("500% 缩放时作业区没有被限制在窗口内，或底部横向滚动条不可见。");
+                }
+                string resetZoom = ZoomUntilStable(process.Id, "BtnZoomOut", "TxtZoom", 85);
+                if (ParseZoomPercent(resetZoom) != 100)
+                {
+                    report.FailedChecks.Add($"编辑历史测试前无法恢复 100% 缩放，实际是 {resetZoom}。");
+                }
+
+                var activeJob = JobManager.GetLastJob() ?? throw new InvalidOperationException("撤销测试没有找到当前作业。");
+                int baselineStrokeCount = CountInkStrokes(activeJob);
+                var inkCanvas = WaitForDescendant(process.Id, "MainInkCanvas", TimeSpan.FromSeconds(5));
+                DrawInkStroke(inkCanvas);
+                WaitForCondition(
+                    () => CountInkStrokes(activeJob) > baselineStrokeCount,
+                    TimeSpan.FromSeconds(5),
+                    "真实笔迹没有保存，无法测试撤销。");
+                SendControlShortcut(CursorInterop.VirtualKeyZ);
+                WaitForCondition(
+                    () => CountInkStrokes(activeJob) == baselineStrokeCount,
+                    TimeSpan.FromSeconds(5),
+                    "Ctrl+Z 没有撤销刚才的笔迹。");
+                SendControlShortcut(CursorInterop.VirtualKeyY);
+                WaitForCondition(
+                    () => CountInkStrokes(activeJob) > baselineStrokeCount,
+                    TimeSpan.FromSeconds(5),
+                    "Ctrl+Y 没有恢复刚才的笔迹。");
+                report.UndoRedoPassed = true;
+
+                for (int strokeIndex = 0; strokeIndex < 5; strokeIndex += 1)
+                {
+                    DrawInkStroke(inkCanvas, strokeIndex + 1);
+                }
+                WaitForCondition(
+                    () => CountInkStrokes(activeJob) >= baselineStrokeCount + 6,
+                    TimeSpan.FromSeconds(8),
+                    "没有写入用于五步历史测试的六条笔迹。");
+                for (int undoIndex = 0; undoIndex < 5; undoIndex += 1)
+                {
+                    SendControlShortcut(CursorInterop.VirtualKeyZ);
+                }
+                WaitForCondition(
+                    () => CountInkStrokes(activeJob) == baselineStrokeCount + 1,
+                    TimeSpan.FromSeconds(5),
+                    "最近五步撤销没有停在预期笔画数。");
+                SendControlShortcut(CursorInterop.VirtualKeyZ);
+                Thread.Sleep(300);
+                report.HistoryStepLimitPassed = CountInkStrokes(activeJob) == baselineStrokeCount + 1;
+                if (!report.HistoryStepLimitPassed)
+                {
+                    report.FailedChecks.Add("第六次 Ctrl+Z 仍然撤销了内容，历史没有限制为五步。");
+                }
+
+                JobSession? TryReloadActiveJob()
+                {
+                    try
+                    {
+                        return JobManager.LoadJob(activeJob.JobId);
+                    }
+                    catch (IOException)
+                    {
+                        return null;
+                    }
+                }
+                int baselinePageCount = activeJob.TotalPages;
+                InvokeElement(WaitForDescendant(process.Id, "AddHomeworkPage", TimeSpan.FromSeconds(5)), "AddHomeworkPage");
+                WaitForCondition(() => TryReloadActiveJob()?.TotalPages == baselinePageCount + 1, TimeSpan.FromSeconds(5), "添加页面失败。");
+
+                InvokeElement(
+                    WaitForDescendant(process.Id, $"DeleteHomeworkPage{baselinePageCount + 1}", TimeSpan.FromSeconds(8)),
+                    "DeleteHomeworkPage");
+                IntPtr deletePageDialog = WaitForDialogHandle(["删除页"], TimeSpan.FromSeconds(5));
+                ClickDialogButton(deletePageDialog, ["是", "Yes"]);
+                WaitForCondition(
+                    () => FindDialogHandle(["删除页"]) == IntPtr.Zero,
+                    TimeSpan.FromSeconds(5),
+                    "删除页确认框没有关闭。");
+                WaitForCondition(() => TryReloadActiveJob()?.TotalPages == baselinePageCount, TimeSpan.FromSeconds(5), "删除页面失败。");
+
+                bool originalOrientation = TryReloadActiveJob()?.IsPortrait ?? activeJob.IsPortrait;
+                InvokeElement(WaitForDescendant(process.Id, "BtnPageRatio", TimeSpan.FromSeconds(5)), "BtnPageRatio");
+                WaitForCondition(() => TryReloadActiveJob()?.IsPortrait != originalOrientation, TimeSpan.FromSeconds(5), "纸张方向没有切换。");
+
+                if (WaitForVisibleDescendant(process.Id, "ColorGray", TimeSpan.FromSeconds(5)) == null)
+                {
+                    report.FailedChecks.Add("画笔颜色列表中没有灰色。");
+                }
 
                 var toggleButton = WaitForVisibleDescendant(process.Id, "BtnExpandLeft", TimeSpan.FromSeconds(5));
                 report.AssistantCollapseGlyph = ReadElementText(toggleButton!);
@@ -101,7 +233,7 @@ internal static partial class HomeworkAppUiSmoke
                 if (ParseZoomPercent(report.ZoomAtCollapsedMaximum) != ParseZoomPercent(report.ZoomAtExpandedMaximum))
                 {
                     report.FailedChecks.Add(
-                        $"收起作业助手后不应继续增大缩放，展开最大 {report.ZoomAtExpandedMaximum}，收起最大 {report.ZoomAtCollapsedMaximum}。");
+                        $"收起作业助手后缩放上限发生变化，展开最大 {report.ZoomAtExpandedMaximum}，收起最大 {report.ZoomAtCollapsedMaximum}。");
                 }
 
                 InvokeElement(collapsedButton!, "BtnExpandLeft");
@@ -129,6 +261,37 @@ internal static partial class HomeworkAppUiSmoke
                 report.SyncDialogTitle = GetWindowText(dialogHandle);
                 report.HomeworkSyncTriggered = true;
                 ClickDialogButton(dialogHandle, ["确定", "OK"]);
+
+                string selectedSubject = $"功能测试-{DateTime.Now:HHmmssfff}";
+                MoveCursorToSafeMenuZone(process.Id);
+                InvokeElement(WaitForDescendant(process.Id, "BtnMenu", TimeSpan.FromSeconds(5)), "BtnMenu");
+                var newHomeworkItem = WaitForMenuItem(
+                    process.Id,
+                    "MenuActionnew-homework",
+                    "新建作业",
+                    TimeSpan.FromSeconds(5)) ?? throw new InvalidOperationException("没有找到新建作业菜单项。");
+                InvokeElement(newHomeworkItem, "MenuActionnew-homework");
+                SetElementValue(
+                    WaitForProcessDescendant(process.Id, "NewHomeworkSubject", TimeSpan.FromSeconds(5)),
+                    selectedSubject);
+                InvokeElement(
+                    WaitForProcessDescendant(process.Id, "ConfirmNewHomework", TimeSpan.FromSeconds(5)),
+                    "ConfirmNewHomework");
+                WaitForCondition(
+                    () => string.Equals(JobManager.GetLastJob()?.Subject, selectedSubject, StringComparison.Ordinal),
+                    TimeSpan.FromSeconds(5),
+                    "新建作业没有保存选择的科目。");
+                var createdJob = JobManager.GetLastJob()!;
+                createdNewHomeworkJobId = createdJob.JobId;
+                string expectedTitle = $"{DateTime.Today:yyyy-MM-dd} {selectedSubject}";
+                if (!string.Equals(createdJob.Title, expectedTitle, StringComparison.Ordinal))
+                {
+                    report.FailedChecks.Add($"未命名作业的默认名称不对，期望 {expectedTitle}，实际 {createdJob.Title}。");
+                }
+                else
+                {
+                    report.NewHomeworkDefaultTitle = createdJob.Title;
+                }
             });
 
             report.Passed = report.FailedChecks.Count == 0;
@@ -151,6 +314,21 @@ internal static partial class HomeworkAppUiSmoke
             }
 
             RestoreStudyGateState(stateBackup);
+
+            if (!string.IsNullOrWhiteSpace(createdNewHomeworkJobId))
+            {
+                JobManager.DeleteJob(createdNewHomeworkJobId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(createdEditorJobId))
+            {
+                JobManager.DeleteJob(createdEditorJobId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(titlePreservationJobId))
+            {
+                JobManager.DeleteJob(titlePreservationJobId);
+            }
 
             if (!string.IsNullOrWhiteSpace(cleanupJobDir) && Directory.Exists(cleanupJobDir))
             {
@@ -235,6 +413,49 @@ internal static partial class HomeworkAppUiSmoke
 
         string digits = new string(text.Where(char.IsDigit).ToArray());
         return int.TryParse(digits, out int value) ? value : 0;
+    }
+
+    private static int CountInkStrokes(JobSession job)
+    {
+        return InkService.LoadInk(job.GetInkFilePath(job.CurrentPage))?.Count ?? 0;
+    }
+
+    private static void DrawInkStroke(AutomationElement canvas, int offset = 0)
+    {
+        var bounds = canvas.Current.BoundingRectangle;
+        int startX = (int)Math.Round(bounds.Left + Math.Min(120, bounds.Width * 0.2));
+        int startY = (int)Math.Round(bounds.Top + Math.Min(140 + (offset * 12), bounds.Height * 0.3));
+        int endX = (int)Math.Round(Math.Min(bounds.Right - 20, startX + 120));
+        int endY = (int)Math.Round(Math.Min(bounds.Bottom - 20, startY + 60));
+
+        CursorInterop.SetCursorPos(startX, startY);
+        CursorInterop.mouse_event(CursorInterop.MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
+        for (int step = 1; step <= 8; step += 1)
+        {
+            CursorInterop.SetCursorPos(
+                startX + ((endX - startX) * step / 8),
+                startY + ((endY - startY) * step / 8));
+            Thread.Sleep(25);
+        }
+        CursorInterop.mouse_event(CursorInterop.MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    private static void SendControlShortcut(byte key)
+    {
+        CursorInterop.keybd_event(CursorInterop.VirtualKeyControl, 0, 0, UIntPtr.Zero);
+        CursorInterop.keybd_event(key, 0, 0, UIntPtr.Zero);
+        CursorInterop.keybd_event(key, 0, CursorInterop.KeyEventKeyUp, UIntPtr.Zero);
+        CursorInterop.keybd_event(CursorInterop.VirtualKeyControl, 0, CursorInterop.KeyEventKeyUp, UIntPtr.Zero);
+    }
+
+    private static void SetElementValue(AutomationElement element, string value)
+    {
+        if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out object pattern))
+        {
+            throw new InvalidOperationException($"控件 {element.Current.AutomationId} 不支持输入值。");
+        }
+
+        ((ValuePattern)pattern).SetValue(value);
     }
 
     private static void ContinueIntoEditor(AutomationElement mainWindow, int processId)
@@ -565,11 +786,19 @@ internal static partial class HomeworkAppUiSmoke
     {
         internal const uint KeyEventKeyUp = 0x0002;
         internal const int VirtualKeyReturn = 0x0D;
+        internal const byte VirtualKeyControl = 0x11;
+        internal const byte VirtualKeyY = 0x59;
+        internal const byte VirtualKeyZ = 0x5A;
+        internal const uint MouseEventLeftDown = 0x0002;
+        internal const uint MouseEventLeftUp = 0x0004;
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern bool SetCursorPos(int x, int y);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
     }
 }

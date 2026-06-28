@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -69,18 +70,22 @@ namespace HomeworkApp.Views
                 Tag = "add-page"
             };
 
-            var label = new TextBlock
+            var label = new Button
             {
-                Text = "+",
+                Content = "+",
                 FontSize = 22,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Color.FromRgb(72, 72, 72)),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch
             };
+            AutomationProperties.SetAutomationId(label, "AddHomeworkPage");
+            label.Click += AddThumbnailButton_Click;
 
             itemBorder.Child = label;
-            itemBorder.MouseLeftButtonDown += AddThumbnailItem_MouseLeftButtonDown;
             return itemBorder;
         }
 
@@ -144,6 +149,7 @@ namespace HomeworkApp.Views
                     Cursor = Cursors.Hand,
                     Tag = pageIndex
                 };
+                AutomationProperties.SetAutomationId(deleteButton, $"DeleteHomeworkPage{pageIndex + 1}");
                 deleteButton.Click += ThumbnailDeleteButton_Click;
                 pageGrid.Children.Add(deleteButton);
             }
@@ -216,18 +222,7 @@ namespace HomeworkApp.Views
 
             if (context.Job == null)
             {
-                try
-                {
-                    SaveCurrentPageInk();
-                    JobManager.SaveJob(_job);
-                    var blankJob = JobManager.CreateBlankJob(context.Subject, context.Date, context.Bucket);
-                    LoadSelectedJob(blankJob);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"创建空白作业失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-
+                ShowNewHomeworkDialog(context.Subject, context.Date, context.Bucket, appendPageIfExisting: false);
                 return;
             }
 
@@ -239,10 +234,14 @@ namespace HomeworkApp.Views
             LoadSelectedJob(context.Job);
         }
 
-        private async void AddThumbnailItem_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        private async void AddThumbnailButton_Click(object sender, RoutedEventArgs e)
         {
             e.Handled = true;
+            await AddBlankPageFromThumbnailAsync();
+        }
 
+        private async Task AddBlankPageFromThumbnailAsync()
+        {
             try
             {
                 _thumbnailMutationInProgress = true;

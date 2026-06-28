@@ -249,7 +249,8 @@ namespace HomeworkApp.Views
 
         private static string BuildRecentOpenedHeader(JobSession job)
         {
-            return $"{ResolveBucket(job)} · {job.CreateTime:MM-dd} · {job.Subject} · {Math.Max(1, job.TotalPages)}页";
+            string title = JobManager.NormalizeJobTitle(job.Title, job.CreateTime, job.Subject);
+            return $"{ResolveBucket(job)} · {title} · {Math.Max(1, job.TotalPages)}页";
         }
 
         private TreeViewItem CreateDateNode(string header, DateTime date, string bucket, bool isExpanded)

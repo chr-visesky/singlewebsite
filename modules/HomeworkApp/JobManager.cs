@@ -78,10 +78,35 @@ namespace HomeworkApp
 
         public static JobSession CreateBlankJob(string subject, DateTime targetDate, string? bucket)
         {
+            return CreateBlankJob(subject, targetDate, bucket, null, false);
+        }
+
+        public static JobSession CreateBlankJob(
+            string subject,
+            DateTime targetDate,
+            string? bucket,
+            string? title,
+            bool appendPageIfExisting)
+        {
             string normalizedBucket = NormalizeBucket(bucket, subject);
             var existingJob = FindJobBySubjectAndDate(subject, targetDate, normalizedBucket);
             if (existingJob != null)
             {
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    existingJob.Title = NormalizeJobTitle(title, targetDate, subject);
+                }
+                else if (string.IsNullOrWhiteSpace(existingJob.Title))
+                {
+                    existingJob.Title = NormalizeJobTitle(null, targetDate, subject);
+                }
+
+                if (appendPageIfExisting)
+                {
+                    return AddBlankPage(existingJob);
+                }
+
+                existingJob.Save(existingJob.JobDirectory);
                 MarkAsLastJob(existingJob.JobId);
                 return existingJob;
             }
@@ -89,6 +114,7 @@ namespace HomeworkApp
             var job = new JobSession
             {
                 Subject = subject,
+                Title = NormalizeJobTitle(title, targetDate, subject),
                 Bucket = normalizedBucket,
                 SourceFiles = new List<string>(),
                 CreateTime = ComposeCreateTime(targetDate),
@@ -116,6 +142,14 @@ namespace HomeworkApp
         {
             job.Save(job.JobDirectory);
             MarkAsLastJob(job.JobId);
+        }
+
+        public static string NormalizeJobTitle(string? title, DateTime date, string subject)
+        {
+            string normalized = (title ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(normalized)
+                ? $"{date:yyyy-MM-dd} {subject.Trim()}"
+                : normalized;
         }
 
         /// <summary>
@@ -303,11 +337,6 @@ namespace HomeworkApp
             }
 
             string sourceFile = job.SourceFiles[pageIndex];
-            if (File.Exists(sourceFile))
-            {
-                File.Delete(sourceFile);
-            }
-
             job.SourceFiles.RemoveAt(pageIndex);
             ReindexInkFilesAfterPageDeletion(job, pageIndex);
             job.DocumentType = "Image";
@@ -320,6 +349,8 @@ namespace HomeworkApp
             job.UpdateTime = DateTime.Now;
             job.Save(job.JobDirectory);
             MarkAsLastJob(job.JobId);
+
+            TryDeletePageSourceFile(sourceFile);
         }
 
         public static JobSession AddBlankPage(JobSession job)
@@ -375,6 +406,7 @@ namespace HomeworkApp
             var job = new JobSession
             {
                 Subject = subject,
+                Title = NormalizeJobTitle(null, targetDate, subject),
                 Bucket = bucket,
                 SourceFiles = new List<string>(),
                 CreateTime = ComposeCreateTime(targetDate),
@@ -846,6 +878,27 @@ namespace HomeworkApp
 
                 string newInkPath = job.GetInkFilePath(entry.Key);
                 InkService.SaveInk(entry.Value, newInkPath);
+            }
+        }
+
+        private static void TryDeletePageSourceFile(string sourceFile)
+        {
+            if (string.IsNullOrWhiteSpace(sourceFile) || !File.Exists(sourceFile))
+            {
+                return;
+            }
+
+            try
+            {
+                File.Delete(sourceFile);
+            }
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Could not delete removed page source file '{sourceFile}': {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Could not delete removed page source file '{sourceFile}': {ex.Message}");
             }
         }
 

@@ -369,3 +369,44 @@ This file records regressions that were introduced during development and then f
   Reworked `DictationApp.MainWindow` into a split workspace: a single `+` create affordance and grouped task cards on the left, card-level edit/delete actions, and a right-side inline editor focused on one word group row at a time. Added new automation anchors for the grouped list and inline editor, refreshed the real-UI test case document, and updated native-module smoke to validate the new shell.
 - Avoid:
   For study-task modules, decide the primary interaction unit first. If the real unit is a lesson's word-group set, the landing page must be a workspace for that set, not a generic CRUD toolbar. Whenever the interaction model changes, update both the visible IA and the smoke anchors in the same change.
+## Homework print smoke reused a process that could exit with the Windows print flow
+
+- How it appeared:
+  After adding the print-page selection window, the print smoke passed but the following editor-controls smoke attached to a recycled process ID and reported a unrelated `位置不可用` window instead of HomeworkApp.
+- Root cause:
+  The full smoke suite assumed the HomeworkApp process would always remain alive after the native Windows print and PDF-save dialogs completed. That lifecycle is not stable across printer drivers and modal-window sequences.
+- Fix:
+  Made the print and editor-controls smoke tests launch isolated HomeworkApp processes, and made the print smoke explicitly configure `Microsoft Print to PDF` inside its isolated profile instead of relying on machine leftovers.
+- Avoid:
+  Do not share a desktop process across smoke scenarios that open native system dialogs. Seed required machine-facing settings inside the test profile and give each UI scenario ownership of its own process lifecycle.
+## Leaving the old homework editor could overwrite the newly created last-job pointer
+
+- How it appeared:
+  A new homework page saved the selected subject and generated the correct default title, but the next startup could reopen the previous homework instead.
+- Root cause:
+  Navigation constructed and marked the new job first, then the old `EditorPage` ran its unload save through `JobManager.SaveJob`, which marked the old job as last again.
+- Fix:
+  Kept unload persistence but made it save without changing the last-job pointer; explicit user saves and active edits still mark the current job normally.
+- Avoid:
+  Teardown persistence must not mutate navigation ownership. When moving between editor instances, only the destination may become the latest active document.
+## Homework zoom escaped the viewport and page deletion could be blocked by file locks
+
+- How it appeared:
+  At 500% zoom the homework layout expanded beyond the window with no usable bottom scrollbar. Undo worked for ink, but editor content history was unbounded and reloads could erase redo. Deleting a newly previewed page could also fail because Windows still held the source image through the preview/thumbnail pipeline.
+- Root cause:
+  The homework grid used an `Auto` content column while applying a layout-scale transform, and horizontal scrollbars were hidden. History was split by canvas, unbounded, and treated programmatic `SetStrokes` calls during document loading as new edits. Page deletion tried to remove the physical source file before updating and saving page metadata, so a transient file lock aborted the user-visible deletion.
+- Fix:
+  Constrained the homework and draft areas to proportional viewport columns, enabled bottom horizontal scrollbars for the paper areas, disabled the homework tree's horizontal scrollbar, and replaced the old ink history with one five-step content history for drawing, erasing, clearing, and selection moves/resizes. Page add/delete and orientation changes intentionally do not participate in Ctrl+Z/Y. Page deletion now updates and saves the job first; deleting the old source file is best-effort so a preview lock cannot keep the page visible.
+- Avoid:
+  A zoom transform must live inside a size-constrained scroll viewport. Programmatic state hydration must never be recorded as a user edit, and page-structure operations should stay outside content undo unless the product explicitly asks for them. Never let cleanup of a backing file block the visible page list from being saved.
+
+## Appending a homework page could overwrite the homework title
+
+- How it appeared:
+  When a same-day, same-subject homework already existed, using the new homework page flow to append another blank page could change a custom homework title back to the automatic `yyyy-MM-dd subject` title.
+- Root cause:
+  The new-homework dialog exposed only the normalized title. An empty title field was converted to the default title before `CreateBlankJob` saw it, so the existing-job path could not tell the difference between "user intentionally renamed this homework" and "user left the title blank".
+- Fix:
+  Kept the dialog's raw entered title separate from the normalized display title. Existing homework now preserves its current title unless the user typed a new one; newly created homework still receives the automatic default title when the field is blank. Added a UI smoke regression check for appending a page without overwriting a custom title.
+- Avoid:
+  Preserve user-authored metadata when reusing an existing document. Default values should be applied at object creation time, not treated as an explicit edit during append or navigation flows.

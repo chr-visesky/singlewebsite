@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -30,13 +32,13 @@ namespace HomeworkApp.Views
             _documentService = documentService;
         }
 
-        public FixedDocument CreateFixedDocument(Size pageSize)
+        public FixedDocument CreateFixedDocument(Size pageSize, IReadOnlyCollection<int>? pageIndexes = null)
         {
             var normalizedPageSize = NormalizePageSize(pageSize);
             var fixedDocument = new FixedDocument();
             fixedDocument.DocumentPaginator.PageSize = normalizedPageSize;
 
-            for (int pageIndex = 0; pageIndex < Math.Max(1, _job.TotalPages); pageIndex++)
+            foreach (int pageIndex in ResolvePageIndexes(pageIndexes))
             {
                 var fixedPage = CreateFixedPage(pageIndex, normalizedPageSize);
                 var pageContent = new PageContent();
@@ -47,13 +49,16 @@ namespace HomeworkApp.Views
             return fixedDocument;
         }
 
-        public FixedDocument CreateBitmapFixedDocument(Size pageSize, double dpi = DefaultPrintDpi)
+        public FixedDocument CreateBitmapFixedDocument(
+            Size pageSize,
+            double dpi = DefaultPrintDpi,
+            IReadOnlyCollection<int>? pageIndexes = null)
         {
             var normalizedPageSize = NormalizePageSize(pageSize);
             var fixedDocument = new FixedDocument();
             fixedDocument.DocumentPaginator.PageSize = normalizedPageSize;
 
-            for (int pageIndex = 0; pageIndex < Math.Max(1, _job.TotalPages); pageIndex++)
+            foreach (int pageIndex in ResolvePageIndexes(pageIndexes))
             {
                 var fixedPage = CreateBitmapFixedPage(pageIndex, normalizedPageSize, dpi);
                 var pageContent = new PageContent();
@@ -62,6 +67,21 @@ namespace HomeworkApp.Views
             }
 
             return fixedDocument;
+        }
+
+        private IReadOnlyList<int> ResolvePageIndexes(IReadOnlyCollection<int>? pageIndexes)
+        {
+            int pageCount = Math.Max(1, _job.TotalPages);
+            if (pageIndexes == null)
+            {
+                return Enumerable.Range(0, pageCount).ToList();
+            }
+
+            return pageIndexes
+                .Where(index => index >= 0 && index < pageCount)
+                .Distinct()
+                .OrderBy(index => index)
+                .ToList();
         }
 
         public RenderTargetBitmap RenderPagePreview(int pageNumber, Size pageSize, double dpi = 96)

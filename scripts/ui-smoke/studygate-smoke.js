@@ -807,6 +807,29 @@ async function runStudyGateSmoke(options = {}) {
       report.screenshots.library = path.join(outputDir, 'library.png');
       await takeScreenshot(homePage, report.screenshots.library);
       report.library = await summarizeLibrary(homePage);
+      report.library.sidebarScroll = await homePage.evaluate(async () => {
+        const list = document.getElementById('lesson-list');
+        if (!list) return { passed: false, reason: 'missing-list' };
+        for (let index = 0; index < 80; index += 1) {
+          const item = document.createElement('div');
+          item.textContent = `scroll-smoke-${index}`;
+          item.style.height = '24px';
+          list.appendChild(item);
+        }
+        list.scrollTop = list.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        return {
+          passed: list.scrollHeight > list.clientHeight && list.scrollTop > 0,
+          clientHeight: list.clientHeight,
+          scrollHeight: list.scrollHeight,
+          scrollTop: list.scrollTop,
+          overflowY: getComputedStyle(list).overflowY
+        };
+      });
+
+      if (!report.library.sidebarScroll.passed) {
+        report.failedChecks.push(`百度网盘左侧目录无法上下滚动: ${JSON.stringify(report.library.sidebarScroll)}。`);
+      }
 
       if (typeof report.library.pageTopPadding === 'number' && report.library.pageTopPadding > 24) {
         report.failedChecks.push(`百度网盘页顶部留白过大: ${report.library.pageTopPadding}px。`);

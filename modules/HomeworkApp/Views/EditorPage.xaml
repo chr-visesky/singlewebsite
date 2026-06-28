@@ -3,8 +3,9 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:infc="clr-namespace:System.Windows.Ink;assembly=PresentationCore"
       Background="Transparent"
-      AllowDrop="True"
-      DragOver="Page_DragOver"
+       AllowDrop="True"
+       PreviewKeyDown="EditorPage_PreviewKeyDown"
+       DragOver="Page_DragOver"
       Drop="Page_Drop">
 
     <Page.Resources>
@@ -96,7 +97,7 @@
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="LeftColumn" Width="200"/>
             <ColumnDefinition x:Name="ThumbnailColumn" Width="72"/>
-            <ColumnDefinition Width="Auto" MinWidth="400"/>
+            <ColumnDefinition Width="2*" MinWidth="400"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
@@ -131,11 +132,13 @@
                 <ScrollViewer x:Name="HomeworkTreeScrollViewer"
                               Grid.Row="2"
                               VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
                               PreviewMouseWheel="HomeworkTreeScrollViewer_PreviewMouseWheel">
                     <ScrollViewer.Resources>
                         <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBarStyle}"/>
                     </ScrollViewer.Resources>
                     <TreeView x:Name="HomeworkTree" Background="Transparent" BorderThickness="0"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                               Foreground="{StaticResource PrimaryText}" FontSize="13">
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="TreeViewItem">
@@ -183,6 +186,7 @@
                                                         <TextBlock Name="HeaderText"
                                                                    Grid.Column="1"
                                                                    Text="{TemplateBinding Header}"
+                                                                   TextTrimming="CharacterEllipsis"
                                                                    Foreground="{TemplateBinding Foreground}"/>
                                                     </Grid>
                                                 </Border>
@@ -262,7 +266,8 @@
         <!-- Homework Area (A4 fixed size) -->
         <Grid x:Name="HomeworkHost" Grid.Column="2" Background="Transparent">
             <ScrollViewer x:Name="HomeworkScrollViewer"
-                          HorizontalScrollBarVisibility="Hidden"
+                          AutomationProperties.AutomationId="HomeworkScrollViewer"
+                          HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Hidden"
                           CanContentScroll="False"
                           PreviewMouseLeftButtonDown="ScrollViewer_PreviewMouseLeftButtonDown"
@@ -284,7 +289,7 @@
                            Visibility="Collapsed" ClipToBounds="True"
                            Width="794" Height="1123"/>
                     <!-- Ink Canvas for handwriting -->
-                    <InkCanvas x:Name="MainInkCanvas" Background="Transparent"
+                    <InkCanvas x:Name="MainInkCanvas" AutomationProperties.AutomationId="MainInkCanvas" Background="Transparent"
                                EditingMode="Ink" UseCustomCursor="True"/>
                 </Grid>
             </ScrollViewer>
@@ -299,7 +304,7 @@
         <!-- Draft Area (fills remaining space, height matches homework) -->
         <Grid x:Name="DraftHost" Grid.Column="3" Margin="1,0,0,0" Background="Transparent" SizeChanged="DraftGrid_SizeChanged">
             <ScrollViewer x:Name="DraftScrollViewer"
-                          HorizontalScrollBarVisibility="Hidden"
+                          HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Hidden"
                           CanContentScroll="False"
                           PreviewMouseLeftButtonDown="ScrollViewer_PreviewMouseLeftButtonDown"
@@ -388,6 +393,15 @@
                                 Cursor="Hand" MouseLeftButtonDown="Color_Click" ToolTip="黄色">
                             <Border.Tag>Yellow</Border.Tag>
                         </Border>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8">
+                        <Button AutomationProperties.AutomationId="ColorGray"
+                                Width="24" Height="24" Padding="0" BorderThickness="0"
+                                Background="Transparent" Cursor="Hand" Click="ColorButton_Click" ToolTip="灰色">
+                            <Button.Tag>Gray</Button.Tag>
+                            <Border x:Name="ColorGray" Width="24" Height="24" Background="#808080"
+                                    CornerRadius="12" BorderBrush="Transparent" BorderThickness="2"/>
+                        </Button>
                     </StackPanel>
 
                     <!-- Pen Width -->

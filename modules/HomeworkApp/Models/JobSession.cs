@@ -16,6 +16,9 @@ namespace HomeworkApp.Models
         [JsonProperty("subject")]
         public string Subject { get; set; } = "语文";
 
+        [JsonProperty("title")]
+        public string Title { get; set; } = string.Empty;
+
         [JsonProperty("bucket")]
         public string Bucket { get; set; } = string.Empty;
 

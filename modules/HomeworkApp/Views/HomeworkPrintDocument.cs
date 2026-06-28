@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,7 +23,10 @@ namespace HomeworkApp.Views
             _renderer = new HomeworkPrintRenderer(job, documentService);
         }
 
-        public void Print(PrintQueue printQueue, PrintTicket? printTicket = null)
+        public void Print(
+            PrintQueue printQueue,
+            PrintTicket? printTicket = null,
+            IReadOnlyCollection<int>? pageIndexes = null)
         {
             var printDialog = new PrintDialog
             {
@@ -33,7 +37,7 @@ namespace HomeworkApp.Views
 
             var pageSize = ResolvePrintableArea(printQueue, printDialog.PrintTicket, printDialog);
             var renderDpi = ResolveRenderDpi(printQueue, printDialog.PrintTicket);
-            var fixedDocument = _renderer.CreateBitmapFixedDocument(pageSize, renderDpi);
+            var fixedDocument = _renderer.CreateBitmapFixedDocument(pageSize, renderDpi, pageIndexes);
             printDialog.PrintDocument(fixedDocument.DocumentPaginator, "Homework");
         }
 
