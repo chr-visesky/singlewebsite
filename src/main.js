@@ -109,6 +109,8 @@ const { normalizeAutoUpdateConfig } = require('./auto-update-config');
 const { createConfigRuntime } = require('./config-runtime');
 const { createStudyScheduleRuntime } = require('./schedule-runtime');
 const { registerShellIpc } = require('./ipc-runtime');
+const { createAiLearningRuntime } = require('./ai-learning-runtime');
+const { registerAiLearningIpc } = require('./ai-learning-ipc-runtime');
 const { createReminderPollingRuntime } = require('./reminder-polling-runtime');
 const { createReminderRuntime } = require('./reminder-runtime');
 const { selectReminderTrigger } = require('./reminder-trigger-runtime');
@@ -713,6 +715,13 @@ internalServiceRuntime = createInternalServiceRuntime({
   pathModule: path,
   syncRemoteHomeworkRequests
 });
+const aiLearningRuntime = createAiLearningRuntime({
+  env: process.env,
+  fs,
+  pathModule: path,
+  projectRootPath: path.resolve(__dirname, '..'),
+  userDataPath: STABLE_USER_DATA_DIR
+});
 const {
   startInternalServer,
   stopInternalServer
@@ -888,6 +897,11 @@ if (gotSingleInstanceLock) {
           allowAppQuit = Boolean(value);
         },
         closeExitPasswordWindow
+      });
+      registerAiLearningIpc({
+        ipcMain,
+        aiLearningRuntime,
+        normalizePrefix
       });
       appendStartupDebug('ipc-registered');
       await restoreSessionState();

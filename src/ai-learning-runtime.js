@@ -16,6 +16,42 @@ const { createAiProviderRuntime } = require('./ai-provider-runtime');
 const { createAiTaskRuntime } = require('./ai-task-runtime');
 const { createAttemptRuntime } = require('./attempt-runtime');
 
+function readLocalAiLearningEnv({ env, fs, pathModule, projectRootPath }) {
+  const path = pathModule || require('path');
+  const resolvedEnv = { ...(env || {}) };
+
+  if (!fs || !projectRootPath) {
+    return resolvedEnv;
+  }
+
+  const secretsPath = path.join(projectRootPath, 'config.secrets.json');
+
+  if (!fs.existsSync(secretsPath)) {
+    return resolvedEnv;
+  }
+
+  try {
+    const secrets = JSON.parse(fs.readFileSync(secretsPath, 'utf8').replace(/^\uFEFF/, '')) || {};
+    const aiLearning = secrets.aiLearning && typeof secrets.aiLearning === 'object'
+      ? secrets.aiLearning
+      : {};
+    const deepSeek = aiLearning.deepSeek && typeof aiLearning.deepSeek === 'object'
+      ? aiLearning.deepSeek
+      : {};
+
+    return {
+      ...resolvedEnv,
+      DEEPSEEK_API_KEY: resolvedEnv.DEEPSEEK_API_KEY || deepSeek.apiKey || '',
+      DEEPSEEK_BASE_URL: resolvedEnv.DEEPSEEK_BASE_URL || deepSeek.baseUrl || '',
+      AI_PROVIDER: resolvedEnv.AI_PROVIDER || deepSeek.provider || '',
+      AI_TEXT_FAST_MODEL: resolvedEnv.AI_TEXT_FAST_MODEL || deepSeek.fastModel || '',
+      AI_TEXT_STRONG_MODEL: resolvedEnv.AI_TEXT_STRONG_MODEL || deepSeek.strongModel || ''
+    };
+  } catch {
+    return resolvedEnv;
+  }
+}
+
 function createAiLearningRuntime(dependencies = {}) {
   const {
     env = process.env,
@@ -25,6 +61,12 @@ function createAiLearningRuntime(dependencies = {}) {
     userDataPath
   } = dependencies;
 
+  const resolvedEnv = readLocalAiLearningEnv({
+    env,
+    fs,
+    pathModule,
+    projectRootPath
+  });
   const jsonStore = createAiLearningJsonStoreRuntime({ fs, pathModule });
   const paths = createAiLearningPathsRuntime({
     fs,
@@ -41,8 +83,8 @@ function createAiLearningRuntime(dependencies = {}) {
   const studentModelRuntime = createStudentModelRuntime({ jsonStore, paths });
   const reviewSchedulerRuntime = createReviewSchedulerRuntime({ jsonStore, paths });
   const gameRewardRuntime = createGameRewardRuntime({ jsonStore, paths });
-  const aiModelRoutingRuntime = createAiModelRoutingRuntime({ env });
-  const aiProviderRuntime = createAiProviderRuntime({ env });
+  const aiModelRoutingRuntime = createAiModelRoutingRuntime({ env: resolvedEnv });
+  const aiProviderRuntime = createAiProviderRuntime({ env: resolvedEnv });
   const aiTaskRuntime = createAiTaskRuntime({
     aiModelRoutingRuntime,
     aiProviderRuntime,
@@ -77,6 +119,29 @@ function createAiLearningRuntime(dependencies = {}) {
     return assignmentRuntime.getAssignment(options);
   }
 
+  function getContentItem(contentItemId) {
+    initialize();
+    return contentBankRuntime.getContentItem(contentItemId);
+  }
+
+  function getAiResults(filters = {}) {
+    initialize();
+    const assignmentId = typeof filters.assignmentId === 'string' ? filters.assignmentId.trim() : '';
+    const attemptBatchId = typeof filters.attemptBatchId === 'string' ? filters.attemptBatchId.trim() : '';
+
+    return aiTaskRuntime.listResults().filter((result) => {
+      if (assignmentId && result.assignmentId !== assignmentId) {
+        return false;
+      }
+
+      if (attemptBatchId && result.attemptBatchId !== attemptBatchId) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
   async function submitAttemptBatch(options) {
     initialize();
     return attemptRuntime.submitAttemptBatch(options);
@@ -84,19 +149,23 @@ function createAiLearningRuntime(dependencies = {}) {
 
   return {
     assignmentRuntime,
+    aiTaskRuntime,
     contentBankRuntime,
     evaluationRuntime,
     gameRewardRuntime,
+    getAiResults,
+    getContentItem,
+    getAssignment,
     initialize,
     paths,
     reviewSchedulerRuntime,
     skillGraphRuntime,
     studentModelRuntime,
-    submitAttemptBatch,
-    getAssignment
+    submitAttemptBatch
   };
 }
 
 module.exports = {
+  readLocalAiLearningEnv,
   createAiLearningRuntime
 };

@@ -20,6 +20,7 @@ const { createAiProviderRuntime } = require('../src/ai-provider-runtime');
 const { createAiTaskRuntime } = require('../src/ai-task-runtime');
 const { createAttemptRuntime } = require('../src/attempt-runtime');
 const { createAiLearningRuntime } = require('../src/ai-learning-runtime');
+const { registerAiLearningIpc } = require('../src/ai-learning-ipc-runtime');
 
 const moduleArg = (process.argv.find((arg) => arg.startsWith('--module=')) || '--module=all').split('=')[1];
 const projectRootPath = path.resolve(__dirname, '..');
@@ -139,6 +140,17 @@ function answerForContentItem(item) {
   return String(item.standardAnswer);
 }
 
+function createFakeIpcMain() {
+  const handlers = new Map();
+
+  return {
+    handlers,
+    handle(channel, handler) {
+      handlers.set(channel, handler);
+    }
+  };
+}
+
 async function testPaths() {
   const h = createHarness();
   h.paths.ensureBaseDirectories();
@@ -232,6 +244,55 @@ async function testAiMock() {
   pass('module ai-mock');
 }
 
+async function testIpc() {
+  const tempRoot = path.join(os.tmpdir(), `studygate-ai-learning-ipc-${process.pid}-${Date.now()}`);
+  removeDirectory(tempRoot);
+  const aiLearningRuntime = createAiLearningRuntime({
+    env: { AI_PROVIDER: 'mock' },
+    fs,
+    pathModule: path,
+    projectRootPath,
+    userDataPath: tempRoot
+  });
+  const ipcMain = createFakeIpcMain();
+
+  registerAiLearningIpc({ ipcMain, aiLearningRuntime });
+
+  assert(ipcMain.handlers.has('learning:get-assignment'), 'assignment ipc missing');
+  assert(ipcMain.handlers.has('answer:submit-attempt-batch'), 'submit ipc missing');
+
+  const assignmentResponse = await ipcMain.handlers.get('learning:get-assignment')(null, {
+    studentId: 'ipc_child',
+    dateKey: '2026-06-30',
+    profileId: 'math_olympiad_daily_set_v1'
+  });
+  assert(assignmentResponse.assignment.contentItemIds.length === 10, 'ipc assignment should contain 10 content items');
+  assert(assignmentResponse.contentItems.length === 10, 'ipc assignment content items missing');
+  assert(!Object.prototype.hasOwnProperty.call(assignmentResponse.contentItems[0], 'standardAnswer'), 'ipc leaked standard answer');
+
+  const items = aiLearningRuntime.contentBankRuntime.getContentItemsByIds(assignmentResponse.assignment.contentItemIds);
+  const submitResult = await ipcMain.handlers.get('answer:submit-attempt-batch')(null, {
+    studentId: 'ipc_child',
+    assignmentId: assignmentResponse.assignment.id,
+    attempts: items.map((item) => ({
+      contentItemId: item.id,
+      response: { type: 'final_answer', raw: answerForContentItem(item) }
+    }))
+  });
+  assert(submitResult.evaluationBatch.summary.correct === 10, 'ipc submit evaluation failed');
+  assert(submitResult.aiResult.status === 'completed', 'ipc submit ai result missing');
+
+  const aiResults = await ipcMain.handlers.get('ai:get-results')(null, {
+    assignmentId: assignmentResponse.assignment.id
+  });
+  assert(aiResults.length >= 1, 'ipc ai results lookup failed');
+
+  const gameState = await ipcMain.handlers.get('game:get-state')(null, { studentId: 'ipc_child' });
+  assert(gameState.xp > 0, 'ipc game state missing');
+  removeDirectory(tempRoot);
+  pass('module ipc');
+}
+
 async function testDeepSeekLive() {
   const env = envWithLocalSecrets();
 
@@ -276,6 +337,7 @@ async function testAll() {
   await testAssignment();
   await testAttempt();
   await testAiMock();
+  await testIpc();
 }
 
 const tests = {
@@ -288,6 +350,7 @@ const tests = {
   assignment: testAssignment,
   attempt: testAttempt,
   'ai-mock': testAiMock,
+  ipc: testIpc,
   'deepseek-live': testDeepSeekLive
 };
 

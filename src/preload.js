@@ -493,6 +493,24 @@ if (window.location.protocol === 'file:') {
     getStudentPlanModel(options) {
       return ipcRenderer.invoke('shell:get-student-plan-model', options);
     },
+    getAiLearningAssignment(payload) {
+      return ipcRenderer.invoke('learning:get-assignment', payload);
+    },
+    getAiLearningContentItem(payload) {
+      return ipcRenderer.invoke('learning:get-content-item', payload);
+    },
+    submitAiLearningAttemptBatch(payload) {
+      return ipcRenderer.invoke('answer:submit-attempt-batch', payload);
+    },
+    getAiLearningMastery(payload) {
+      return ipcRenderer.invoke('learning:get-mastery', payload);
+    },
+    getAiLearningGameState(payload) {
+      return ipcRenderer.invoke('game:get-state', payload);
+    },
+    getAiLearningAiResults(payload) {
+      return ipcRenderer.invoke('ai:get-results', payload);
+    },
     saveStudentPlanItems(payload) {
       return ipcRenderer.invoke('shell:save-student-plan-items', payload);
     },
