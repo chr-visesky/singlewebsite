@@ -1,0 +1,80 @@
+{
+  "common": {
+    "home": "Home",
+    "checkUpdate": "Check update"
+  },
+  "home": {
+    "aiLearning": {
+      "title": "AI Math Daily Practice",
+      "badge": "AI Learning"
+    }
+  },
+  "aiLearning": {
+    "pageTitle": "AI Math Daily Practice",
+    "eyebrow": "AI Learning",
+    "heading": "Math Daily Practice",
+    "metrics": {
+      "total": "Questions",
+      "correct": "Correct",
+      "xp": "XP"
+    },
+    "sections": {
+      "assignment": "Today Set",
+      "practice": "Practice",
+      "grading": "Grading",
+      "aiFeedback": "AI Feedback",
+      "mastery": "Mastery"
+    },
+    "buttons": {
+      "reload": "Reload",
+      "submit": "Submit Set"
+    },
+    "status": {
+      "loading": "Loading",
+      "notLoaded": "Not loaded",
+      "pending": "{dateKey} pending",
+      "submitted": "{dateKey} submitted",
+      "loadingAssignment": "Loading assignment",
+      "ready": "Assignment ready",
+      "alreadySubmitted": "Today's set has already been submitted",
+      "submitting": "Submitting",
+      "submitDone": "Submitted",
+      "submitAfter": "Generated after submit",
+      "emptyQuestions": "No questions yet",
+      "noResult": "No result yet",
+      "masteryEmpty": "Complete one set to update"
+    },
+    "errors": {
+      "apiUnavailable": "AI learning API is unavailable",
+      "loadFailed": "Load failed",
+      "submitFailed": "Submit failed",
+      "aiFailed": "AI feedback failed"
+    },
+    "answerHints": {
+      "default": "Enter the final answer",
+      "fraction": "For example: 3/4",
+      "list": "Separate answers with commas",
+      "object": "Fields: {fields}"
+    },
+    "question": {
+      "index": "Question {index}",
+      "difficulty": "Difficulty {difficulty}",
+      "skillFallback": "Skill"
+    },
+    "result": {
+      "correct": "Correct",
+      "wrong": "Needs revision",
+      "unanswered": "Unanswered",
+      "score": "{score}/{maxScore} points"
+    },
+    "feedback": {
+      "strengths": "Strengths",
+      "weaknesses": "Weaknesses",
+      "nextPlan": "Next step",
+      "empty": "None"
+    },
+    "mastery": {
+      "percent": "Mastery {percent}%"
+    }
+  }
+}

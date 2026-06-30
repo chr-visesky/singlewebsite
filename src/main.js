@@ -107,6 +107,7 @@ const { createBannerAssetLoader, createStatePathHelpers } = require('./runtime-p
 const { createAppIconRuntime } = require('./app-icon-runtime');
 const { normalizeAutoUpdateConfig } = require('./auto-update-config');
 const { createConfigRuntime } = require('./config-runtime');
+const { createI18nRuntime } = require('./i18n-runtime');
 const { createStudyScheduleRuntime } = require('./schedule-runtime');
 const { registerShellIpc } = require('./ipc-runtime');
 const { createAiLearningRuntime } = require('./ai-learning-runtime');
@@ -223,6 +224,12 @@ const startupDebugRuntime = createStartupDebugRuntime({
   fs,
   logPath: STARTUP_DEBUG_LOG,
   os
+});
+const i18nRuntime = createI18nRuntime({
+  fs,
+  pathModule: path,
+  projectRootPath: path.resolve(__dirname, '..'),
+  locale: process.env.STUDYGATE_LOCALE || 'zh-CN'
 });
 let navigationRuntime = null;
 const exitRuntime = createExitRuntime({
@@ -351,6 +358,7 @@ navigationRuntime = createNavigationRuntime({
   syncCompatibilityPatch: (targetWebContents) => applyCompatibilityPatch(targetWebContents),
   syncCompatibilityPatchForFrame: (frameProcessId, frameRoutingId) =>
     applyCompatibilityPatchForFrame(frameProcessId, frameRoutingId),
+  t: (key, fallback, variables) => i18nRuntime.t(key, fallback, variables),
   topLevelDecision
 });
 const {
@@ -364,6 +372,7 @@ const {
   launchStudyEntry,
   learningToolEntryTarget,
   libraryTarget,
+  aiLearningTarget,
   loadHomePage,
   navigateMainWindow,
   resolveClassroomForUrl,
@@ -580,8 +589,10 @@ const studyScheduleRuntime = createStudyScheduleRuntime({
   getClassroomDefinitions: () => classroomDefinitions,
   getLibraryDefinitions: () => libraryDefinitions,
   getLearningToolDefinitions: () => learningToolDefinitions,
+  t: (key, fallback, variables) => i18nRuntime.t(key, fallback, variables),
   nativeModuleTarget,
   libraryTarget,
+  aiLearningTarget,
   learningToolEntryTarget,
   syncStudentDeviceAccessStatus: (options) => syncStudentDeviceAccessStatus(options),
   serializeStudySchedule

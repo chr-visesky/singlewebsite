@@ -5,7 +5,19 @@ function buildHomeUiModel(options = {}) {
   const classrooms = Array.isArray(options.classrooms) ? options.classrooms : [];
   const libraries = Array.isArray(options.libraries) ? options.libraries : [];
   const learningTools = Array.isArray(options.learningTools) ? options.learningTools : [];
+  const t = typeof options.t === 'function' ? options.t : (_key, fallback) => fallback;
   const cards = [
+    {
+      id: 'ai-learning',
+      title: t('home.aiLearning.title', 'AI Math Daily Practice'),
+      tone: 'teal',
+      badge: t('home.aiLearning.badge', 'AI Learning'),
+      order: 20,
+      target: options.aiLearningTarget || 'internal:ai-learning',
+      scheduleTargetId: 'ai-learning',
+      libraryId: '',
+      supportsStateReset: false
+    },
     ...nativeModules.map((moduleDefinition) => ({
       id: moduleDefinition.id,
       title: moduleDefinition.title,
@@ -63,6 +75,7 @@ function buildHomeUiModel(options = {}) {
 }
 
 function buildNavigationUiModel(options = {}) {
+  const t = typeof options.t === 'function' ? options.t : (_key, fallback) => fallback;
   const model = {
     canGoBack: Boolean(options.canGoBack),
     canGoForward: Boolean(options.canGoForward),
@@ -112,6 +125,17 @@ function buildNavigationUiModel(options = {}) {
       model.crumbs = [
         { label: '首页', target: 'internal:home', current: false },
         { label: '学生计划', target: options.studentPlanTarget, current: true }
+      ];
+      return model;
+    }
+
+    if (fileName === 'ai-learning.html') {
+      model.actions = [
+        { id: 'check-update', label: t('common.checkUpdate', 'Check update'), icon: '>', compact: true }
+      ];
+      model.crumbs = [
+        { label: t('common.home', 'Home'), target: 'internal:home', current: false },
+        { label: t('home.aiLearning.title', 'AI Math Daily Practice'), target: options.aiLearningTarget || 'internal:ai-learning', current: true }
       ];
       return model;
     }

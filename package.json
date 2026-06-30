@@ -15,6 +15,7 @@
     "server": "node server/server.js",
     "cloudbase:token": "node scripts/generate-cloudbase-token.js",
     "test:ui": "node scripts/ui-smoke/run.js",
+    "test:ai-learning-ui": "node scripts/ai-learning-ui-smoke.js",
     "skill:pack:study-helper": "node scripts/build-study-helper-zip.js",
     "skill:publish:study-helper": "node scripts/publish-study-helper-cloudbase.js"
   },

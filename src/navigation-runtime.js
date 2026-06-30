@@ -37,6 +37,7 @@ function createNavigationRuntime(dependencies = {}) {
     shouldBlockShortcut,
     syncCompatibilityPatch,
     syncCompatibilityPatchForFrame,
+    t,
     topLevelDecision
   } = dependencies;
 
@@ -44,6 +45,7 @@ function createNavigationRuntime(dependencies = {}) {
     home: 'home.html',
     library: 'library.html',
     studentPlan: 'student-plan.html',
+    aiLearning: 'ai-learning.html',
     classroomShell: 'classroom-shell.html'
   };
 
@@ -73,6 +75,10 @@ function createNavigationRuntime(dependencies = {}) {
 
   function studentPlanTarget() {
     return 'internal:student-plan';
+  }
+
+  function aiLearningTarget() {
+    return 'internal:ai-learning';
   }
 
   function learningToolEntryTarget(toolId) {
@@ -485,6 +491,19 @@ function createNavigationRuntime(dependencies = {}) {
     mainWindow.loadFile(internalPagePath('studentPlan'));
   }
 
+  function loadAiLearningPage(query = {}) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+
+    destroyClassroomBrowserView();
+    logNavigationDebug('load-ai-learning-page');
+    mainWindow.loadFile(internalPagePath('aiLearning'), {
+      query
+    });
+  }
+
   function navigateMainWindow(target) {
     const normalizedTarget = normalizePrefix(target);
     const mainWindow = getMainWindow();
@@ -510,6 +529,22 @@ function createNavigationRuntime(dependencies = {}) {
 
     if (normalizedTarget === studentPlanTarget()) {
       loadStudentPlanPage();
+      return true;
+    }
+
+    if (normalizedTarget === aiLearningTarget() || normalizedTarget.startsWith(`${aiLearningTarget()}?`)) {
+      const query = {};
+      const queryIndex = normalizedTarget.indexOf('?');
+
+      if (queryIndex >= 0) {
+        const params = new URLSearchParams(normalizedTarget.slice(queryIndex + 1));
+
+        for (const [key, value] of params.entries()) {
+          query[key] = value;
+        }
+      }
+
+      loadAiLearningPage(query);
       return true;
     }
 
@@ -635,7 +670,9 @@ function createNavigationRuntime(dependencies = {}) {
       canGoForward: Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.canGoForward()),
       bannerText: getBannerText(),
       bannerImageUrl: getBannerImageUrl(),
+      t,
       studentPlanTarget: studentPlanTarget(),
+      aiLearningTarget: aiLearningTarget(),
       resolveLibrary,
       libraryTarget,
       resolveClassroomForUrl,
@@ -856,6 +893,7 @@ function createNavigationRuntime(dependencies = {}) {
     launchStudyEntry,
     learningToolEntryTarget,
     libraryTarget,
+    aiLearningTarget,
     loadHomePage,
     navigateMainWindow,
     resolveClassroomForUrl,

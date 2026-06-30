@@ -1,0 +1,80 @@
+{
+  "common": {
+    "home": "首页",
+    "checkUpdate": "检查更新"
+  },
+  "home": {
+    "aiLearning": {
+      "title": "AI 奥数每日练",
+      "badge": "AI 学习"
+    }
+  },
+  "aiLearning": {
+    "pageTitle": "AI 奥数每日练",
+    "eyebrow": "AI 学习",
+    "heading": "奥数每日练",
+    "metrics": {
+      "total": "题量",
+      "correct": "正确",
+      "xp": "XP"
+    },
+    "sections": {
+      "assignment": "今日题集",
+      "practice": "答题区",
+      "grading": "判分结果",
+      "aiFeedback": "AI 反馈",
+      "mastery": "能力状态"
+    },
+    "buttons": {
+      "reload": "刷新",
+      "submit": "提交整套"
+    },
+    "status": {
+      "loading": "加载中",
+      "notLoaded": "未加载",
+      "pending": "{dateKey} 待完成",
+      "submitted": "{dateKey} 已提交",
+      "loadingAssignment": "加载题集中",
+      "ready": "题集已就绪",
+      "alreadySubmitted": "今天的题集已提交",
+      "submitting": "提交中",
+      "submitDone": "提交完成",
+      "submitAfter": "提交后生成",
+      "emptyQuestions": "还没有题目",
+      "noResult": "暂无结果",
+      "masteryEmpty": "完成一次题集后更新"
+    },
+    "errors": {
+      "apiUnavailable": "AI 学习接口不可用",
+      "loadFailed": "加载失败",
+      "submitFailed": "提交失败",
+      "aiFailed": "AI 反馈生成失败"
+    },
+    "answerHints": {
+      "default": "填写最终答案",
+      "fraction": "例如 3/4",
+      "list": "多个答案用逗号隔开",
+      "object": "字段：{fields}"
+    },
+    "question": {
+      "index": "第 {index} 题",
+      "difficulty": "难度 {difficulty}",
+      "skillFallback": "能力点"
+    },
+    "result": {
+      "correct": "正确",
+      "wrong": "需订正",
+      "unanswered": "未答",
+      "score": "{score}/{maxScore} 分"
+    },
+    "feedback": {
+      "strengths": "优势",
+      "weaknesses": "薄弱点",
+      "nextPlan": "下一步",
+      "empty": "暂无"
+    },
+    "mastery": {
+      "percent": "掌握 {percent}%"
+    }
+  }
+}

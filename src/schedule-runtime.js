@@ -23,8 +23,10 @@ function createStudyScheduleRuntime(dependencies = {}) {
     getClassroomDefinitions,
     getLibraryDefinitions,
     getLearningToolDefinitions,
+    t,
     nativeModuleTarget,
     libraryTarget,
+    aiLearningTarget,
     learningToolEntryTarget,
     syncStudentDeviceAccessStatus,
     serializeStudySchedule
@@ -363,8 +365,10 @@ function createStudyScheduleRuntime(dependencies = {}) {
       classrooms: typeof getClassroomDefinitions === 'function' ? getClassroomDefinitions() : [],
       libraries: typeof getLibraryDefinitions === 'function' ? getLibraryDefinitions() : [],
       learningTools: typeof getLearningToolDefinitions === 'function' ? getLearningToolDefinitions() : [],
+      t,
       nativeModuleTarget,
       libraryTarget,
+      aiLearningTarget: typeof aiLearningTarget === 'function' ? aiLearningTarget() : 'internal:ai-learning',
       learningToolEntryTarget
     });
   }

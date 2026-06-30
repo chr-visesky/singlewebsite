@@ -86,7 +86,7 @@ function createConfigRuntime(dependencies = {}) {
 
   function readJsonFile(filePath) {
     try {
-      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      return JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
     } catch (error) {
       throw createConfigError(`无法解析 ${filePath}: ${error.message}`);
     }
