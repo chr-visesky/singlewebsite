@@ -114,6 +114,26 @@ function registerAiLearningIpc(dependencies = {}) {
     return aiLearningRuntime.studentModelRuntime.getMastery(studentId);
   });
 
+  ipcMain.handle('learning:get-review-queue', async (_event, payload = {}) => {
+    const studentId = normalizePrefix(payload.studentId) || 'default_child';
+    return aiLearningRuntime.getReviewQueue(studentId);
+  });
+
+  ipcMain.handle('answer:get-attempt-batches', async (_event, payload = {}) => {
+    return aiLearningRuntime.getAttemptBatches({
+      studentId: normalizePrefix(payload.studentId),
+      assignmentId: normalizePrefix(payload.assignmentId)
+    });
+  });
+
+  ipcMain.handle('answer:get-evaluation-batches', async (_event, payload = {}) => {
+    return aiLearningRuntime.getEvaluationBatches({
+      studentId: normalizePrefix(payload.studentId),
+      assignmentId: normalizePrefix(payload.assignmentId),
+      attemptBatchId: normalizePrefix(payload.attemptBatchId)
+    });
+  });
+
   ipcMain.handle('game:get-state', async (_event, payload = {}) => {
     const studentId = normalizePrefix(payload.studentId) || 'default_child';
     aiLearningRuntime.initialize();
@@ -124,6 +144,17 @@ function registerAiLearningIpc(dependencies = {}) {
     return aiLearningRuntime.getAiResults({
       assignmentId: normalizePrefix(payload.assignmentId),
       attemptBatchId: normalizePrefix(payload.attemptBatchId)
+    });
+  });
+
+  ipcMain.handle('ai:generate-content-candidates', async (_event, payload = {}) => {
+    return aiLearningRuntime.generateContentCandidates({
+      subject: normalizePrefix(payload.subject) || 'math',
+      track: normalizePrefix(payload.track) || 'olympiad',
+      skillNodeIds: Array.isArray(payload.skillNodeIds) ? payload.skillNodeIds : [],
+      difficulty: Number(payload.difficulty) || 2,
+      count: Number(payload.count) || 3,
+      constraints: payload.constraints && typeof payload.constraints === 'object' ? payload.constraints : {}
     });
   });
 }

@@ -207,6 +207,8 @@ function createContentBankRuntime(dependencies = {}) {
     const contentType = normalizePrefix(filters.contentType);
     const subject = normalizePrefix(filters.subject);
     const track = normalizePrefix(filters.track);
+    const minDifficulty = Number(filters.minDifficulty);
+    const maxDifficulty = Number(filters.maxDifficulty);
     const skillNodeIds = new Set(normalizeStringArray(filters.skillNodeIds));
     const excludeIds = new Set(normalizeStringArray(filters.excludeContentItemIds));
     const enabledOnly = filters.enabledOnly !== false;
@@ -229,6 +231,14 @@ function createContentBankRuntime(dependencies = {}) {
       }
 
       if (contentType && item.contentType !== contentType) {
+        return false;
+      }
+
+      if (Number.isFinite(minDifficulty) && item.difficulty < minDifficulty) {
+        return false;
+      }
+
+      if (Number.isFinite(maxDifficulty) && item.difficulty > maxDifficulty) {
         return false;
       }
 

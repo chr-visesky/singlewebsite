@@ -28,23 +28,34 @@ function createAiTaskRuntime(dependencies = {}) {
     jsonStore.writeJsonFileAtomic(paths.aiResultsPath(), results);
   }
 
-  async function createAndRunTask({ type = 'daily_summary', assignment, attemptBatch, evaluationBatch }) {
+  function taskId() {
+    return `ai_task_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function resultId() {
+    return `ai_result_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  async function createAndRunGenericTask({
+    type = 'daily_summary',
+    assignmentId = '',
+    attemptBatchId = '',
+    input = {},
+    metadata = {}
+  }) {
     const route = aiModelRoutingRuntime.routeTask(type);
     const now = new Date().toISOString();
     const task = {
-      id: `ai_task_${Date.now()}`,
+      id: taskId(),
       type,
-      assignmentId: assignment.id,
-      attemptBatchId: attemptBatch.id,
+      assignmentId,
+      attemptBatchId,
       provider: route.provider,
       model: route.model,
       thinking: route.thinking,
       status: 'running',
-      input: {
-        assignmentId: assignment.id,
-        summary: evaluationBatch.summary,
-        evaluations: evaluationBatch.evaluations
-      },
+      input,
+      metadata,
       createdAt: now,
       updatedAt: now
     };
@@ -56,10 +67,10 @@ function createAiTaskRuntime(dependencies = {}) {
     try {
       const providerResult = await aiProviderRuntime.runTask(task);
       const result = {
-        id: `ai_result_${Date.now()}`,
+        id: resultId(),
         taskId: task.id,
-        assignmentId: assignment.id,
-        attemptBatchId: attemptBatch.id,
+        assignmentId,
+        attemptBatchId,
         type,
         provider: providerResult.provider,
         model: providerResult.model,
@@ -88,10 +99,26 @@ function createAiTaskRuntime(dependencies = {}) {
       writeTasks(nextTasks);
       return {
         taskId: task.id,
+        type,
+        assignmentId,
+        attemptBatchId,
         status: 'failed',
         error: error.message || String(error)
       };
     }
+  }
+
+  async function createAndRunTask({ type = 'daily_summary', assignment, attemptBatch, evaluationBatch }) {
+    return createAndRunGenericTask({
+      type,
+      assignmentId: assignment.id,
+      attemptBatchId: attemptBatch.id,
+      input: {
+        assignmentId: assignment.id,
+        summary: evaluationBatch.summary,
+        evaluations: evaluationBatch.evaluations
+      }
+    });
   }
 
   function listResults() {
@@ -100,6 +127,7 @@ function createAiTaskRuntime(dependencies = {}) {
 
   return {
     createAndRunTask,
+    createAndRunGenericTask,
     listResults
   };
 }

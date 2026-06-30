@@ -60,7 +60,14 @@ function createAssignmentRuntime(dependencies = {}) {
     return ids;
   }
 
-  function getAssignment({ studentId, dateKey, profileId = 'math_olympiad_daily_set_v1', dueSkillNodeIds = [], weakSkillNodeIds = [] }) {
+  function getAssignment({
+    studentId,
+    dateKey,
+    profileId = 'math_olympiad_daily_set_v1',
+    dueSkillNodeIds = [],
+    weakSkillNodeIds = [],
+    excludeContentItemIds = []
+  }) {
     const normalizedStudentId = normalizePrefix(studentId) || 'default_child';
     const normalizedDateKey = normalizePrefix(dateKey);
     const normalizedProfileId = normalizePrefix(profileId) || 'math_olympiad_daily_set_v1';
@@ -83,7 +90,8 @@ function createAssignmentRuntime(dependencies = {}) {
     const sections = trainingPolicyRuntime.buildAssignmentSections({
       profile,
       dueSkillNodeIds,
-      weakSkillNodeIds
+      weakSkillNodeIds,
+      excludeContentItemIds
     });
     const contentItemIds = flattenContentItemIds(sections);
     const now = new Date().toISOString();
@@ -98,6 +106,11 @@ function createAssignmentRuntime(dependencies = {}) {
       status: 'assigned',
       sections,
       contentItemIds,
+      generationContext: {
+        dueSkillNodeIds: (Array.isArray(dueSkillNodeIds) ? dueSkillNodeIds : []).map(normalizePrefix).filter(Boolean),
+        weakSkillNodeIds: (Array.isArray(weakSkillNodeIds) ? weakSkillNodeIds : []).map(normalizePrefix).filter(Boolean),
+        excludeContentItemIds: (Array.isArray(excludeContentItemIds) ? excludeContentItemIds : []).map(normalizePrefix).filter(Boolean)
+      },
       warnings: contentItemIds.length < (Number(profile.targetContentCount) || 0)
         ? [`Only ${contentItemIds.length} content items available.`]
         : []

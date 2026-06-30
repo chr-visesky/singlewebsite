@@ -50,6 +50,75 @@ function createAttemptRuntime(dependencies = {}) {
     jsonStore.writeJsonFileAtomic(paths.evaluationsPath(), evaluations);
   }
 
+  function listAttemptBatches(filters = {}) {
+    const studentId = normalizePrefix(filters.studentId);
+    const assignmentId = normalizePrefix(filters.assignmentId);
+
+    return readAttempts().filter((attemptBatch) => {
+      if (studentId && attemptBatch.studentId !== studentId) {
+        return false;
+      }
+
+      if (assignmentId && attemptBatch.assignmentId !== assignmentId) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  function listEvaluationBatches(filters = {}) {
+    const studentId = normalizePrefix(filters.studentId);
+    const assignmentId = normalizePrefix(filters.assignmentId);
+    const attemptBatchId = normalizePrefix(filters.attemptBatchId);
+
+    return readEvaluations().filter((evaluationBatch) => {
+      if (studentId && evaluationBatch.studentId !== studentId) {
+        return false;
+      }
+
+      if (assignmentId && evaluationBatch.assignmentId !== assignmentId) {
+        return false;
+      }
+
+      if (attemptBatchId && evaluationBatch.attemptBatchId !== attemptBatchId) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  function recentContentItemIds({ studentId, limit = 30 } = {}) {
+    const normalizedStudentId = normalizePrefix(studentId);
+    const maxCount = Math.max(0, Math.round(Number(limit) || 0));
+    const ids = [];
+    const seen = new Set();
+
+    const batches = listAttemptBatches({ studentId: normalizedStudentId })
+      .slice()
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+    for (const batch of batches) {
+      for (const attempt of Array.isArray(batch.attempts) ? batch.attempts : []) {
+        const contentItemId = normalizePrefix(attempt && attempt.contentItemId);
+
+        if (!contentItemId || seen.has(contentItemId)) {
+          continue;
+        }
+
+        seen.add(contentItemId);
+        ids.push(contentItemId);
+
+        if (ids.length >= maxCount) {
+          return ids;
+        }
+      }
+    }
+
+    return ids;
+  }
+
   function normalizeAttempts(rawAttempts = [], assignment) {
     const assignmentContentIds = new Set(assignment.contentItemIds || []);
     const byContentItemId = new Map();
@@ -182,6 +251,9 @@ function createAttemptRuntime(dependencies = {}) {
   }
 
   return {
+    listAttemptBatches,
+    listEvaluationBatches,
+    recentContentItemIds,
     submitAttemptBatch
   };
 }

@@ -14,6 +14,7 @@ const { createGameRewardRuntime } = require('./game-reward-runtime');
 const { createAiModelRoutingRuntime } = require('./ai-model-routing-runtime');
 const { createAiProviderRuntime } = require('./ai-provider-runtime');
 const { createAiTaskRuntime } = require('./ai-task-runtime');
+const { createContentGenerationRuntime } = require('./content-generation-runtime');
 const { createAttemptRuntime } = require('./attempt-runtime');
 
 function readLocalAiLearningEnv({ env, fs, pathModule, projectRootPath }) {
@@ -91,6 +92,11 @@ function createAiLearningRuntime(dependencies = {}) {
     jsonStore,
     paths
   });
+  const contentGenerationRuntime = createContentGenerationRuntime({
+    aiTaskRuntime,
+    jsonStore,
+    paths
+  });
   const attemptRuntime = createAttemptRuntime({
     aiTaskRuntime,
     assignmentRuntime,
@@ -114,9 +120,35 @@ function createAiLearningRuntime(dependencies = {}) {
     };
   }
 
-  function getAssignment(options) {
+  function getAssignment(options = {}) {
     initialize();
-    return assignmentRuntime.getAssignment(options);
+    const studentId = typeof options.studentId === 'string' && options.studentId.trim()
+      ? options.studentId.trim()
+      : 'default_child';
+    const dateKey = typeof options.dateKey === 'string' ? options.dateKey.trim() : '';
+    const dueSkillNodeIds = Array.isArray(options.dueSkillNodeIds) && options.dueSkillNodeIds.length
+      ? options.dueSkillNodeIds
+      : reviewSchedulerRuntime.dueSkillNodeIds({
+          studentId,
+          date: dateKey ? new Date(`${dateKey}T23:59:59`) : new Date()
+        });
+    const weakSkillNodeIds = Array.isArray(options.weakSkillNodeIds) && options.weakSkillNodeIds.length
+      ? options.weakSkillNodeIds
+      : studentModelRuntime.getWeakSkillNodeIds(studentId);
+    const excludeContentItemIds = Array.isArray(options.excludeContentItemIds) && options.excludeContentItemIds.length
+      ? options.excludeContentItemIds
+      : attemptRuntime.recentContentItemIds({
+          studentId,
+          limit: Number(options.excludeRecentLimit) || 20
+        });
+
+    return assignmentRuntime.getAssignment({
+      ...options,
+      studentId,
+      dueSkillNodeIds,
+      weakSkillNodeIds,
+      excludeContentItemIds
+    });
   }
 
   function getContentItem(contentItemId) {
@@ -142,20 +174,45 @@ function createAiLearningRuntime(dependencies = {}) {
     });
   }
 
+  function getAttemptBatches(filters = {}) {
+    initialize();
+    return attemptRuntime.listAttemptBatches(filters);
+  }
+
+  function getEvaluationBatches(filters = {}) {
+    initialize();
+    return attemptRuntime.listEvaluationBatches(filters);
+  }
+
+  function getReviewQueue(studentId) {
+    initialize();
+    return reviewSchedulerRuntime.listQueue(studentId);
+  }
+
   async function submitAttemptBatch(options) {
     initialize();
     return attemptRuntime.submitAttemptBatch(options);
+  }
+
+  async function generateContentCandidates(options) {
+    initialize();
+    return contentGenerationRuntime.generateContentCandidates(options);
   }
 
   return {
     assignmentRuntime,
     aiTaskRuntime,
     contentBankRuntime,
+    contentGenerationRuntime,
     evaluationRuntime,
     gameRewardRuntime,
     getAiResults,
+    getAttemptBatches,
     getContentItem,
+    getEvaluationBatches,
     getAssignment,
+    getReviewQueue,
+    generateContentCandidates,
     initialize,
     paths,
     reviewSchedulerRuntime,

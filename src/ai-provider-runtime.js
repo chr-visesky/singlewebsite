@@ -11,6 +11,44 @@ function createAiProviderRuntime(dependencies = {}) {
   }
 
   async function runMockTask(task) {
+    if (task.type === 'content_generation') {
+      const skillNodeIds = Array.isArray(task.input && task.input.skillNodeIds)
+        ? task.input.skillNodeIds
+        : [];
+      const count = Math.max(1, Math.min(10, Math.round(Number(task.input && task.input.count) || 3)));
+
+      return {
+        provider: 'mock',
+        model: task.model || 'mock-ai',
+        status: 'completed',
+        output: {
+          candidates: Array.from({ length: count }).map((_item, index) => ({
+            id: `candidate_${Date.now()}_${index + 1}`,
+            type: 'question',
+            subject: task.input.subject || 'math',
+            track: task.input.track || 'olympiad',
+            skillNodeIds,
+            difficulty: Number(task.input.difficulty) || 2,
+            contentType: 'math_short_answer',
+            questionType: 'fill_blank',
+            prompt: `Mock generated question ${index + 1}`,
+            answerSchema: { type: 'number' },
+            standardAnswer: index + 1,
+            evaluationPolicy: { finalAnswerRequired: true, processOptional: true },
+            quality: {
+              status: 'candidate',
+              riskFlags: [],
+              confidence: 0.8
+            }
+          }))
+        },
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0
+        }
+      };
+    }
+
     const itemCount = Array.isArray(task.input && task.input.evaluations)
       ? task.input.evaluations.length
       : 0;

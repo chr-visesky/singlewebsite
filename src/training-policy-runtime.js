@@ -32,8 +32,9 @@ function createTrainingPolicyRuntime(dependencies = {}) {
     return selected;
   }
 
-  function buildAssignmentSections({ profile, dueSkillNodeIds = [], weakSkillNodeIds = [] }) {
+  function buildAssignmentSections({ profile, dueSkillNodeIds = [], weakSkillNodeIds = [], excludeContentItemIds = [] }) {
     const usedIds = new Set();
+    const excludedIds = new Set((Array.isArray(excludeContentItemIds) ? excludeContentItemIds : []).map(normalizePrefix).filter(Boolean));
     const sections = [];
     const targetCount = Number(profile.targetContentCount) || 10;
     const contentTypes = Array.isArray(profile.contentTypes) ? profile.contentTypes : [];
@@ -50,6 +51,7 @@ function createTrainingPolicyRuntime(dependencies = {}) {
       return contentBankRuntime.listContentItems({
         ...baseFilters,
         skillNodeIds,
+        excludeContentItemIds: [...excludedIds],
         enabledOnly: true
       }).filter((item) => !contentTypes.length || contentTypes.includes(item.contentType));
     }
@@ -57,6 +59,7 @@ function createTrainingPolicyRuntime(dependencies = {}) {
     function listAll() {
       return contentBankRuntime.listContentItems({
         ...baseFilters,
+        excludeContentItemIds: [...excludedIds],
         enabledOnly: true
       }).filter((item) => !contentTypes.length || contentTypes.includes(item.contentType));
     }

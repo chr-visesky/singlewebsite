@@ -18,6 +18,7 @@ const { createGameRewardRuntime } = require('../src/game-reward-runtime');
 const { createAiModelRoutingRuntime } = require('../src/ai-model-routing-runtime');
 const { createAiProviderRuntime } = require('../src/ai-provider-runtime');
 const { createAiTaskRuntime } = require('../src/ai-task-runtime');
+const { createContentGenerationRuntime } = require('../src/content-generation-runtime');
 const { createAttemptRuntime } = require('../src/attempt-runtime');
 const { createAiLearningRuntime } = require('../src/ai-learning-runtime');
 const { registerAiLearningIpc } = require('../src/ai-learning-ipc-runtime');
@@ -96,6 +97,7 @@ function createHarness(options = {}) {
   const aiModelRoutingRuntime = createAiModelRoutingRuntime({ env: options.env || { AI_PROVIDER: 'mock' } });
   const aiProviderRuntime = createAiProviderRuntime({ env: options.env || { AI_PROVIDER: 'mock' } });
   const aiTaskRuntime = createAiTaskRuntime({ aiModelRoutingRuntime, aiProviderRuntime, jsonStore, paths });
+  const contentGenerationRuntime = createContentGenerationRuntime({ aiTaskRuntime, jsonStore, paths });
   const attemptRuntime = createAttemptRuntime({
     aiTaskRuntime,
     assignmentRuntime,
@@ -116,6 +118,7 @@ function createHarness(options = {}) {
     assignmentRuntime,
     attemptRuntime,
     contentBankRuntime,
+    contentGenerationRuntime,
     evaluationRuntime,
     gameRewardRuntime,
     jsonStore,
@@ -129,6 +132,10 @@ function createHarness(options = {}) {
 }
 
 function answerForContentItem(item) {
+  if (item.answerSchema && item.answerSchema.type === 'choice') {
+    return String(item.standardAnswer);
+  }
+
   if (item.answerSchema && item.answerSchema.type === 'object') {
     return Object.entries(item.standardAnswer).map(([key, value]) => `${key}${value}`).join('，');
   }
@@ -209,6 +216,29 @@ async function testAssignment() {
   pass('module assignment');
 }
 
+async function testTrainingPolicy() {
+  const h = createHarness();
+  h.skillGraphRuntime.initialize();
+  h.contentBankRuntime.initialize();
+  const dueSkillNodeIds = ['math.number.remainder'];
+  const weakSkillNodeIds = ['math.application.age'];
+  const assignment = h.assignmentRuntime.getAssignment({
+    studentId: 'policy_child',
+    dateKey: '2026-07-01',
+    profileId: 'math_olympiad_daily_set_v1',
+    dueSkillNodeIds,
+    weakSkillNodeIds,
+    excludeContentItemIds: ['q_math_remainder_001']
+  });
+  const reviewSection = assignment.sections.find((section) => section.type === 'review');
+  const weaknessSection = assignment.sections.find((section) => section.type === 'weakness');
+  assert(reviewSection && reviewSection.contentItemIds.length > 0, 'review section missing');
+  assert(weaknessSection && weaknessSection.contentItemIds.length > 0, 'weakness section missing');
+  assert(!assignment.contentItemIds.includes('q_math_remainder_001'), 'excluded recent item was selected');
+  assert(assignment.generationContext.dueSkillNodeIds.includes(dueSkillNodeIds[0]), 'generation context missing due skill');
+  pass('module training-policy');
+}
+
 async function testAttempt() {
   const h = createHarness();
   h.skillGraphRuntime.initialize();
@@ -244,6 +274,73 @@ async function testAiMock() {
   pass('module ai-mock');
 }
 
+async function testContentGeneration() {
+  const h = createHarness();
+  const result = await h.contentGenerationRuntime.generateContentCandidates({
+    subject: 'math',
+    track: 'olympiad',
+    skillNodeIds: ['math.number.remainder'],
+    count: 2
+  });
+  assert(result.candidates.length === 2, 'content generation should return 2 candidates');
+  assert(result.candidates.every((candidate) => candidate.enabled === false), 'generated candidates must not be enabled');
+  assert(h.contentGenerationRuntime.listCandidates({ skillNodeId: 'math.number.remainder' }).length === 2, 'generated candidates not persisted');
+  pass('module content-generation');
+}
+
+async function testLearningRuntimePolicy() {
+  const tempRoot = path.join(os.tmpdir(), `studygate-ai-learning-runtime-policy-${process.pid}-${Date.now()}`);
+  removeDirectory(tempRoot);
+  const aiLearningRuntime = createAiLearningRuntime({
+    env: { AI_PROVIDER: 'mock' },
+    fs,
+    pathModule: path,
+    projectRootPath,
+    userDataPath: tempRoot
+  });
+  const previousAssignment = aiLearningRuntime.getAssignment({
+    studentId: 'policy_runtime_child',
+    dateKey: '2026-06-30',
+    profileId: 'math_olympiad_daily_set_v1'
+  });
+  const previousItems = aiLearningRuntime.contentBankRuntime.getContentItemsByIds(previousAssignment.contentItemIds);
+  await aiLearningRuntime.submitAttemptBatch({
+    studentId: 'policy_runtime_child',
+    assignmentId: previousAssignment.id,
+    attempts: previousItems.map((item) => ({
+      contentItemId: item.id,
+      response: { type: 'final_answer', raw: answerForContentItem(item) }
+    }))
+  });
+  fs.writeFileSync(
+    aiLearningRuntime.paths.reviewQueuePath(),
+    JSON.stringify([
+      {
+        studentId: 'policy_runtime_child',
+        skillNodeId: 'math.number.divisibility',
+        reviewStage: 0,
+        nextReviewAt: '2026-07-01T00:00:00.000Z',
+        lastReviewResult: 'passed',
+        stability: 0.1,
+        status: 'active'
+      }
+    ], null, 2),
+    'utf8'
+  );
+  const nextAssignment = aiLearningRuntime.getAssignment({
+    studentId: 'policy_runtime_child',
+    dateKey: '2026-07-01',
+    profileId: 'math_olympiad_daily_set_v1'
+  });
+  const reviewSection = nextAssignment.sections.find((section) => section.type === 'review');
+  assert(reviewSection && reviewSection.contentItemIds.length > 0, 'runtime did not auto-select due review section');
+  assert(nextAssignment.generationContext.dueSkillNodeIds.includes('math.number.divisibility'), 'runtime generation context missing due review');
+  assert(nextAssignment.generationContext.excludeContentItemIds.some((id) => previousAssignment.contentItemIds.includes(id)), 'runtime did not include recent exclusions');
+  assert(!nextAssignment.contentItemIds.some((id) => previousAssignment.contentItemIds.includes(id)), 'runtime selected a recent content item');
+  removeDirectory(tempRoot);
+  pass('module learning-runtime-policy');
+}
+
 async function testIpc() {
   const tempRoot = path.join(os.tmpdir(), `studygate-ai-learning-ipc-${process.pid}-${Date.now()}`);
   removeDirectory(tempRoot);
@@ -260,6 +357,7 @@ async function testIpc() {
 
   assert(ipcMain.handlers.has('learning:get-assignment'), 'assignment ipc missing');
   assert(ipcMain.handlers.has('answer:submit-attempt-batch'), 'submit ipc missing');
+  assert(ipcMain.handlers.has('ai:generate-content-candidates'), 'content generation ipc missing');
 
   const assignmentResponse = await ipcMain.handlers.get('learning:get-assignment')(null, {
     studentId: 'ipc_child',
@@ -289,6 +387,16 @@ async function testIpc() {
 
   const gameState = await ipcMain.handlers.get('game:get-state')(null, { studentId: 'ipc_child' });
   assert(gameState.xp > 0, 'ipc game state missing');
+  const evaluations = await ipcMain.handlers.get('answer:get-evaluation-batches')(null, {
+    studentId: 'ipc_child',
+    assignmentId: assignmentResponse.assignment.id
+  });
+  assert(evaluations.length === 1, 'ipc evaluation batches lookup failed');
+  const generated = await ipcMain.handlers.get('ai:generate-content-candidates')(null, {
+    skillNodeIds: ['math.number.remainder'],
+    count: 1
+  });
+  assert(generated.candidates.length === 1, 'ipc content generation failed');
   removeDirectory(tempRoot);
   pass('module ipc');
 }
@@ -335,8 +443,11 @@ async function testAll() {
   await testContent();
   await testEvaluation();
   await testAssignment();
+  await testTrainingPolicy();
   await testAttempt();
   await testAiMock();
+  await testContentGeneration();
+  await testLearningRuntimePolicy();
   await testIpc();
 }
 
@@ -348,8 +459,11 @@ const tests = {
   content: testContent,
   evaluation: testEvaluation,
   assignment: testAssignment,
+  'training-policy': testTrainingPolicy,
   attempt: testAttempt,
   'ai-mock': testAiMock,
+  'content-generation': testContentGeneration,
+  'learning-runtime-policy': testLearningRuntimePolicy,
   ipc: testIpc,
   'deepseek-live': testDeepSeekLive
 };

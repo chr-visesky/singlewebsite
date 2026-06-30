@@ -505,11 +505,23 @@ if (window.location.protocol === 'file:') {
     getAiLearningMastery(payload) {
       return ipcRenderer.invoke('learning:get-mastery', payload);
     },
+    getAiLearningReviewQueue(payload) {
+      return ipcRenderer.invoke('learning:get-review-queue', payload);
+    },
+    getAiLearningAttemptBatches(payload) {
+      return ipcRenderer.invoke('answer:get-attempt-batches', payload);
+    },
+    getAiLearningEvaluationBatches(payload) {
+      return ipcRenderer.invoke('answer:get-evaluation-batches', payload);
+    },
     getAiLearningGameState(payload) {
       return ipcRenderer.invoke('game:get-state', payload);
     },
     getAiLearningAiResults(payload) {
       return ipcRenderer.invoke('ai:get-results', payload);
+    },
+    generateAiLearningContentCandidates(payload) {
+      return ipcRenderer.invoke('ai:generate-content-candidates', payload);
     },
     saveStudentPlanItems(payload) {
       return ipcRenderer.invoke('shell:save-student-plan-items', payload);
