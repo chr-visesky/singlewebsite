@@ -46,6 +46,7 @@ function createNavigationRuntime(dependencies = {}) {
     library: 'library.html',
     studentPlan: 'student-plan.html',
     aiLearning: 'ai-learning.html',
+    aiLearningReport: 'ai-learning-report.html',
     classroomShell: 'classroom-shell.html'
   };
 
@@ -79,6 +80,10 @@ function createNavigationRuntime(dependencies = {}) {
 
   function aiLearningTarget() {
     return 'internal:ai-learning';
+  }
+
+  function aiLearningReportTarget() {
+    return 'internal:ai-learning-report';
   }
 
   function learningToolEntryTarget(toolId) {
@@ -504,6 +509,19 @@ function createNavigationRuntime(dependencies = {}) {
     });
   }
 
+  function loadAiLearningReportPage(query = {}) {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+
+    destroyClassroomBrowserView();
+    logNavigationDebug('load-ai-learning-report-page');
+    mainWindow.loadFile(internalPagePath('aiLearningReport'), {
+      query
+    });
+  }
+
   function navigateMainWindow(target) {
     const normalizedTarget = normalizePrefix(target);
     const mainWindow = getMainWindow();
@@ -545,6 +563,22 @@ function createNavigationRuntime(dependencies = {}) {
       }
 
       loadAiLearningPage(query);
+      return true;
+    }
+
+    if (normalizedTarget === aiLearningReportTarget() || normalizedTarget.startsWith(`${aiLearningReportTarget()}?`)) {
+      const query = {};
+      const queryIndex = normalizedTarget.indexOf('?');
+
+      if (queryIndex >= 0) {
+        const params = new URLSearchParams(normalizedTarget.slice(queryIndex + 1));
+
+        for (const [key, value] of params.entries()) {
+          query[key] = value;
+        }
+      }
+
+      loadAiLearningReportPage(query);
       return true;
     }
 
@@ -894,6 +928,7 @@ function createNavigationRuntime(dependencies = {}) {
     learningToolEntryTarget,
     libraryTarget,
     aiLearningTarget,
+    aiLearningReportTarget,
     loadHomePage,
     navigateMainWindow,
     resolveClassroomForUrl,

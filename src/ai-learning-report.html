@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: file:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Learning Report</title>
+    <link rel="stylesheet" href="./ai-learning.css" />
+  </head>
+  <body>
+    <main class="report-shell">
+      <section class="paper-header" aria-label="Report summary">
+        <div>
+          <p class="eyebrow" data-i18n="aiLearning.eyebrow">AI Learning</p>
+          <h1 data-i18n="aiLearning.report.title">Learning Report</h1>
+        </div>
+        <div class="paper-metrics">
+          <div class="metric">
+            <span data-i18n="aiLearning.metrics.correct">Correct</span>
+            <strong id="metric-correct">-</strong>
+          </div>
+          <div class="metric">
+            <span data-i18n="aiLearning.metrics.xp">XP</span>
+            <strong id="metric-xp">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="report-layout">
+        <section class="report-panel" aria-label="Paper result">
+          <h2 data-i18n="aiLearning.report.paperResult">Paper Result</h2>
+          <div id="result-list" class="result-list"></div>
+        </section>
+        <section class="report-panel" aria-label="Ability analysis">
+          <h2 data-i18n="aiLearning.report.abilityAnalysis">Ability Analysis</h2>
+          <div id="ai-feedback" class="ai-feedback"></div>
+          <div id="mastery-list" class="mastery-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./i18n-browser.js"></script>
+    <script src="./ai-learning-report.js"></script>
+  </body>
+</html>

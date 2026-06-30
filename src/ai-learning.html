@@ -11,62 +11,60 @@
     <link rel="stylesheet" href="./ai-learning.css" />
   </head>
   <body>
-    <main class="ai-shell">
-      <section class="topbar" data-i18n-aria-label="aiLearning.sections.practice" aria-label="Practice overview">
+    <main class="paper-shell">
+      <section class="paper-header" aria-label="Paper summary">
         <div>
           <p class="eyebrow" data-i18n="aiLearning.eyebrow">AI Learning</p>
-          <h1 data-i18n="aiLearning.heading">Math Daily Practice</h1>
+          <h1 data-i18n="aiLearning.paper.title">Daily Paper</h1>
         </div>
-        <div class="summary-strip">
-          <div class="summary-pill">
+        <div class="paper-metrics">
+          <div class="metric">
             <span data-i18n="aiLearning.metrics.total">Questions</span>
             <strong id="metric-total">0</strong>
           </div>
-          <div class="summary-pill">
-            <span data-i18n="aiLearning.metrics.correct">Correct</span>
-            <strong id="metric-correct">-</strong>
-          </div>
-          <div class="summary-pill">
-            <span data-i18n="aiLearning.metrics.xp">XP</span>
-            <strong id="metric-xp">0</strong>
+          <div class="metric">
+            <span data-i18n="aiLearning.metrics.answered">Answered</span>
+            <strong id="metric-answered">0</strong>
           </div>
         </div>
       </section>
 
-      <section class="workspace">
-        <aside class="rail" data-i18n-aria-label="aiLearning.sections.assignment" aria-label="Question list">
-          <div class="rail__head">
+      <section class="paper-layout">
+        <section class="paper-panel" aria-label="Paper">
+          <div class="panel-head">
             <div>
-              <h2 data-i18n="aiLearning.sections.assignment">Today Set</h2>
+              <h2 data-i18n="aiLearning.paper.paperSection">Paper</h2>
               <p id="assignment-status" data-i18n="aiLearning.status.loading">Loading</p>
             </div>
-            <button id="reload-button" type="button" data-i18n="aiLearning.buttons.reload">Reload</button>
+            <button id="reload-button" type="button" class="ghost-button" data-i18n="aiLearning.buttons.reload">Reload</button>
           </div>
-          <div id="question-list" class="question-list"></div>
-        </aside>
 
-        <section class="practice" data-i18n-aria-label="aiLearning.sections.practice" aria-label="Practice">
-          <div id="question-pane" class="question-pane"></div>
+          <div class="paper-body">
+            <nav id="question-list" class="question-list" aria-label="Questions"></nav>
+            <article id="question-card" class="question-card"></article>
+          </div>
+        </section>
+
+        <section class="work-panel" aria-label="Answer and draft">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="aiLearning.paper.workSection">Answer</h2>
+              <p id="question-type-label"></p>
+            </div>
+          </div>
+
+          <div id="answer-slot" class="answer-slot"></div>
+
+          <div class="draft-area">
+            <label for="current-draft" data-i18n="aiLearning.paper.draft">Draft</label>
+            <textarea id="current-draft" spellcheck="false"></textarea>
+          </div>
+
           <div class="submit-bar">
             <p id="submit-message"></p>
             <button id="submit-button" type="button" data-i18n="aiLearning.buttons.submit">Submit Set</button>
           </div>
         </section>
-
-        <aside class="insight" data-i18n-aria-label="aiLearning.sections.aiFeedback" aria-label="Learning feedback">
-          <section class="insight-panel">
-            <h2 data-i18n="aiLearning.sections.grading">Grading</h2>
-            <div id="result-list" class="result-list"></div>
-          </section>
-          <section class="insight-panel">
-            <h2 data-i18n="aiLearning.sections.aiFeedback">AI Feedback</h2>
-            <div id="ai-feedback" class="ai-feedback" data-i18n="aiLearning.status.submitAfter">Generated after submit</div>
-          </section>
-          <section class="insight-panel">
-            <h2 data-i18n="aiLearning.sections.mastery">Mastery</h2>
-            <div id="mastery-list" class="mastery-list"></div>
-          </section>
-        </aside>
       </section>
     </main>
 

@@ -202,6 +202,25 @@ function createFinalAnswerGrader(dependencies = {}) {
     };
   }
 
+  function parseChoiceAnswer(rawValue) {
+    const raw = normalizePrefix(String(rawValue === undefined || rawValue === null ? '' : rawValue)).toUpperCase();
+
+    if (!raw) {
+      return {
+        value: '',
+        confidence: 1,
+        status: 'unanswered'
+      };
+    }
+
+    const match = raw.match(/[A-Z0-9]+/);
+
+    return {
+      value: match ? match[0] : raw,
+      confidence: match ? 1 : 0.6
+    };
+  }
+
   function answerSchemaType(contentItem) {
     const schemaType = normalizePrefix(contentItem && contentItem.answerSchema && contentItem.answerSchema.type);
 
@@ -223,6 +242,10 @@ function createFinalAnswerGrader(dependencies = {}) {
       return 'list';
     }
 
+    if (contentType.includes('choice')) {
+      return 'choice';
+    }
+
     return 'number';
   }
 
@@ -239,6 +262,8 @@ function createFinalAnswerGrader(dependencies = {}) {
         return parseFraction(rawAnswer);
       case 'list':
         return parseListAnswer(rawAnswer);
+      case 'choice':
+        return parseChoiceAnswer(rawAnswer);
       case 'number':
       default:
         return parseNumber(rawAnswer);
@@ -271,6 +296,10 @@ function createFinalAnswerGrader(dependencies = {}) {
       }
 
       return left.every((item, index) => Number(item) === Number(right[index]));
+    }
+
+    if (type === 'choice') {
+      return String(left).toUpperCase() === String(right).toUpperCase();
     }
 
     return Number(left) === Number(right);

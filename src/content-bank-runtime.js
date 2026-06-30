@@ -26,6 +26,82 @@ function createContentBankRuntime(dependencies = {}) {
       .filter(Boolean);
   }
 
+  function normalizeChoices(value) {
+    return (Array.isArray(value) ? value : [])
+      .map((choice, index) => {
+        const label = normalizePrefix(choice && choice.label) || String.fromCharCode(65 + index);
+        const choiceValue = normalizePrefix(choice && choice.value) || label;
+        const text = normalizePrefix(choice && choice.text);
+
+        return text
+          ? {
+              label,
+              value: choiceValue,
+              text
+            }
+          : null;
+      })
+      .filter(Boolean);
+  }
+
+  function shouldUseChoiceFallback(item) {
+    const schemaType = normalizePrefix(item && item.answerSchema && item.answerSchema.type);
+    const skillNodeIds = normalizeStringArray(item && item.skillNodeIds);
+
+    return schemaType === 'number' &&
+      Math.max(1, Math.min(5, Math.round(normalizeNumber(item && item.difficulty, 2)))) === 1 &&
+      skillNodeIds.includes('math.number.remainder');
+  }
+
+  function inferQuestionType(item, choices) {
+    const explicit = normalizePrefix(item && item.questionType);
+
+    if (explicit) {
+      return explicit;
+    }
+
+    const schemaType = normalizePrefix(item && item.answerSchema && item.answerSchema.type);
+    const contentType = normalizePrefix(item && item.contentType);
+
+    if (choices.length || schemaType === 'choice' || contentType.includes('choice') || shouldUseChoiceFallback(item)) {
+      return 'choice';
+    }
+
+    if (schemaType === 'object' || contentType.includes('object')) {
+      return 'application';
+    }
+
+    return 'fill_blank';
+  }
+
+  function generatedNumberChoices(item, questionType, choices) {
+    if (choices.length || questionType !== 'choice') {
+      return choices;
+    }
+
+    const standardAnswer = Number(item && item.standardAnswer);
+
+    if (!Number.isFinite(standardAnswer)) {
+      return choices;
+    }
+
+    const values = [standardAnswer - 2, standardAnswer - 1, standardAnswer, standardAnswer + 1]
+      .filter((value, index, source) => value >= 0 && source.indexOf(value) === index);
+
+    while (values.length < 4) {
+      const nextValue = values[values.length - 1] + 1;
+      if (!values.includes(nextValue)) {
+        values.push(nextValue);
+      }
+    }
+
+    return values.slice(0, 4).map((value, index) => ({
+      label: String.fromCharCode(65 + index),
+      value: String(value),
+      text: String(value)
+    }));
+  }
+
   function validateContentItem(item, index, skillNodeIds) {
     const id = normalizePrefix(item && item.id);
     const type = normalizePrefix(item && item.type) || 'question';
@@ -33,6 +109,9 @@ function createContentBankRuntime(dependencies = {}) {
     const contentType = normalizePrefix(item && item.contentType);
     const prompt = normalizePrefix(item && item.prompt);
     const itemSkillNodeIds = normalizeStringArray(item && item.skillNodeIds);
+    const seedChoices = normalizeChoices(item && item.choices);
+    const questionType = inferQuestionType(item, seedChoices);
+    const choices = generatedNumberChoices(item, questionType, seedChoices);
 
     if (!id) {
       throw new Error(`ContentItem at index ${index} is missing id.`);
@@ -76,7 +155,9 @@ function createContentBankRuntime(dependencies = {}) {
       skillNodeIds: itemSkillNodeIds,
       difficulty: Math.max(1, Math.min(5, Math.round(normalizeNumber(item.difficulty, 2)))),
       contentType,
+      questionType,
       prompt,
+      choices,
       answerSchema: item.answerSchema || null,
       standardAnswer: item.standardAnswer,
       evaluationPolicy: item.evaluationPolicy && typeof item.evaluationPolicy === 'object'

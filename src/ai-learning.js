@@ -1,17 +1,16 @@
 'use strict';
 
 const metricTotal = document.getElementById('metric-total');
-const metricCorrect = document.getElementById('metric-correct');
-const metricXp = document.getElementById('metric-xp');
+const metricAnswered = document.getElementById('metric-answered');
 const assignmentStatus = document.getElementById('assignment-status');
+const questionTypeLabel = document.getElementById('question-type-label');
 const questionList = document.getElementById('question-list');
-const questionPane = document.getElementById('question-pane');
+const questionCard = document.getElementById('question-card');
+const answerSlot = document.getElementById('answer-slot');
+const draftInput = document.getElementById('current-draft');
 const submitMessage = document.getElementById('submit-message');
 const submitButton = document.getElementById('submit-button');
 const reloadButton = document.getElementById('reload-button');
-const resultList = document.getElementById('result-list');
-const aiFeedback = document.getElementById('ai-feedback');
-const masteryList = document.getElementById('mastery-list');
 
 const params = new URLSearchParams(window.location.search);
 const studentId = params.get('studentId') || window.localStorage.getItem('aiLearningStudentId') || 'default_child';
@@ -22,6 +21,7 @@ const state = {
   assignment: null,
   contentItems: [],
   responses: new Map(),
+  drafts: new Map(),
   selectedIndex: 0,
   submitted: false
 };
@@ -52,14 +52,9 @@ function t(key, fallback, variables = {}) {
 }
 
 function applyStaticI18n() {
-  document.title = t('aiLearning.pageTitle', 'AI Math Daily Practice');
-
+  document.title = t('aiLearning.paper.title', 'Daily Paper');
   document.querySelectorAll('[data-i18n]').forEach((node) => {
     node.textContent = t(node.getAttribute('data-i18n'), node.textContent || '');
-  });
-
-  document.querySelectorAll('[data-i18n-aria-label]').forEach((node) => {
-    node.setAttribute('aria-label', t(node.getAttribute('data-i18n-aria-label'), node.getAttribute('aria-label') || ''));
   });
 }
 
@@ -68,23 +63,30 @@ function safeText(value, fallback = '') {
   return text || fallback;
 }
 
-function answerHint(item) {
-  const schema = item && item.answerSchema && typeof item.answerSchema === 'object' ? item.answerSchema : {};
+function selectedItem() {
+  return state.contentItems[state.selectedIndex] || null;
+}
 
-  if (schema.type === 'object' && Array.isArray(schema.fields)) {
-    const fields = schema.fields.map((field) => safeText(field.name)).filter(Boolean).join(', ');
-    return t('aiLearning.answerHints.object', 'Fields: {fields}', { fields });
+function questionType(item) {
+  return safeText(item && item.questionType, 'fill_blank');
+}
+
+function questionTypeText(item) {
+  const type = questionType(item);
+
+  if (type === 'choice') {
+    return t('aiLearning.questionTypes.choice', 'Choice');
   }
 
-  if (schema.type === 'fraction') {
-    return t('aiLearning.answerHints.fraction', 'For example: 3/4');
+  if (type === 'application') {
+    return t('aiLearning.questionTypes.application', 'Word problem');
   }
 
-  if (schema.type === 'list') {
-    return t('aiLearning.answerHints.list', 'Separate answers with commas');
-  }
+  return t('aiLearning.questionTypes.fillBlank', 'Fill blank');
+}
 
-  return t('aiLearning.answerHints.default', 'Enter the final answer');
+function answeredCount() {
+  return state.contentItems.filter((item) => safeText(state.responses.get(item.id))).length;
 }
 
 function setMessage(text, isError = false) {
@@ -97,8 +99,27 @@ function setLoading(isLoading) {
   submitButton.disabled = isLoading || state.submitted || !state.assignment;
 }
 
-function selectedItem() {
-  return state.contentItems[state.selectedIndex] || null;
+function syncDraftInput() {
+  const item = selectedItem();
+  draftInput.value = item ? state.drafts.get(item.id) || '' : '';
+  draftInput.disabled = state.submitted || !item;
+}
+
+function renderMetrics() {
+  metricTotal.textContent = String(state.contentItems.length);
+  metricAnswered.textContent = String(answeredCount());
+
+  if (!state.assignment) {
+    assignmentStatus.textContent = t('aiLearning.status.notLoaded', 'Not loaded');
+    submitButton.disabled = true;
+    return;
+  }
+
+  state.submitted = state.assignment.status === 'submitted';
+  assignmentStatus.textContent = state.submitted
+    ? t('aiLearning.status.submitted', '{dateKey} submitted', { dateKey })
+    : t('aiLearning.status.pending', '{dateKey} pending', { dateKey });
+  submitButton.disabled = state.submitted;
 }
 
 function renderQuestionList() {
@@ -110,6 +131,7 @@ function renderQuestionList() {
     button.className = 'question-tab';
     button.setAttribute('aria-selected', String(index === state.selectedIndex));
     button.dataset.contentItemId = item.id;
+    button.dataset.answered = String(Boolean(safeText(state.responses.get(item.id))));
 
     const order = document.createElement('span');
     order.className = 'question-tab__index';
@@ -117,13 +139,9 @@ function renderQuestionList() {
 
     const title = document.createElement('span');
     title.className = 'question-tab__title';
-    title.textContent = safeText(item.prompt).slice(0, 24);
+    title.textContent = questionTypeText(item);
 
-    const mark = document.createElement('span');
-    mark.className = 'question-tab__mark';
-    mark.textContent = state.responses.get(item.id) ? '*' : '';
-
-    button.append(order, title, mark);
+    button.append(order, title);
     button.addEventListener('click', () => {
       state.selectedIndex = index;
       render();
@@ -132,19 +150,17 @@ function renderQuestionList() {
   });
 }
 
-function renderQuestionPane() {
-  questionPane.replaceChildren();
+function renderQuestionCard() {
+  questionCard.replaceChildren();
   const item = selectedItem();
 
   if (!item) {
-    const empty = document.createElement('p');
-    empty.textContent = t('aiLearning.status.emptyQuestions', 'No questions yet');
-    questionPane.append(empty);
+    questionCard.textContent = t('aiLearning.status.emptyQuestions', 'No questions yet');
+    questionTypeLabel.textContent = '';
     return;
   }
 
-  const article = document.createElement('article');
-  article.className = 'question-card';
+  questionTypeLabel.textContent = questionTypeText(item);
 
   const meta = document.createElement('div');
   meta.className = 'question-meta';
@@ -163,155 +179,103 @@ function renderQuestionPane() {
   prompt.className = 'prompt';
   prompt.textContent = safeText(item.prompt);
 
-  const answerBox = document.createElement('div');
-  answerBox.className = 'answer-box';
-
-  const label = document.createElement('label');
-  label.setAttribute('for', 'current-answer');
-  label.textContent = answerHint(item);
-
-  const textarea = document.createElement('textarea');
-  textarea.id = 'current-answer';
-  textarea.dataset.contentItemId = item.id;
-  textarea.value = state.responses.get(item.id) || '';
-  textarea.disabled = state.submitted;
-  textarea.addEventListener('input', () => {
-    state.responses.set(item.id, textarea.value);
-    renderQuestionList();
-  });
-
-  answerBox.append(label, textarea);
-  article.append(meta, prompt, answerBox);
-  questionPane.append(article);
+  questionCard.append(meta, prompt);
 }
 
-function renderMetrics() {
-  metricTotal.textContent = String(state.contentItems.length);
+function answerLabelText(item) {
+  const type = questionType(item);
 
-  if (!state.assignment) {
-    assignmentStatus.textContent = t('aiLearning.status.notLoaded', 'Not loaded');
-    submitButton.disabled = true;
+  if (type === 'choice') {
+    return t('aiLearning.answerHints.choice', 'Choose one answer');
+  }
+
+  if (type === 'application') {
+    return t('aiLearning.answerHints.application', 'Write the final answer');
+  }
+
+  return t('aiLearning.answerHints.default', 'Enter the final answer');
+}
+
+function saveResponse(item, value) {
+  state.responses.set(item.id, value);
+  renderMetrics();
+  renderQuestionList();
+}
+
+function renderChoiceAnswer(item) {
+  const list = document.createElement('div');
+  list.className = 'choice-list';
+  const currentValue = state.responses.get(item.id) || '';
+
+  (Array.isArray(item.choices) ? item.choices : []).forEach((choice, index) => {
+    const id = `choice-${item.id}-${index}`;
+    const label = document.createElement('label');
+    label.className = 'choice-option';
+    label.setAttribute('for', id);
+
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.id = id;
+    input.name = `answer-${item.id}`;
+    input.value = choice.value;
+    input.checked = currentValue === choice.value;
+    input.disabled = state.submitted;
+    input.addEventListener('change', () => {
+      saveResponse(item, input.value);
+    });
+
+    const text = document.createElement('span');
+    text.textContent = `${choice.label}. ${choice.text}`;
+
+    label.append(input, text);
+    list.append(label);
+  });
+
+  return list;
+}
+
+function renderTextAnswer(item) {
+  const input = document.createElement(questionType(item) === 'application' ? 'textarea' : 'input');
+  input.id = 'current-answer';
+  input.dataset.contentItemId = item.id;
+  input.value = state.responses.get(item.id) || '';
+  input.disabled = state.submitted;
+
+  if (input.tagName === 'TEXTAREA') {
+    input.className = 'application-answer';
+  } else {
+    input.className = 'blank-input';
+    input.type = 'text';
+  }
+
+  input.addEventListener('input', () => {
+    saveResponse(item, input.value);
+  });
+
+  return input;
+}
+
+function renderAnswerSlot() {
+  answerSlot.replaceChildren();
+  const item = selectedItem();
+
+  if (!item) {
     return;
   }
 
-  state.submitted = state.assignment.status === 'submitted';
-  assignmentStatus.textContent = state.submitted
-    ? t('aiLearning.status.submitted', '{dateKey} submitted', { dateKey })
-    : t('aiLearning.status.pending', '{dateKey} pending', { dateKey });
-  submitButton.disabled = state.submitted;
+  const label = document.createElement('label');
+  label.setAttribute('for', 'current-answer');
+  label.textContent = answerLabelText(item);
+  answerSlot.append(label);
+  answerSlot.append(questionType(item) === 'choice' ? renderChoiceAnswer(item) : renderTextAnswer(item));
+  syncDraftInput();
 }
 
 function render() {
   renderMetrics();
   renderQuestionList();
-  renderQuestionPane();
-}
-
-function renderEvaluations(result) {
-  const evaluations = result && result.evaluationBatch && Array.isArray(result.evaluationBatch.evaluations)
-    ? result.evaluationBatch.evaluations
-    : [];
-  const summary = result && result.evaluationBatch ? result.evaluationBatch.summary || {} : {};
-
-  metricCorrect.textContent = Number.isFinite(Number(summary.correct)) ? String(summary.correct) : '-';
-  resultList.replaceChildren();
-
-  if (!evaluations.length) {
-    resultList.textContent = t('aiLearning.status.noResult', 'No result yet');
-    return;
-  }
-
-  evaluations.forEach((evaluation, index) => {
-    const verdict = evaluation.verdict || {};
-    const status = verdict.status || 'unknown';
-    const item = document.createElement('div');
-    item.className = 'result-item';
-    item.dataset.status = status;
-
-    const title = document.createElement('strong');
-    const statusText = status === 'correct'
-      ? t('aiLearning.result.correct', 'Correct')
-      : status === 'unanswered'
-        ? t('aiLearning.result.unanswered', 'Unanswered')
-        : t('aiLearning.result.wrong', 'Needs revision');
-    title.textContent = `${t('aiLearning.question.index', 'Question {index}', { index: index + 1 })} ${statusText}`;
-
-    const score = document.createElement('span');
-    score.textContent = t('aiLearning.result.score', '{score}/{maxScore} points', {
-      score: verdict.score || 0,
-      maxScore: verdict.maxScore || 10
-    });
-
-    item.append(title, score);
-    resultList.append(item);
-  });
-}
-
-function appendFeedbackBlock(titleText, rows) {
-  const block = document.createElement('div');
-  block.className = 'feedback-block';
-
-  const title = document.createElement('strong');
-  title.textContent = titleText;
-  block.append(title);
-
-  const list = document.createElement('p');
-  list.textContent = Array.isArray(rows) && rows.length ? rows.join('; ') : t('aiLearning.feedback.empty', 'None');
-  block.append(list);
-  aiFeedback.append(block);
-}
-
-function renderAiFeedback(aiResult) {
-  const output = aiResult && aiResult.output && typeof aiResult.output === 'object' ? aiResult.output : {};
-  const dailySummary = output.dailySummary && typeof output.dailySummary === 'object' ? output.dailySummary : {};
-
-  aiFeedback.replaceChildren();
-
-  if (aiResult && aiResult.status === 'failed') {
-    aiFeedback.textContent = aiResult.error || t('aiLearning.errors.aiFailed', 'AI feedback failed');
-    aiFeedback.classList.add('error');
-    return;
-  }
-
-  aiFeedback.classList.remove('error');
-  appendFeedbackBlock(t('aiLearning.feedback.strengths', 'Strengths'), dailySummary.strengths || []);
-  appendFeedbackBlock(t('aiLearning.feedback.weaknesses', 'Weaknesses'), dailySummary.weaknesses || []);
-  appendFeedbackBlock(t('aiLearning.feedback.nextPlan', 'Next step'), dailySummary.nextPlanSuggestion || []);
-}
-
-function renderMastery(items) {
-  masteryList.replaceChildren();
-
-  if (!Array.isArray(items) || !items.length) {
-    masteryList.textContent = t('aiLearning.status.masteryEmpty', 'Complete one set to update');
-    return;
-  }
-
-  items.slice(0, 8).forEach((mastery) => {
-    const node = document.createElement('div');
-    node.className = 'mastery-item';
-
-    const title = document.createElement('strong');
-    title.textContent = safeText(mastery.skillNodeId);
-
-    const detail = document.createElement('span');
-    detail.textContent = t('aiLearning.mastery.percent', 'Mastery {percent}%', {
-      percent: Math.round((Number(mastery.mastery) || 0) * 100)
-    });
-
-    node.append(title, detail);
-    masteryList.append(node);
-  });
-}
-
-async function refreshSideState() {
-  const [mastery, gameState] = await Promise.all([
-    window.studyGate.getAiLearningMastery({ studentId }),
-    window.studyGate.getAiLearningGameState({ studentId })
-  ]);
-
-  metricXp.textContent = String((gameState && gameState.xp) || 0);
-  renderMastery(mastery);
+  renderQuestionCard();
+  renderAnswerSlot();
 }
 
 function attemptsPayload() {
@@ -344,7 +308,6 @@ async function loadAssignment() {
     state.selectedIndex = Math.min(state.selectedIndex, Math.max(0, state.contentItems.length - 1));
     state.submitted = state.assignment && state.assignment.status === 'submitted';
     render();
-    await refreshSideState();
     setMessage(state.submitted
       ? t('aiLearning.status.alreadySubmitted', "Today's set has already been submitted")
       : t('aiLearning.status.ready', 'Assignment ready'));
@@ -353,6 +316,14 @@ async function loadAssignment() {
   } finally {
     setLoading(false);
   }
+}
+
+function openReport(result) {
+  const reportId = `ai-learning-report:${result.assignment.id}`;
+  window.sessionStorage.setItem(reportId, JSON.stringify(result));
+  window.studyGate.navigate(
+    `internal:ai-learning-report?studentId=${encodeURIComponent(studentId)}&dateKey=${encodeURIComponent(dateKey)}&reportId=${encodeURIComponent(reportId)}`
+  );
 }
 
 async function submitAssignment() {
@@ -369,17 +340,15 @@ async function submitAssignment() {
       assignmentId: state.assignment.id,
       attempts: attemptsPayload(),
       behavior: {
-        source: 'ai-learning-ui'
+        source: 'ai-learning-ui',
+        drafts: Object.fromEntries(state.drafts.entries())
       }
     });
 
     state.assignment = result.assignment;
     state.submitted = true;
-    render();
-    renderEvaluations(result);
-    renderAiFeedback(result.aiResult);
-    await refreshSideState();
     setMessage(t('aiLearning.status.submitDone', 'Submitted'));
+    openReport(result);
   } catch (error) {
     setMessage((error && error.message) || t('aiLearning.errors.submitFailed', 'Submit failed'), true);
   } finally {
@@ -398,6 +367,12 @@ async function bootstrap() {
   });
   submitButton.addEventListener('click', () => {
     void submitAssignment();
+  });
+  draftInput.addEventListener('input', () => {
+    const item = selectedItem();
+    if (item) {
+      state.drafts.set(item.id, draftInput.value);
+    }
   });
   await loadAssignment();
 }

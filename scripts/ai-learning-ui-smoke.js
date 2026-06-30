@@ -3,7 +3,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const { chromium } = require('playwright-core');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -12,6 +12,32 @@ function delay(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function escapePowerShellSingleQuoted(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+function stopProcessesByPath(exePath) {
+  const normalizedPath = String(exePath || '').replace(/\//g, '\\');
+  const command = `
+$target = '${escapePowerShellSingleQuoted(normalizedPath)}'
+Get-CimInstance Win32_Process |
+  Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq $target } |
+  ForEach-Object {
+    try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
+  }
+`;
+
+  try {
+    execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      { stdio: 'ignore' }
+    );
+  } catch {
+    // Ignore cleanup failures so smoke output still reflects app behavior.
+  }
 }
 
 async function connectToElectron(port, timeoutMs = 30000) {
@@ -58,13 +84,26 @@ async function waitForQuestionCount(page, expectedCount) {
 
 async function fillAllAnswers(page, answerText) {
   const count = await page.locator('#question-list .question-tab').count();
+  let sawChoiceQuestion = false;
 
   for (let index = 0; index < count; index += 1) {
     await page.locator('#question-list .question-tab').nth(index).click();
-    await page.locator('#current-answer').fill(answerText);
+    const choiceCount = await page.locator('.choice-option input').count();
+
+    if (choiceCount > 0) {
+      sawChoiceQuestion = true;
+      await page.locator('.choice-option input').first().click();
+    } else {
+      await page.locator('#current-answer').fill(answerText);
+    }
+
+    await page.locator('#current-draft').fill(`draft ${index + 1}`);
   }
 
-  return count;
+  return {
+    count,
+    sawChoiceQuestion
+  };
 }
 
 async function main() {
@@ -96,6 +135,7 @@ async function main() {
     };
     delete env.ELECTRON_RUN_AS_NODE;
 
+    stopProcessesByPath(electronPath);
     child = spawn(electronPath, [`--remote-debugging-port=${port}`, '.'], {
       cwd: rootDir,
       env,
@@ -136,7 +176,9 @@ async function main() {
       title: document.querySelector('h1') ? document.querySelector('h1').textContent.trim() : '',
       questionCount: document.querySelectorAll('#question-list .question-tab').length,
       totalMetric: document.getElementById('metric-total')?.textContent || '',
-      hasStandardAnswerText: document.body.textContent.includes('standardAnswer')
+      hasStandardAnswerText: document.body.textContent.includes('standardAnswer'),
+      hasReportPanels: Boolean(document.getElementById('result-list') || document.getElementById('mastery-list') || document.getElementById('ai-feedback')),
+      hasDraft: Boolean(document.getElementById('current-draft'))
     }));
     report.loadedState = loadedState;
 
@@ -149,31 +191,46 @@ async function main() {
     if (loadedState.hasStandardAnswerText) {
       report.failedChecks.push('Page appears to expose standard answer text.');
     }
+    if (loadedState.hasReportPanels) {
+      report.failedChecks.push('Paper page contains report or ability-analysis panels.');
+    }
+    if (!loadedState.hasDraft) {
+      report.failedChecks.push('Paper page did not render the draft area.');
+    }
 
     report.filledAnswers = await fillAllAnswers(page, '0');
+    if (!report.filledAnswers.sawChoiceQuestion) {
+      report.failedChecks.push('Paper page did not render a choice question module.');
+    }
     await page.locator('#submit-button').click();
+    const reportPage = await findPage(browser, (url) => /ai-learning-report\.html/i.test(url), 30000);
+    await reportPage.waitForLoadState('domcontentloaded');
     await page.waitForFunction(
+      () => /ai-learning-report\.html/i.test(window.location.href),
+      null,
+      { timeout: 30000 }
+    );
+    await reportPage.waitForFunction(
       () => document.querySelectorAll('#result-list .result-item').length === 10,
       null,
       { timeout: 30000 }
     );
-    await page.waitForFunction(
+    await reportPage.waitForFunction(
       () => document.querySelectorAll('#ai-feedback .feedback-block').length > 0,
       null,
       { timeout: 30000 }
     );
 
     report.screenshots.submitted = path.join(outputDir, 'ai-learning-submitted.png');
-    await page.screenshot({ path: report.screenshots.submitted, fullPage: true });
+    await reportPage.screenshot({ path: report.screenshots.submitted, fullPage: true });
 
-    const submittedState = await page.evaluate(() => ({
+    const submittedState = await reportPage.evaluate(() => ({
       resultCount: document.querySelectorAll('#result-list .result-item').length,
       correctMetric: document.getElementById('metric-correct')?.textContent || '',
       xpMetric: Number(document.getElementById('metric-xp')?.textContent || '0'),
-      submitDisabled: Boolean(document.getElementById('submit-button')?.disabled),
-      message: document.getElementById('submit-message')?.textContent || '',
       aiFeedbackText: document.getElementById('ai-feedback')?.textContent || '',
-      masteryCount: document.querySelectorAll('#mastery-list .mastery-item').length
+      masteryCount: document.querySelectorAll('#mastery-list .mastery-item').length,
+      panelCount: document.querySelectorAll('.report-panel').length
     }));
     report.submittedState = submittedState;
 
@@ -183,14 +240,14 @@ async function main() {
     if (!Number.isFinite(submittedState.xpMetric) || submittedState.xpMetric <= 0) {
       report.failedChecks.push(`XP did not update after submit: ${submittedState.xpMetric}.`);
     }
-    if (!submittedState.submitDisabled) {
-      report.failedChecks.push('Submit button was not disabled after submitting.');
-    }
     if (!submittedState.aiFeedbackText.trim()) {
       report.failedChecks.push('AI feedback area is empty after submitting.');
     }
     if (submittedState.masteryCount <= 0) {
       report.failedChecks.push('Mastery list did not update after submitting.');
+    }
+    if (submittedState.panelCount !== 2) {
+      report.failedChecks.push(`Report page should contain 2 function panels, got ${submittedState.panelCount}.`);
     }
 
     report.passed = report.failedChecks.length === 0;
@@ -204,6 +261,8 @@ async function main() {
     if (child && !child.killed) {
       child.kill();
     }
+
+    stopProcessesByPath(electronPath);
 
     await fs.rm(appDataDir, { recursive: true, force: true }).catch(() => {});
     await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2));

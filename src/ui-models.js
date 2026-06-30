@@ -140,6 +140,18 @@ function buildNavigationUiModel(options = {}) {
       return model;
     }
 
+    if (fileName === 'ai-learning-report.html') {
+      model.actions = [
+        { id: 'check-update', label: t('common.checkUpdate', 'Check update'), icon: '>', compact: true }
+      ];
+      model.crumbs = [
+        { label: t('common.home', 'Home'), target: 'internal:home', current: false },
+        { label: t('home.aiLearning.title', 'AI Math Daily Practice'), target: options.aiLearningTarget || 'internal:ai-learning', current: false },
+        { label: t('aiLearning.report.title', 'Learning Report'), target: 'internal:ai-learning-report', current: true }
+      ];
+      return model;
+    }
+
     model.crumbs = [{ label: '首页', target: 'internal:home', current: true }];
     model.isHome = true;
     model.actions = [
