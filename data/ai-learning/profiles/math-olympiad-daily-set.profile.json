@@ -1,0 +1,43 @@
+{
+  "id": "math_olympiad_daily_set_v1",
+  "title": "小学奥数每日题集 V1",
+  "assignmentType": "daily_set",
+  "subject": "math",
+  "track": "olympiad",
+  "targetContentCount": 10,
+  "sections": [
+    {
+      "type": "review",
+      "title": "到期复习",
+      "maxCount": 4
+    },
+    {
+      "type": "weakness",
+      "title": "薄弱巩固",
+      "maxCount": 4
+    },
+    {
+      "type": "new",
+      "title": "今日练习",
+      "maxCount": 10
+    }
+  ],
+  "contentTypes": [
+    "math_short_answer",
+    "math_object_answer",
+    "math_fraction_answer",
+    "math_list_answer"
+  ],
+  "evaluation": {
+    "primary": "programmatic_final_answer",
+    "grader": "final-answer-grader",
+    "aiFeedbackEnabled": true
+  },
+  "reward": {
+    "baseEventTypes": [
+      "final_answer_correct",
+      "spaced_review_passed",
+      "assignment_completed"
+    ]
+  }
+}

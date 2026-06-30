@@ -1,0 +1,82 @@
+[
+  {
+    "id": "math.application.chicken_rabbit",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "鸡兔同笼",
+    "parentId": "math.application",
+    "examImportance": 0.85,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.application.sum_difference_multiple",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "和差倍问题",
+    "parentId": "math.application",
+    "examImportance": 0.8,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.application.age",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "年龄问题",
+    "parentId": "math.application",
+    "examImportance": 0.7,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.number.remainder",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "余数",
+    "parentId": "math.number",
+    "examImportance": 0.9,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.number.divisibility",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "整除",
+    "parentId": "math.number",
+    "examImportance": 0.75,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.calculation.arithmetic_series",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "等差求和",
+    "parentId": "math.calculation",
+    "examImportance": 0.75,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.geometry.area",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "面积",
+    "parentId": "math.geometry",
+    "examImportance": 0.8,
+    "defaultDifficulty": 2,
+    "enabled": true
+  },
+  {
+    "id": "math.combinatorics.enumeration",
+    "subject": "math",
+    "track": "olympiad",
+    "title": "枚举",
+    "parentId": "math.combinatorics",
+    "examImportance": 0.7,
+    "defaultDifficulty": 2,
+    "enabled": true
+  }
+]
